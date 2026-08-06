@@ -34,6 +34,7 @@ from api.schemas import (
     CapabilityOverviewRequest,
     DataCapabilitySchemasRequest,
     GenerateWidgetCardRequest,
+    GenerateWidgetCardResponse,
 )
 from api.routes import (
     _build_plugin_stream_response,
@@ -133,8 +134,8 @@ Column("card",
     messages = [json_module.loads(line) for line in genui.splitlines()]
 
     assert len(messages) == 3
-    assert messages[0]["createSurface"]["width"] == 140
-    assert messages[0]["createSurface"]["height"] == 140
+    assert messages[0]["createSurface"]["width"] == 160
+    assert messages[0]["createSurface"]["height"] == 160
     components = messages[1]["updateComponents"]["components"]
     assert [item["id"] for item in components] == [
         "root",
@@ -227,7 +228,7 @@ Column("card",
     assert '"createSurface"' in saved_genui[0]
     assert selected_conversion_profiles == ["terse-dsl-nested-2"]
     create_surface = json_module.loads(saved_genui[0].splitlines()[0])["createSurface"]
-    assert create_surface["width"] == 298
+    assert create_surface["width"] == 320
 
 
 def test_terse_dsl_nested2_prompt_builder_uses_terse_system_prompt():
@@ -249,7 +250,22 @@ def test_terse_dsl_nested2_prompt_builder_uses_terse_system_prompt():
 
 
 @pytest.mark.asyncio
-async def test_terse_dsl_nested2_rejects_dynamic_requests():
+async def test_terse_dsl_nested2_accepts_dynamic_requests(monkeypatch):
+    policies = []
+
+    async def generate_with_policy(_service, request, policy, **_kwargs):
+        policies.append(policy)
+        return GenerateWidgetCardResponse(
+            status=GenerationStatus.SUCCESS,
+            suggestSize=request.size or "2x2",
+            message="ok",
+        )
+
+    monkeypatch.setattr(
+        WidgetGenerationService,
+        "_generate_widget_card_with_policy",
+        generate_with_policy,
+    )
     dynamic_request = GenerateWidgetCardRequest(
         uid="test-user",
         prdVer=APP_VERSION,
@@ -271,8 +287,8 @@ async def test_terse_dsl_nested2_rejects_dynamic_requests():
         dynamic_request
     )
 
-    assert dynamic_response.status == GenerationStatus.UNSUPPORTED
-    assert dynamic_response.errorCode == "PROTOCOL_CAPABILITY_UNSUPPORTED"
+    assert dynamic_response.status == GenerationStatus.SUCCESS
+    assert policies[0].supports_dynamic_capabilities is True
 
 
 def test_websocket_handler_runs_sync_service_in_threadpool():

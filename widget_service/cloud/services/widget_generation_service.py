@@ -30,6 +30,7 @@ from custom.a2ui_model_client import (
 from custom.model_runtime import ModelExecutionRuntime
 from models.artifact import ArtifactMeta, GenerationPlan, WidgetArtifact
 from models.generation import DEFAULT_WIDGET_SIZE, EventAction, ModelRequestContext
+from services.advanced_component_pipeline import AdvancedComponentPipeline
 from services.artifact_store import ArtifactStore
 from services.capability_registry import CapabilityRegistry
 from services.card_spec_builder import CardSpecBuilder
@@ -77,11 +78,7 @@ class WidgetGenerationService:
     async def widget_card_service(
         self,
         request: WidgetCardServiceRequest,
-    ) -> (
-        CapabilityOverviewResponse
-        | DataCapabilitySchemasResponse
-        | GenerateWidgetCardResponse
-    ):
+    ) -> CapabilityOverviewResponse | DataCapabilitySchemasResponse | GenerateWidgetCardResponse:
         """统一云侧卡片工具入口。
 
         入参：
@@ -125,9 +122,7 @@ class WidgetGenerationService:
             if request.operation == "generateWidgetCardCompactDsl":
                 return await self.generate_widget_card_compact_dsl(generation_request)
             if request.operation == "generateWidgetCardTerseDslNested2":
-                return await self.generate_widget_card_terse_dsl_nested2(
-                    generation_request
-                )
+                return await self.generate_widget_card_terse_dsl_nested2(generation_request)
             return await self.generate_widget_card_a2ui_form(generation_request)
 
         raise ValueError(f"Unknown operation: {request.operation}")
@@ -272,9 +267,7 @@ class WidgetGenerationService:
         stage_started_at = generation_started_at
         latency_by_stage: dict[str, float] = {}
         settings = get_settings()
-        generation_mode = (
-            "edit" if "sourceArtifactUrl" in request.model_fields_set else "create"
-        )
+        generation_mode = "edit" if "sourceArtifactUrl" in request.model_fields_set else "create"
         source_load_result = None
         source_url_hash = ""
         previous_design_token = None
@@ -302,9 +295,7 @@ class WidgetGenerationService:
                     request.sourceArtifactUrl or "",
                 )
                 if policy.stores_design_token:
-                    previous_design_token = self._require_source_design_token(
-                        source_load_result
-                    )
+                    previous_design_token = self._require_source_design_token(source_load_result)
                 normalized = EditRequestNormalizer().normalize_edit(
                     request,
                     source_load_result.artifact,
@@ -551,9 +542,7 @@ class WidgetGenerationService:
         )
         # Prompt 约束模型生成源 DSL；Processor 和 Validator 依次产出统一质量问题，再由策略决定门禁。
         if policy.stores_design_token:
-            design_system_prompt = A2UIProtocolRegistry.read_design_prompt(
-                policy.model_profile_id
-            )
+            design_system_prompt = A2UIProtocolRegistry.read_design_prompt(policy.model_profile_id)
             prompt = PromptBuilder().build_design_token(
                 task_spec,
                 design_system_prompt,
@@ -565,17 +554,14 @@ class WidgetGenerationService:
                 task_spec,
                 protocol_profile,
                 "；".join(f"{item.id}:{item.reason}" for item in removed),
-                previous_genui=(
-                    source_load_result.artifact.genui if source_load_result else None
-                ),
+                previous_genui=(source_load_result.artifact.genui if source_load_result else None),
             )
         prompt_log_summary = build_prompt_log_summary(
             prompt,
             settings.model_prompt_log_preview_chars,
         )
         logger.info(
-            f"{_MODULE} a2ui_prompt_built "
-            f"prompt_summary={json_for_log(prompt_log_summary)}"
+            f"{_MODULE} a2ui_prompt_built prompt_summary={json_for_log(prompt_log_summary)}"
         )
         latency_by_stage["specAndPrompt"] = self._elapsed_ms(stage_started_at)
         stage_started_at = time.perf_counter()
@@ -586,6 +572,19 @@ class WidgetGenerationService:
             request_context=self._resolve_model_request_context(request),
             operation_name=policy.operation,
         )
+        advanced_output = None
+        if policy.processor_kind == DslProcessorKind.TERSE_NESTED2:
+            try:
+                advanced_output = await AdvancedComponentPipeline().generate(
+                    task_spec,
+                    model_client,
+                )
+            except ValueError as exc:
+                logger.warning(
+                    f"{_MODULE} advanced_component_generation_failed "
+                    f"exception_type={type(exc).__name__} fallback=terse"
+                )
+        advanced_source_dsl = advanced_output.source_dsl if advanced_output is not None else ""
         model_protocol_profile = {
             "id": policy.model_profile_id,
             "format": policy.model_format,
@@ -620,9 +619,13 @@ class WidgetGenerationService:
         async def generate_source_dsl() -> str:
             if before_model_call is not None:
                 await before_model_call()
-            logger.info(
-                f"{_MODULE} model_source_generation_started operation={policy.operation}"
-            )
+            if advanced_source_dsl:
+                logger.info(
+                    f"{_MODULE} advanced_component_template_generated "
+                    f"source_length={len(advanced_source_dsl)}"
+                )
+                return advanced_source_dsl
+            logger.info(f"{_MODULE} model_source_generation_started operation={policy.operation}")
             result = await self._resolve_model_result(
                 model_client.generate(prompt, model_protocol_profile)
             )
@@ -632,16 +635,30 @@ class WidgetGenerationService:
             invalid_source_dsl: str,
             quality_errors: list[str],
         ) -> str:
-            nonlocal model_call_phase, quality_repair_attempt_count
+            nonlocal advanced_source_dsl, model_call_phase, quality_repair_attempt_count
             quality_repair_attempt_count += 1
+            if advanced_source_dsl and invalid_source_dsl == advanced_source_dsl:
+                logger.warning(
+                    f"{_MODULE} advanced_component_quality_fallback operation={policy.operation}"
+                )
+                advanced_source_dsl = ""
+                model_call_phase = "advanced-fallback"
+                fallback_prompt = PromptBuilder().build_design_token(
+                    task_spec,
+                    A2UIProtocolRegistry.read_design_prompt(policy.model_profile_id),
+                    policy.source_format,
+                    previous_design_token=None,
+                )
+                result = await self._resolve_model_result(
+                    model_client.generate(fallback_prompt, model_protocol_profile)
+                )
+                return require_generated_dsl(result)
             quality_error_payloads = [
                 item.to_prompt_payload() for item in latest_processing_result.errors
             ]
             if len(quality_error_payloads) != len(quality_errors):
                 raise RuntimeError("repair quality issue state is inconsistent")
-            quality_error_stages = sorted(
-                {item["stage"] for item in quality_error_payloads}
-            )
+            quality_error_stages = sorted({item["stage"] for item in quality_error_payloads})
             repair_prompt = PromptBuilder().build_repair(
                 prompt,
                 invalid_source_dsl,
@@ -744,7 +761,9 @@ class WidgetGenerationService:
         async def evaluate_source_dsl(source_dsl: str) -> list[str]:
             return await to_thread.run_sync(evaluate_source_dsl_sync, source_dsl)
 
-        retry_on_validation_failure = settings.enable_validation_failure_retry
+        retry_on_validation_failure = settings.enable_validation_failure_retry or bool(
+            advanced_source_dsl
+        )
         try:
             retry_result = await retry_controller.run(
                 generate_source_dsl,
@@ -762,8 +781,7 @@ class WidgetGenerationService:
             effective_capabilities = {
                 "data": [item.id for item in effective_data_capabilities],
                 "event": [
-                    item.model_dump(mode="json", exclude_none=True)
-                    for item in effective_events
+                    item.model_dump(mode="json", exclude_none=True) for item in effective_events
                 ],
                 "asset": [item.id for item in asset_candidates],
             }
@@ -935,9 +953,7 @@ class WidgetGenerationService:
             source_artifact_digest=(
                 source_load_result.artifact_digest if source_load_result else ""
             ),
-            source_artifact_url_hash=(
-                source_load_result.url_hash if source_load_result else ""
-            ),
+            source_artifact_url_hash=(source_load_result.url_hash if source_load_result else ""),
         )
         return response
 
@@ -990,9 +1006,7 @@ class WidgetGenerationService:
         """输出一次生成请求的统一观测字段，不记录 uid 和原始设备标识。"""
         candidate_capabilities = {
             "data": [item.capabilityId for item in request.candidateDataBindings or []],
-            "event": [
-                item.capabilityId for item in request.candidateEventCandidates or []
-            ],
+            "event": [item.capabilityId for item in request.candidateEventCandidates or []],
             "asset": list(request.candidateAssetIds or []),
         }
         removed_capabilities = [
@@ -1119,7 +1133,7 @@ class WidgetGenerationService:
             model_profile_id=TERSE_DSL_NESTED2_PROFILE_ID,
             model_format=TERSE_DSL_NESTED2_PROFILE_ID,
             design_profile_id=TERSE_DSL_NESTED2_PROFILE_ID,
-            supports_dynamic_capabilities=False,
+            supports_dynamic_capabilities=True,
             validation_failure_blocking=True,
             stores_design_token=True,
         )
@@ -1188,7 +1202,9 @@ class WidgetGenerationService:
         )
         processor = get_dsl_processor(policy.processor_kind)
         result = await to_thread.run_sync(processor.process, design_token, context)
-        return not result.errors
+        if not result.errors:
+            return True
+        return False
 
     @staticmethod
     def _policy_unsupported_response(

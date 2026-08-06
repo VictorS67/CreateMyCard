@@ -13,26 +13,35 @@ from typing import Any
 from pydantic import ValidationError
 
 from models.generation import TaskSpec
+from services.cardplan_template.prompt import selection_candidates
+from services.cardplan_template.registry import CardPlanRegistry
 
 from .models import DataShape, UIBrief
 
 
-def build_ui_planner_prompt(task_spec: TaskSpec, data_shape: DataShape) -> list[dict[str, str]]:
-    """构造第一轮模型消息，不暴露组件实现和模板选择规则。"""
+def build_ui_planner_prompt(
+    task_spec: TaskSpec,
+    data_shape: DataShape,
+    registry: CardPlanRegistry | None = None,
+) -> list[dict[str, str]]:
+    """构造第一轮模型消息，仅开放版本化局部 Template 能力元数据。"""
+    registry = registry or CardPlanRegistry()
     user_payload = {
         "userQuery": task_spec.userQuery,
         "size": task_spec.size,
         "dataShape": data_shape.model_dump(exclude={"fields"}),
         "fields": [field.model_dump() for field in data_shape.fields],
         "eventIds": [event.id for event in task_spec.eventCandidates if event.id],
+        "cardPlanCandidates": selection_candidates(task_spec, registry),
     }
     return [
         {
             "role": "system",
             "content": (
-                "你只负责输出抽象 UI 意图 JSON，不能选择组件、布局或主题。"
-                "必须严格符合给出的 UIBrief JSON Schema，不得输出颜色、圆角、"
-                "组件名、布局名、主题名或 DesignToken。\n"
+                "你只负责输出抽象 UI 意图 JSON。themeId 和 localTemplateIds 只能从"
+                "cardPlanCandidates 选择；themeSemantics/layoutSemantics 只能表达语义，"
+                "不能输出颜色、圆角、组件树、布局源码、参数值或 DesignToken。"
+                "局部 Template 是可选能力，不适合时输出空列表。\n"
                 + json.dumps(UIBrief.model_json_schema(by_alias=True), ensure_ascii=False)
             ),
         },
@@ -48,9 +57,17 @@ async def plan_ui_with_llm(
     """第一轮模型只生成抽象 UIBrief；结构不合法时由调用方回退离线规划。"""
     raw = await generate_json(build_ui_planner_prompt(task_spec, data_shape), "advanced-ui-brief")
     try:
-        return UIBrief.model_validate(raw)
+        brief = UIBrief.model_validate(raw)
     except ValidationError as exc:
         raise ValueError(f"invalid UIBrief: {exc}") from exc
+    candidates = selection_candidates(task_spec, CardPlanRegistry())
+    theme_ids = {item["id"] for item in candidates["themes"]}
+    template_ids = {item["id"] for item in candidates["localTemplates"]}
+    if brief.theme_id is not None and brief.theme_id not in theme_ids:
+        raise ValueError("UIBrief selected a theme outside the trusted candidates")
+    if any(item not in template_ids for item in brief.local_template_ids):
+        raise ValueError("UIBrief selected a Template outside the trusted candidates")
+    return brief
 
 
 def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:

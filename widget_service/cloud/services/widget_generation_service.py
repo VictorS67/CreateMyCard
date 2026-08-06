@@ -2,6 +2,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 import hashlib
 import inspect
+import secrets
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -27,6 +28,7 @@ from custom.a2ui_model_client import (
     build_prompt_log_summary,
     require_generated_dsl,
 )
+from custom.deepseek_call_budget import DeepSeekCallBudgetExceeded
 from custom.model_runtime import ModelExecutionRuntime
 from models.artifact import ArtifactMeta, GenerationPlan, WidgetArtifact
 from models.generation import DEFAULT_WIDGET_SIZE, EventAction, ModelRequestContext
@@ -331,7 +333,7 @@ class WidgetGenerationService:
                     message="上一版卡片无法安全读取，本次修改未完成，原卡片不受影响。",
                     errorCode=exc.error_code.value,
                 )
-            except ValueError as exc:
+            except (RuntimeError, ValueError) as exc:
                 logger.error(
                     f"{_MODULE} source_artifact_normalization_failed "
                     f"error_code={ErrorCode.SOURCE_ARTIFACT_INVALID.value} error={exc}"
@@ -533,12 +535,10 @@ class WidgetGenerationService:
         )
         logger.info(
             f"{_MODULE} card_and_task_spec_built data_binding_count={len(effective_bindings)} "
-            "card_spec="
-            f"{json_for_log(card_spec.model_dump(mode='json', exclude_none=True))} "
-            "task_spec="
-            f"{json_for_log(task_spec.model_dump(mode='json', exclude_none=True))} "
             "task_data_model_schema_keys="
-            f"{json_for_log(list(task_spec.dataModelSchema))}"
+            f"{json_for_log(list(task_spec.dataModelSchema))} "
+            f"event_count={len(task_spec.eventCandidates)} "
+            f"asset_count={len(task_spec.assetCandidates)}"
         )
         # Prompt 约束模型生成源 DSL；Processor 和 Validator 依次产出统一质量问题，再由策略决定门禁。
         if policy.stores_design_token:
@@ -573,23 +573,46 @@ class WidgetGenerationService:
             operation_name=policy.operation,
         )
         advanced_output = None
-        if policy.processor_kind == DslProcessorKind.TERSE_NESTED2:
+        if (
+            policy.processor_kind == DslProcessorKind.TERSE_NESTED2
+            and generation_mode == "create"
+        ):
+            force_hybrid = self._authorize_hybrid_bypass(request)
             try:
                 advanced_output = await AdvancedComponentPipeline().generate(
                     task_spec,
                     model_client,
+                    card_spec.model_dump(mode="json", exclude_none=True),
+                    force_hybrid=force_hybrid,
                 )
-            except ValueError as exc:
+            except DeepSeekCallBudgetExceeded:
+                raise
+            except (RuntimeError, ValueError) as exc:
                 logger.warning(
                     f"{_MODULE} advanced_component_generation_failed "
                     f"exception_type={type(exc).__name__} fallback=terse"
                 )
         advanced_source_dsl = advanced_output.source_dsl if advanced_output is not None else ""
+        if advanced_output is not None:
+            logger.info(
+                f"{_MODULE} advanced_route_resolved route={advanced_output.route} "
+                f"whole_card_confidence={advanced_output.whole_card_confidence} "
+                f"confidence_bypassed={advanced_output.confidence_bypassed} "
+                f"raw_length={len(advanced_output.raw_output)} "
+                f"effective_length={len(advanced_output.effective_output)} "
+                f"fallback_used={advanced_output.fallback_used} "
+                f"template_call_count={advanced_output.template_call_count} "
+                f"expanded_component_count={advanced_output.expanded_component_count}"
+            )
         advanced_source_format = (
             getattr(advanced_output, "source_format", "terse")
             if advanced_output is not None
             else "terse"
         )
+        advanced_compiled_a2ui = (
+            advanced_output.compiled_a2ui if advanced_output is not None else ""
+        )
+        advanced_route = advanced_output.route if advanced_output is not None else ""
         model_protocol_profile = {
             "id": policy.model_profile_id,
             "format": policy.model_format,
@@ -691,15 +714,28 @@ class WidgetGenerationService:
 
         def evaluate_source_dsl_sync(source_dsl: str) -> list[str]:
             nonlocal latest_processing_result
+            is_hybrid_compilation = (
+                advanced_route == "hybrid-template"
+                and source_dsl == advanced_source_dsl
+                and bool(advanced_compiled_a2ui)
+            )
             is_advanced_a2ui = (
                 bool(advanced_source_dsl)
                 and source_dsl == advanced_source_dsl
                 and advanced_source_format == "a2ui"
             )
-            active_processor = (
-                get_dsl_processor(DslProcessorKind.STANDARD_A2UI) if is_advanced_a2ui else processor
-            )
-            processing_result = active_processor.process(source_dsl, processing_context)
+            if is_hybrid_compilation:
+                processing_result = DslProcessingResult(
+                    source_dsl=source_dsl,
+                    standard_dsl=advanced_compiled_a2ui,
+                )
+            else:
+                active_processor = (
+                    get_dsl_processor(DslProcessorKind.STANDARD_A2UI)
+                    if is_advanced_a2ui
+                    else processor
+                )
+                processing_result = active_processor.process(source_dsl, processing_context)
             latest_processing_result = processing_result
             warnings = [
                 item.repair_message()
@@ -974,6 +1010,24 @@ class WidgetGenerationService:
     @staticmethod
     def _elapsed_ms(started_at: float) -> float:
         return round((time.perf_counter() - started_at) * 1000, 2)
+
+    @staticmethod
+    def _authorize_hybrid_bypass(request: GenerateWidgetCardRequest) -> bool:
+        """Allow confidence bypass only in explicitly enabled local/test environments."""
+        if not request.options.forceHybridTemplate:
+            return False
+        settings = get_settings()
+        environment_allowed = settings.env.casefold() in {"local", "test"}
+        configured_token = settings.hybrid_test_bypass_token
+        supplied_token = request.options.testAuthorization or ""
+        token_allowed = bool(configured_token) and secrets.compare_digest(
+            configured_token,
+            supplied_token,
+        )
+        if not settings.enable_hybrid_test_bypass or not environment_allowed or not token_allowed:
+            raise ValueError("Hybrid confidence bypass is not authorized")
+        logger.warning(f"{_MODULE} hybrid_confidence_bypass_authorized")
+        return True
 
     @staticmethod
     async def _resolve_model_result(value: str | Awaitable[str]) -> str:

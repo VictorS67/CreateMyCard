@@ -1,0 +1,425 @@
+{
+  "themeRegistryVersion": "theme-registry/1",
+  "themes": [
+    {
+      "themeProfileId": "family-weather-care-blue",
+      "description": "家庭天气关怀蓝",
+      "supportedCapabilityIds": [
+        "ViewWeather"
+      ],
+      "surfaceRole": "weather-surface",
+      "primaryColorRole": "multi-color-02",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "sparse",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF28363E' : '#FFEAF5FA' }}",
+        "borderRadius": 18,
+        "padding": 10,
+        "linearGradient": {
+          "direction": "Bottom",
+          "colors": [
+            [
+              "#072973",
+              0
+            ],
+            [
+              "#5e93ff",
+              1
+            ]
+          ]
+        },
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "device-clean-blue-teal",
+      "description": "设备清理蓝青",
+      "supportedCapabilityIds": [
+        "GetSystemMemInfo"
+      ],
+      "surfaceRole": "device-surface",
+      "primaryColorRole": "multi-color-03",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "normal",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF1C405F' : '#FF1D4162' }}",
+        "borderRadius": 18,
+        "padding": 8,
+        "justifyContent": "spaceBetween",
+        "alignItems": "center",
+        "linearGradient": {
+          "direction": "Bottom",
+          "colors": [
+            [
+              "#102D38",
+              0
+            ],
+            [
+              "#0A466A",
+              0.6
+            ],
+            [
+              "#006995",
+              1
+            ]
+          ]
+        },
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "rainy-commute-gray-blue",
+      "description": "雨天通勤灰蓝",
+      "supportedCapabilityIds": [
+        "ViewWeather",
+        "GetCalendarEvents"
+      ],
+      "surfaceRole": "weather-muted-surface",
+      "primaryColorRole": "multi-color-02",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "normal",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF272D31' : '#FFEEF3F6' }}",
+        "borderRadius": 18,
+        "padding": 8,
+        "justifyContent": "spaceBetween",
+        "linearGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            [
+              "#B9C7D9",
+              0
+            ],
+            [
+              "#9AA9C7",
+              0.55
+            ],
+            [
+              "#8191B7",
+              1
+            ]
+          ]
+        },
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "system-low-power-blue",
+      "description": "系统低电蓝",
+      "supportedCapabilityIds": [
+        "GetPhoneBatteryInfo"
+      ],
+      "surfaceRole": "system-surface",
+      "primaryColorRole": "multi-color-08",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "normal",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF24314A' : '#FFE8EFFD' }}",
+        "borderRadius": 18,
+        "padding": 10,
+        "justifyContent": "spaceBetween",
+        "alignItems": "center",
+        "linearGradient": {
+          "direction": "Bottom",
+          "colors": [
+            [
+              "#06225C",
+              0
+            ],
+            [
+              "#0B55CB",
+              0.58
+            ],
+            [
+              "#4A9BFF",
+              1
+            ]
+          ]
+        },
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "audio-product-neutral-violet",
+      "description": "音频产品中性紫",
+      "supportedCapabilityIds": [
+        "GetEarphoneInfo"
+      ],
+      "surfaceRole": "surface-primary",
+      "primaryColorRole": "multi-color-01",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "normal",
+      "rootComponent": "Stack",
+      "rootStyles": {
+        "backgroundColor": "#F7F8FF",
+        "borderRadius": 18,
+        "padding": 0,
+        "alignContent": "topStart",
+        "shadow": {
+          "radius": 18,
+          "color": "#22091D4B",
+          "offsetX": 0,
+          "offsetY": 8
+        },
+        "linearGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            [
+              "#FBFCFF",
+              0
+            ],
+            [
+              "#F0F0FF",
+              0.6
+            ],
+            [
+              "#D8D7F5",
+              1
+            ]
+          ]
+        },
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "sleep-night-violet",
+      "description": "睡眠夜间紫",
+      "supportedCapabilityIds": [
+        "GetHealthAndSportSummary"
+      ],
+      "surfaceRole": "night-surface",
+      "primaryColorRole": "multi-color-06",
+      "textRole": "text-on-accent",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "sparse",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF471B78' : '#FF4B1E7D' }}",
+        "borderRadius": 18,
+        "padding": 9,
+        "justifyContent": "spaceBetween",
+        "alignItems": "center",
+        "linearGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            [
+              "#211044",
+              0
+            ],
+            [
+              "#3C126E",
+              0.43
+            ],
+            [
+              "#6C16F2",
+              1
+            ]
+          ]
+        },
+        "shadow": {
+          "radius": 18,
+          "color": "#442B18FF",
+          "offsetX": 0,
+          "offsetY": 7,
+          "fill": false,
+          "type": "color",
+          "style": "outer"
+        },
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "race-night-violet",
+      "description": "赛事夜间紫",
+      "supportedCapabilityIds": [
+        "GetCountdownDays",
+        "GetHealthAndSportSummary"
+      ],
+      "surfaceRole": "night-surface",
+      "primaryColorRole": "multi-color-06",
+      "textRole": "text-on-accent",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "normal",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "#191D2B",
+        "borderRadius": 18,
+        "padding": 9,
+        "linearGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            [
+              "#171823",
+              0
+            ],
+            [
+              "#20245A",
+              0.56
+            ],
+            [
+              "#7164FF",
+              1
+            ]
+          ]
+        },
+        "shadow": {
+          "radius": 18,
+          "color": "#553654FF",
+          "offsetX": 0,
+          "offsetY": 6,
+          "fill": false,
+          "type": "color",
+          "style": "outer"
+        },
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "race-sunrise-action",
+      "description": "赛事日出行动橙",
+      "supportedCapabilityIds": [
+        "GetCountdownDays",
+        "GetHealthAndSportSummary"
+      ],
+      "surfaceRole": "action-surface",
+      "primaryColorRole": "multi-color-09",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "normal",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF4A3028' : '#FFFFEBDD' }}",
+        "borderRadius": 20,
+        "padding": 12,
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "focus-warm-amber",
+      "description": "专注暖琥珀",
+      "supportedCapabilityIds": [
+        "GetCountdownDays",
+        "GetAppUsageDuration"
+      ],
+      "surfaceRole": "focus-surface",
+      "primaryColorRole": "multi-color-09",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "sparse",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FFA87365' : '#FFAC7769' }}",
+        "borderRadius": 18,
+        "padding": 10,
+        "justifyContent": "spaceBetween",
+        "alignItems": "center",
+        "linearGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            [
+              "#9D491D",
+              0
+            ],
+            [
+              "#AC6A55",
+              0.55
+            ],
+            [
+              "#C08C85",
+              1
+            ]
+          ]
+        },
+        "shadow": {
+          "radius": 16,
+          "color": "#33251610",
+          "offsetX": 0,
+          "offsetY": 6,
+          "fill": false,
+          "type": "color",
+          "style": "outer"
+        },
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "meeting-paper-neutral",
+      "description": "会议纸张中性",
+      "supportedCapabilityIds": [
+        "GetCalendarEvents"
+      ],
+      "surfaceRole": "surface-primary",
+      "primaryColorRole": "neutral",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "normal",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "#FBFCFA",
+        "borderRadius": 18,
+        "padding": 7,
+        "justifyContent": "spaceBetween",
+        "alignItems": "center",
+        "clip": true
+      }
+    },
+    {
+      "themeProfileId": "digital-wellbeing-neutral-dark",
+      "description": "健康使用设备中性明暗",
+      "supportedCapabilityIds": [
+        "GetAppUsageDuration"
+      ],
+      "surfaceRole": "surface-primary",
+      "primaryColorRole": "neutral",
+      "textRole": "text-primary",
+      "spacingScale": "card-default",
+      "radiusScale": "card-default",
+      "density": "normal",
+      "rootComponent": "Column",
+      "rootStyles": {
+        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF202224' : '#FFFFFFFF' }}",
+        "borderRadius": 18,
+        "padding": 10,
+        "justifyContent": "spaceBetween",
+        "alignItems": "center",
+        "linearGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            [
+              "#08090A",
+              0
+            ],
+            [
+              "#17191B",
+              0.58
+            ],
+            [
+              "#2B2C2E",
+              1
+            ]
+          ]
+        },
+        "clip": true
+      }
+    }
+  ]
+}

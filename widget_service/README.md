@@ -18,10 +18,13 @@ The service follows `docs/AGENTS.md`:
   profile's `protocol.json` before validation and storage. The three generation routes share one policy-driven
   generation pipeline and the same model-failure, quality-repair, and validation switches. Tool callers cannot
   select or override either backend.
-- `generateWidgetCardTerseDslNested2` uses the local `tersedsl-nested-2/0.1` Prompt and a restricted parser.
-  Registered advanced components support dynamic TaskSpec bindings and events. Their output defaults to
-  `WIDGET_SERVICE_ADVANCED_COMPONENT_OUTPUT_FORMAT=terse`; set it to `a2ui` to use the restored direct A2UI
-  template compiler and bypass Terse serialization/conversion for visual diagnosis.
+- `generateWidgetCardTerseDslNested2` keeps the two-step UI Brief and whole-card confidence flow. High-confidence
+  requests keep the existing whole-card template compiler. Low-confidence create requests use a `card@1` shell whose
+  content mixes versioned local Templates with standard components. The service expands Templates statically and
+  reuses the existing Terse UI IR/A2UI adapter, so final A2UI never contains `Template`.
+- The hybrid confidence bypass is test-only and disabled by default. It requires the enable switch, a local/test
+  environment, and constant-time verification of a separate token. Every real DeepSeek physical attempt reserves one
+  slot in a persistent, concurrency-safe SQLite budget with an immutable hard limit of 400.
 - Temporary route `generateWidgetCardCompactDslWithDirective` directly reuses the fourth route's generation service
   and schema, but always emits widget directive command frames even when the global directive switch is disabled.
   Its forced behavior is isolated in the router so the route can be removed without changing the generation pipeline.
@@ -83,6 +86,9 @@ The service follows `docs/AGENTS.md`:
   not cancel generation, repair, or artifact persistence.
 - Package filtering emits exactly one summary result per capability-overview request; per-capability dependency-check logs are not emitted.
 - OBS upload is intentionally left as a TODO hook in `ArtifactStore`; remote source artifact reads reuse `utils/download_file_from_url.py`.
+
+See `docs/cardplan_template_production.md` for the CardPlan Registry/Compiler mapping, SHA drift checks, bypass security,
+Golden evaluation commands, deployment, observability, and rollback guidance.
 
 ## Run
 

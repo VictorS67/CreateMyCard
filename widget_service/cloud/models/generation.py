@@ -55,6 +55,7 @@ class CardSpecDataBinding(BaseModel):
 
 class EventAction(BaseModel):
     id: str | None = None
+    displayLabel: str | None = None
     call: str
     args: dict[str, Any]
 
@@ -63,6 +64,8 @@ class GenerationOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     allowDegradation: bool = True
+    forceHybridTemplate: bool = False
+    testAuthorization: str | None = Field(default=None, exclude=True)
 
 
 class CardSpec(BaseModel):

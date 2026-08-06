@@ -115,6 +115,12 @@ class OfflineModelClient:
     async def generate_json(self, _prompt, *, phase):
         raise RuntimeError(f"offline: {phase}")
 
+    async def generate(self, *_args, **_kwargs):
+        return (
+            'Template("card@1", {}, '
+            'Column("section", Text("清理内存", "body")));'
+        )
+
 
 class StructuredModelClient:
     def __init__(self):
@@ -211,13 +217,17 @@ async def test_pipeline_output_format_switch_can_emit_standard_a2ui(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_pipeline_returns_none_without_required_action():
+async def test_pipeline_uses_hybrid_route_without_reliable_whole_card_candidate():
     output = await AdvancedComponentPipeline().generate(
         _metric_task_spec(with_action=False),
         OfflineModelClient(),
     )
 
-    assert output is None
+    assert output is not None
+    assert output.route == "hybrid-template"
+    assert output.whole_card_confidence == 0.0
+    assert output.fallback_used is False
+    assert "Template" not in output.compiled_a2ui
 
 
 def test_invocation_rejects_string_binding_for_progress():
@@ -605,7 +615,7 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
 async def test_invalid_advanced_template_falls_back_to_original_terse(monkeypatch):
     calls: list[str] = []
 
-    async def invalid_advanced(_pipeline, _task_spec, _model_client):
+    async def invalid_advanced(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
         return AdvancedPipelineOutput(
             component_id="ring-split-metric-action",
             style_id="night-violet",

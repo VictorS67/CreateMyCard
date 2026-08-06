@@ -84,7 +84,16 @@ async def test_deepseek_platform_builds_signed_dynamic_request_and_closes_socket
     websocket = _FakeWebSocket(
         [
             json.dumps({"result": {"type": "partialText", "text": "part"}}),
-            json.dumps({"result": {"type": "finalText", "text": "complete"}}),
+            json.dumps(
+                {
+                    "result": {
+                        "type": "finalText",
+                        "text": "complete",
+                        "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+                        "finishReason": "stop",
+                    }
+                }
+            ),
         ]
     )
     connect_arguments: dict[str, object] = {}
@@ -138,6 +147,10 @@ async def test_deepseek_platform_builds_signed_dynamic_request_and_closes_socket
     assert body["body"]["messages"] == messages
     assert body["body"]["modelName"] == "model-test"
     assert body["body"]["apiKey"] == "business-key"
+    assert client.last_response_metadata == {
+        "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+        "finishReason": "stop",
+    }
 
 
 @pytest.mark.asyncio

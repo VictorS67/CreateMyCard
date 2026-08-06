@@ -50,12 +50,14 @@ class LLMClientOptions:
 async def stream_genui(
         options: LLMClientOptions,
         messages: list[dict],
+        *,
+        trace: dict[str, object] | None = None,
 ) -> AsyncGenerator[str, None]:
     """流式调用 LLM，逐 token yield content。"""
     if not options.api_key:
         raise ValueError("Missing API key")
     if options.api_url.startswith(("http://", "https://")):
-        async for chunk in _stream_http_genui(options, messages):
+        async for chunk in _stream_http_genui(options, messages, trace=trace):
             yield chunk
         return
 
@@ -105,6 +107,8 @@ async def stream_genui(
 
                 if "usage" in response:
                     usage = response["usage"]
+                    if trace is not None and isinstance(usage, dict):
+                        trace["usage"] = usage
 
                 choices = response.get("choices", [])
                 if not choices:
@@ -124,6 +128,8 @@ async def stream_genui(
                     yield content_text
 
                 if choice.get("finish_reason"):
+                    if trace is not None:
+                        trace["finishReason"] = choice["finish_reason"]
                     logger.info(f"{_MODULE} stream_finished reason={choice['finish_reason']}")
                     break
 
@@ -143,6 +149,8 @@ async def stream_genui(
 async def _stream_http_genui(
     options: LLMClientOptions,
     messages: list[dict],
+    *,
+    trace: dict[str, object] | None = None,
 ) -> AsyncGenerator[str, None]:
     """调用 DeepSeek/OpenAI 兼容 HTTP SSE 接口。"""
     endpoint = options.api_url.rstrip("/")
@@ -179,10 +187,15 @@ async def _stream_http_genui(
                 event = json.loads(data)
                 if isinstance(event.get("usage"), dict):
                     usage = event["usage"]
+                    if trace is not None:
+                        trace["usage"] = usage
                 choices = event.get("choices") or []
                 if not choices:
                     continue
-                content = (choices[0].get("delta") or {}).get("content", "")
+                choice = choices[0]
+                if trace is not None and choice.get("finish_reason"):
+                    trace["finishReason"] = choice["finish_reason"]
+                content = (choice.get("delta") or {}).get("content", "")
                 if isinstance(content, str) and content:
                     yield content
     if usage:

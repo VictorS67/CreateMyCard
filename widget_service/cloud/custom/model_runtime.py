@@ -17,11 +17,19 @@ from models.generation import ModelRequestContext
 _MODULE = "[Model Runtime]"
 
 
-def _generate_with_llmclient(messages: list[dict[str, str]]) -> str:
+def _generate_with_llmclient(
+    messages: list[dict[str, str]],
+    trace: dict[str, object] | None = None,
+) -> str:
     """在线程内聚合原有 llmclient 的异步 Token 流。"""
     async def collect_stream() -> str:
         options = LLMClientOptions()
-        chunks = [chunk async for chunk in stream_genui(options, messages)]
+        if trace is None:
+            chunks = [chunk async for chunk in stream_genui(options, messages)]
+        else:
+            chunks = [
+                chunk async for chunk in stream_genui(options, messages, trace=trace)
+            ]
         return "".join(chunks)
 
     try:
@@ -61,6 +69,8 @@ class ModelExecutionRuntime:
             if llmclient_transport is not None
             else _generate_with_llmclient
         )
+        self._uses_default_llmclient = llmclient_transport is None
+        self.last_response_metadata: dict[str, object] = {}
         self._llmclient_executor = ThreadPoolExecutor(
             max_workers=self.settings.model_max_concurrency,
             thread_name_prefix="llmclient-model",
@@ -100,8 +110,17 @@ class ModelExecutionRuntime:
         )
         execution_started_at = time.perf_counter()
         execution_status = "failed"
+        self.last_response_metadata = {}
         try:
             result = await self._execute_provider(provider, messages, request_context)
+            if provider == "deepseek_platform":
+                metadata = getattr(
+                    self._deepseek_platform_transport,
+                    "last_response_metadata",
+                    {},
+                )
+                if isinstance(metadata, dict):
+                    self.last_response_metadata = dict(metadata)
             execution_status = "success"
             return result
         finally:
@@ -172,14 +191,25 @@ class ModelExecutionRuntime:
     async def _generate_llmclient(self, messages: list[dict[str, str]]) -> str:
         """在线程中运行同步适配器；超时后持有令牌直至真实调用结束。"""
         loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(
-            self._llmclient_executor,
-            self._llmclient_generate,
-            messages,
-        )
+        trace: dict[str, object] = {}
+        if self._uses_default_llmclient:
+            future = loop.run_in_executor(
+                self._llmclient_executor,
+                self._llmclient_generate,
+                messages,
+                trace,
+            )
+        else:
+            future = loop.run_in_executor(
+                self._llmclient_executor,
+                self._llmclient_generate,
+                messages,
+            )
         timeout = self.settings.model_request_timeout_seconds
         try:
-            return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+            result = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+            self.last_response_metadata = trace
+            return result
         except TimeoutError as exc:
             logger.error(
                 f"{_MODULE} request_timeout provider=llmclient "

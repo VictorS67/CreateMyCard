@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     a2ui_form_model_backend: Literal["mep", "openai"] = "mep"
     design_compact_model_backend: Literal["mep", "openai"] = "openai"
     advanced_component_output_format: Literal["terse", "a2ui"] = "terse"
+    advanced_whole_card_confidence_threshold: float = Field(default=0.75, ge=0.5, le=0.99)
+    enable_hybrid_test_bypass: bool = False
+    hybrid_test_bypass_token: str = ""
     openai_master_client: Literal["deepseek_platform", "llmclient"] = "deepseek_platform"
     openai_fallback_client: Literal["deepseek_platform", "llmclient"] = "llmclient"
     enable_openai_fallback: bool = True
@@ -69,6 +72,8 @@ class Settings(BaseSettings):
     deepseek_include_usage: bool = True
     deepseek_debug_usage: bool = True
     deepseek_recv_timeout: int = Field(default=120, ge=1)
+    deepseek_call_budget_limit: Literal[400] = 400
+    deepseek_call_budget_path: str = "workspace/runtime/deepseek_call_budget.sqlite3"
     system_prompt_file: str = "docs/system_prompt.txt"
     edit_system_prompt_file: str = "docs/edit_system_prompt.txt"
     repair_system_prompt_file: str = "docs/repair_system_prompt.txt"
@@ -197,6 +202,14 @@ class Settings(BaseSettings):
             return path
         return (self.package_root / path).resolve()
 
+    @property
+    def resolved_deepseek_call_budget_path(self) -> Path:
+        """Resolve the persistent runtime-only DeepSeek budget database path."""
+        path = Path(self.deepseek_call_budget_path)
+        if path.is_absolute():
+            return path
+        return (self.package_root / path).resolve()
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -209,7 +222,7 @@ def get_settings() -> Settings:
 
 class LoggingConfig:
     PROJECT_ROOT = get_settings().PROJECT_ROOT
-    if get_settings().LOCAL_FLAG:
+    if get_settings().LOCAL_FLAG or get_settings().env in {"local", "test"}:
         LOG_DIR = PROJECT_ROOT / "logs"
     else:
         LOG_DIR = "/opt/test/logs/genui-agent-service/debug"

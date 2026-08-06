@@ -62,6 +62,15 @@ STYLE_TOKENS: dict[str, dict[str, object]] = {
     },
 }
 
+# aesthetic_plan_a 原始 A2UI 模板使用的 token 名称。保留现有名称供 Terse
+# 模板使用，同时提供原模板的同义字段，避免两条输出链路互相改写。
+for _tokens in STYLE_TOKENS.values():
+    _gradient = _tokens["gradient"]
+    _tokens["rootGradient"] = _gradient["colors"]
+    _tokens["textPrimary"] = _tokens["primary"]
+    _tokens["textSecondary"] = _tokens["secondary"]
+    _tokens.setdefault("accentSecondary", _tokens["secondary"])
+
 
 def select_style(brief: UIBrief) -> tuple[str, dict[str, object]]:
     """根据抽象意图选择受控主题，模板不接受模型直接下发的颜色。"""

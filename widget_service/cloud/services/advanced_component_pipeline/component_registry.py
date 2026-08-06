@@ -22,6 +22,7 @@ class ComponentPlugin:
     spec: ComponentSpec
     invocation_model: type[BaseModel]
     build_rows: Callable[[BaseModel, dict[str, object], TaskSpec], list[list[object]]]
+    build_a2ui: Callable[[BaseModel, dict[str, object], TaskSpec], str]
     map_offline: Callable[[TaskSpec, DataShape], BaseModel]
     validate: Callable[[BaseModel, TaskSpec], None]
 

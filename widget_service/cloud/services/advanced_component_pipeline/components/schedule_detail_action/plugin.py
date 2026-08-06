@@ -6,6 +6,14 @@ from models.generation import TaskSpec
 
 from ...component_registry import ComponentPlugin, register_component
 from ...models import ActionRef, BindingRef, ComponentSpec, DataShape
+from ..a2ui_base import (
+    binding_expression,
+    make_a2ui,
+    root_styles,
+)
+from ..a2ui_base import (
+    event_handler as a2ui_event_handler,
+)
 from ..base import binding, event_handler, primary_action, root_props, select_field
 
 
@@ -163,6 +171,162 @@ def build_rows(
     return rows
 
 
+def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec) -> str:
+    """aesthetic_plan_a/schedule_detail_action.py 原始 build()。"""
+    root = root_styles(tokens)
+    root["padding"] = {"top": 14, "right": 9, "bottom": 9, "left": 9}
+    components: list[dict[str, object]] = [
+        {
+            "id": "root",
+            "component": "Column",
+            "itemMargin": 4,
+            "suppressResourceBackdrop": True,
+            "styles": root,
+            "children": [
+                "caption-row",
+                "entity-title",
+                "time-range",
+                "reminder-row",
+                "flex-spacer",
+                "action",
+            ],
+        },
+        {
+            "id": "caption-row",
+            "component": "Row",
+            "itemMargin": 4,
+            "styles": {"height": 15, "alignItems": "center", "flexShrink": 0},
+            "children": ["caption-icon", "caption-text"],
+        },
+        {
+            "id": "caption-icon",
+            "component": "Text",
+            "content": invocation.caption_icon,
+            "styles": {"fontSize": 11, "fontColor": tokens["textSecondary"]},
+        },
+        {
+            "id": "caption-text",
+            "component": "Text",
+            "content": invocation.caption,
+            "styles": {
+                "fontSize": 10,
+                "fontWeight": 500,
+                "fontColor": tokens["textSecondary"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "entity-title",
+            "component": "Text",
+            "content": binding_expression(invocation.entity_title),
+            "styles": {
+                "fontSize": 12,
+                "fontWeight": 600,
+                "fontColor": tokens["textPrimary"],
+                "maxLines": 1,
+                "textOverflow": "ellipsis",
+                "width": "matchParent",
+            },
+        },
+        {
+            "id": "time-range",
+            "component": "Row",
+            "itemMargin": 2,
+            "styles": {"alignItems": "center", "height": 28, "flexShrink": 0},
+            "children": ["start-time", "time-separator", "end-time"],
+        },
+        {
+            "id": "start-time",
+            "component": "Text",
+            "content": binding_expression(invocation.start_time),
+            "styles": {
+                "fontSize": 21,
+                "fontWeight": 700,
+                "fontColor": tokens["textPrimary"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "time-separator",
+            "component": "Text",
+            "content": "-",
+            "styles": {
+                "fontSize": 20,
+                "fontWeight": 600,
+                "fontColor": tokens["textPrimary"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "end-time",
+            "component": "Text",
+            "content": binding_expression(invocation.end_time),
+            "styles": {
+                "fontSize": 21,
+                "fontWeight": 700,
+                "fontColor": tokens["textPrimary"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "reminder-row",
+            "component": "Row",
+            "itemMargin": 3,
+            "styles": {"height": 14, "alignItems": "center", "flexShrink": 0},
+            "children": ["reminder-icon", "reminder-prefix", "reminder-value", "reminder-suffix"],
+        },
+        {
+            "id": "reminder-icon",
+            "component": "Text",
+            "content": invocation.reminder_icon,
+            "styles": {"fontSize": 10, "fontColor": tokens["accent"]},
+        },
+        {
+            "id": "reminder-prefix",
+            "component": "Text",
+            "content": invocation.reminder_prefix,
+            "styles": {"fontSize": 9, "fontColor": tokens["accentSecondary"], "maxLines": 1},
+        },
+        {
+            "id": "reminder-value",
+            "component": "Text",
+            "content": binding_expression(invocation.reminder_value),
+            "styles": {
+                "fontSize": 9,
+                "fontWeight": 700,
+                "fontColor": tokens["accent"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "reminder-suffix",
+            "component": "Text",
+            "content": invocation.reminder_suffix,
+            "styles": {"fontSize": 9, "fontColor": tokens["accentSecondary"], "maxLines": 1},
+        },
+        {"id": "flex-spacer", "component": "Column", "styles": {"layoutWeight": 1}, "children": []},
+        {
+            "id": "action",
+            "component": "Button",
+            "label": f"{invocation.action.icon or 'moon'} {invocation.action.label}",
+            "onClick": a2ui_event_handler(invocation.action, task_spec),
+            "styles": {
+                "height": 31,
+                "width": "matchParent",
+                "flexShrink": 0,
+                "fontSize": 12,
+                "fontWeight": 600,
+                "fontColor": tokens["textPrimary"],
+                "backgroundColor": tokens["button"],
+                "borderColor": tokens["buttonBorder"],
+                "borderWidth": 1,
+                "borderRadius": 16,
+            },
+        },
+    ]
+    return make_a2ui(components, task_spec)
+
+
 def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
     time_fields = [field for field in data_shape.fields if "time" in field.roles]
     if len(time_fields) < 2:
@@ -189,6 +353,7 @@ PLUGIN = register_component(
         spec=SPEC,
         invocation_model=Invocation,
         build_rows=build_rows,
+        build_a2ui=build_a2ui,
         map_offline=map_offline,
         validate=validate,
     )

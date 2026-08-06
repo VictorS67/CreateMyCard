@@ -5,11 +5,9 @@ from typing import Literal
 from pydantic import BaseModel
 
 from models.generation import TaskSpec
-from services.compact_dsl_a2ui_converter import convert_compact_dsl_to_a2ui
-from services.protocol_registry import DESIGN_COMPACT_PROFILE_ID, A2UIProtocolRegistry
 
 from .component_registry import get_component
-from .components.base import serialize, serialize_compact
+from .components.base import serialize
 from .styles import STYLE_TOKENS
 
 AdvancedOutputFormat = Literal["terse", "a2ui"]
@@ -42,15 +40,11 @@ def build_standard_a2ui(
     task_spec: TaskSpec,
     style_id: str,
 ) -> str:
-    """绕过 Terse 转换器，恢复原 Design Compact 模板到 A2UI 的输出路径。"""
-    rows = _build_rows(component_id, invocation, task_spec, style_id)
-    compact_dsl = serialize_compact(rows, task_spec)
-    profile = A2UIProtocolRegistry.read_design_protocol_profile(DESIGN_COMPACT_PROFILE_ID)
-    return convert_compact_dsl_to_a2ui(
-        compact_dsl,
-        size=task_spec.size,
-        protocol_profile=profile,
-    )
+    """直接调用从 aesthetic_plan_a 移植的原始 A2UI build() 模板。"""
+    plugin = get_component(component_id)
+    if not isinstance(invocation, plugin.invocation_model):
+        raise ValueError(f"invocation does not match component {component_id}")
+    return plugin.build_a2ui(invocation, STYLE_TOKENS[style_id], task_spec)
 
 
 def build_component_output(

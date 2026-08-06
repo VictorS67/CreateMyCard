@@ -361,30 +361,28 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
         ),
     ],
 )
-def test_terse_templates_produce_same_a2ui_as_direct_a2ui_templates(
+def test_direct_a2ui_templates_use_original_aesthetic_component_tree(
     component_id,
     invocation,
     style_id,
 ):
     task_spec = _template_task_spec()
-    profile = {"version": "v0.9", "sizes": {"2x2": {"width": 160, "height": 160}}}
-    expected = build_standard_a2ui(
+    output = build_standard_a2ui(
         component_id,
         invocation,
         task_spec,
         style_id,
     )
-
-    terse_source = build_terse_nested2(component_id, invocation, task_spec, style_id)
-    actual = convert_terse_dsl_nested2_to_a2ui(
-        terse_source,
-        size="2x2",
-        protocol_profile=profile,
-    )
-
-    assert [json.loads(line) for line in actual.splitlines()] == [
-        json.loads(line) for line in expected.splitlines()
-    ]
+    messages = [json.loads(line) for line in output.splitlines()]
+    update = messages[1]["updateComponents"]
+    ids = {component["id"] for component in update["components"]}
+    expected_original_ids = {
+        "compact-metrics-primary-action": {"compact-rings-row", "hero-card"},
+        "ring-split-metric-action": {"hero-icon-disc", "split-values"},
+        "schedule-detail-action": {"time-range", "flex-spacer"},
+    }
+    assert update["root"] == "root"
+    assert expected_original_ids[component_id] <= ids
 
 
 def _template_task_spec():

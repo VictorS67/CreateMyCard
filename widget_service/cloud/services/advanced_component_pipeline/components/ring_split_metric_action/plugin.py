@@ -6,6 +6,14 @@ from models.generation import TaskSpec
 
 from ...component_registry import ComponentPlugin, register_component
 from ...models import ActionRef, BindingRef, ComponentSpec, DataShape
+from ..a2ui_base import (
+    binding_expression,
+    make_a2ui,
+    root_styles,
+)
+from ..a2ui_base import (
+    event_handler as a2ui_event_handler,
+)
 from ..base import (
     binding,
     event_handler,
@@ -158,6 +166,191 @@ def build_rows(
     return rows
 
 
+def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec) -> str:
+    """aesthetic_plan_a/ring_split_metric_action.py 原始 build()。"""
+    root = root_styles(tokens)
+    root["padding"] = {"top": 14, "right": 8, "bottom": 6, "left": 8}
+    components: list[dict[str, object]] = [
+        {
+            "id": "root",
+            "component": "Column",
+            "itemMargin": 4,
+            "suppressResourceBackdrop": True,
+            "styles": root,
+            "children": ["caption-row", "metric-content", "action"],
+        },
+        {
+            "id": "caption-row",
+            "component": "Row",
+            "itemMargin": 4,
+            "styles": {
+                "height": 15,
+                "alignItems": "center",
+                "flexShrink": 0,
+                "margin": {"left": 7},
+            },
+            "children": ["caption-icon", "caption-text"],
+        },
+        {
+            "id": "caption-icon",
+            "component": "Text",
+            "content": invocation.caption_icon,
+            "styles": {"fontSize": 11, "fontColor": tokens["textSecondary"]},
+        },
+        {
+            "id": "caption-text",
+            "component": "Text",
+            "content": binding_expression(invocation.caption),
+            "styles": {
+                "fontSize": 10,
+                "fontWeight": 500,
+                "fontColor": tokens["textSecondary"],
+                "maxLines": 1,
+                "textOverflow": "ellipsis",
+            },
+        },
+        {
+            "id": "metric-content",
+            "component": "Row",
+            "itemMargin": 8,
+            "styles": {"layoutWeight": 1, "alignItems": "center", "justifyContent": "center"},
+            "children": ["hero-ring", "split-values"],
+        },
+        {
+            "id": "hero-ring",
+            "component": "Stack",
+            "styles": {"width": 76, "height": 76, "alignContent": "center"},
+            "children": ["hero-progress", "hero-icon-disc"],
+        },
+        {
+            "id": "hero-progress",
+            "component": "Progress",
+            "value": binding_expression(invocation.progress),
+            "total": invocation.progress_total,
+            "styles": {
+                "type": "ring",
+                "width": 72,
+                "height": 72,
+                "strokeWidth": 10,
+                "startAngle": -20,
+                "color": tokens["accent"],
+                "secondaryColor": tokens["accentSecondary"],
+                "trackColor": tokens["track"],
+                "centerColor": "#FF5630A4",
+            },
+            "accessibility": {"label": "核心进度"},
+        },
+        {
+            "id": "hero-icon-disc",
+            "component": "Column",
+            "styles": {
+                "width": 24,
+                "height": 24,
+                "borderRadius": 12,
+                "backgroundColor": "#FFFFFFFF",
+                "alignItems": "center",
+                "justifyContent": "center",
+            },
+            "children": ["hero-icon"],
+        },
+        {
+            "id": "hero-icon",
+            "component": "Text",
+            "content": "sleep-moon"
+            if invocation.center_icon in {"moon", "sleep", "sleep-moon"}
+            else invocation.center_icon,
+            "iconChrome": False,
+            "iconUseStyleColor": True,
+            "styles": {"fontSize": 16, "fontColor": "#FF5630A4"},
+        },
+        {
+            "id": "split-values",
+            "component": "Column",
+            "itemMargin": 0,
+            "styles": {"width": 54, "alignItems": "start", "justifyContent": "center"},
+            "children": ["major-row", "minor-row"],
+        },
+        {
+            "id": "major-row",
+            "component": "Row",
+            "itemMargin": 3,
+            "styles": {"alignItems": "end"},
+            "children": ["major-value", "major-unit"],
+        },
+        {
+            "id": "major-value",
+            "component": "Text",
+            "content": binding_expression(invocation.major_value),
+            "styles": {
+                "fontSize": 22,
+                "fontWeight": 700,
+                "fontColor": tokens["textPrimary"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "major-unit",
+            "component": "Text",
+            "content": invocation.major_unit,
+            "styles": {
+                "fontSize": 10,
+                "fontWeight": 600,
+                "fontColor": tokens["textPrimary"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "minor-row",
+            "component": "Row",
+            "itemMargin": 3,
+            "styles": {"alignItems": "end"},
+            "children": ["minor-value", "minor-unit"],
+        },
+        {
+            "id": "minor-value",
+            "component": "Text",
+            "content": binding_expression(invocation.minor_value),
+            "styles": {
+                "fontSize": 22,
+                "fontWeight": 700,
+                "fontColor": tokens["textPrimary"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "minor-unit",
+            "component": "Text",
+            "content": invocation.minor_unit,
+            "styles": {
+                "fontSize": 10,
+                "fontWeight": 600,
+                "fontColor": tokens["textPrimary"],
+                "maxLines": 1,
+            },
+        },
+        {
+            "id": "action",
+            "component": "Button",
+            "label": f"{invocation.action.icon or 'alarm'} {invocation.action.label}",
+            "onClick": a2ui_event_handler(invocation.action, task_spec),
+            "styles": {
+                "height": 34,
+                "width": "matchParent",
+                "flexShrink": 0,
+                "fontSize": 12,
+                "fontWeight": 600,
+                "fontColor": tokens["textPrimary"],
+                "iconSize": 14,
+                "backgroundColor": tokens["button"],
+                "borderColor": tokens["buttonBorder"],
+                "borderWidth": 1,
+                "borderRadius": 18,
+            },
+        },
+    ]
+    return make_a2ui(components, task_spec)
+
+
 def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
     numeric_fields = [
         field for field in data_shape.fields if field.data_type in {"integer", "number"}
@@ -191,6 +384,7 @@ PLUGIN = register_component(
         spec=SPEC,
         invocation_model=Invocation,
         build_rows=build_rows,
+        build_a2ui=build_a2ui,
         map_offline=map_offline,
         validate=validate,
     )

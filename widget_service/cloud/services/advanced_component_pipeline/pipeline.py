@@ -34,6 +34,11 @@ class AdvancedComponentPipeline:
             prompt: list[dict[str, str]],
             phase: str,
         ) -> dict[str, Any]:
+            if phase == "advanced-argument-map":
+                logger.info(
+                    f"{_MODULE} argument_mapper_prompt_built "
+                    f"phase={phase} prompt={json_for_log(prompt)}"
+                )
             response = await model_client.generate_json(prompt, phase=phase)
             logger.info(
                 f"{_MODULE} model_response_received phase={phase} response={json_for_log(response)}"

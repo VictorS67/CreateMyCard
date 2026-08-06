@@ -82,6 +82,18 @@ def _metric_task_spec(with_action: bool = True) -> TaskSpec:
                 }
             }
         },
+        assetCandidates=[
+            {
+                "id": "bell",
+                "src": "resources/base/media/bell.svg",
+                "description": "状态图标",
+            },
+            {
+                "id": "moon",
+                "src": "resources/base/media/moon.svg",
+                "description": "睡眠图标",
+            },
+        ],
     )
 
 
@@ -107,9 +119,11 @@ class OfflineModelClient:
 class StructuredModelClient:
     def __init__(self):
         self.phases = []
+        self.prompts = {}
 
-    async def generate_json(self, _prompt, *, phase):
+    async def generate_json(self, prompt, *, phase):
         self.phases.append(phase)
+        self.prompts[phase] = prompt
         if phase == "advanced-ui-brief":
             return {
                 "purpose": "resource-monitoring",
@@ -143,13 +157,23 @@ class StructuredModelClient:
 @pytest.mark.asyncio
 async def test_pipeline_uses_two_structured_model_calls_and_builds_template():
     model_client = StructuredModelClient()
-    output = await AdvancedComponentPipeline().generate(_metric_task_spec(), model_client)
+    task_spec = _metric_task_spec()
+    task_spec.assetCandidates = [
+        {
+            "id": "asset.memory",
+            "src": "resources/base/media/memory.svg",
+            "description": "内存状态图标",
+        }
+    ]
+    output = await AdvancedComponentPipeline().generate(task_spec, model_client)
 
     assert output is not None
     assert output.component_id == "compact-metrics-primary-action"
     assert output.planner_mode == "llm"
     assert output.mapper_mode == "llm"
     assert model_client.phases == ["advanced-ui-brief", "advanced-argument-map"]
+    argument_payload = json.loads(model_client.prompts["advanced-argument-map"][1]["content"])
+    assert argument_payload["assetCandidates"] == task_spec.assetCandidates
     assert output.source_dsl.startswith('Column("card"')
     assert "\ndata = " in output.source_dsl
     assert '"onClick":[{"call":"clickToApi","args":{}}]' in output.source_dsl
@@ -200,7 +224,9 @@ def test_invocation_rejects_string_binding_for_progress():
     task_spec = _metric_task_spec()
     invocation = RingSplitMetricInvocation(
         caption=BindingRef(path="/data/memory/available"),
+        caption_icon="bell",
         progress=BindingRef(path="/data/memory/missingText"),
+        center_icon="moon",
         major_value=BindingRef(path="/data/memory/usedPercent"),
         major_unit="%",
         minor_value=BindingRef(path="/data/memory/available"),
@@ -226,7 +252,9 @@ def test_ring_split_invocation_allows_string_display_values():
     }
     invocation = RingSplitMetricInvocation(
         caption=BindingRef(path="/data/memory/durationText"),
+        caption_icon="bell",
         progress=BindingRef(path="/data/memory/usedPercent"),
+        center_icon="moon",
         major_value=BindingRef(path="/data/memory/usedPercent"),
         major_unit="分",
         minor_value=BindingRef(path="/data/memory/durationText"),
@@ -244,7 +272,27 @@ def test_ring_split_invocation_schema_describes_binding_semantics():
     assert "number 或 integer" in properties["progress"]["description"]
     assert "格式化的字符串" in properties["minor_value"]["description"]
     assert "已包含单位" in properties["minor_unit"]["description"]
+    assert "assetCandidates" in properties["caption_icon"]["description"]
+    assert "assetCandidates" in properties["center_icon"]["description"]
     assert properties["progress_total"]["exclusiveMinimum"] == 0
+
+
+def test_ring_split_invocation_rejects_unknown_icon_asset():
+    task_spec = _metric_task_spec()
+    invocation = RingSplitMetricInvocation(
+        caption=BindingRef(path="/data/memory/available"),
+        caption_icon="asset.unknown",
+        progress=BindingRef(path="/data/memory/usedPercent"),
+        center_icon="moon",
+        major_value=BindingRef(path="/data/memory/usedPercent"),
+        major_unit="%",
+        minor_value=BindingRef(path="/data/memory/available"),
+        minor_unit="GB",
+        action=ActionRef(event_id="event.clean.memory", label="查看详情"),
+    )
+
+    with pytest.raises(ValueError, match="asset is not in TaskSpec"):
+        validate_invocation("ring-split-metric-action", invocation, task_spec)
 
 
 @pytest.mark.asyncio
@@ -276,7 +324,9 @@ async def test_advanced_template_converts_to_standard_a2ui():
             "ring-split-metric-action",
             RingSplitMetricInvocation(
                 caption=BindingRef(path="/data/metric/caption"),
+                caption_icon="bell",
                 progress=BindingRef(path="/data/metric/progress"),
+                center_icon="moon",
                 major_value=BindingRef(path="/data/metric/major"),
                 major_unit="小时",
                 minor_value=BindingRef(path="/data/metric/minor"),
@@ -333,6 +383,18 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
                 }
             }
         },
+        assetCandidates=[
+            {
+                "id": "bell",
+                "src": "resources/base/media/bell.svg",
+                "description": "状态图标",
+            },
+            {
+                "id": "moon",
+                "src": "resources/base/media/moon.svg",
+                "description": "睡眠图标",
+            },
+        ],
     )
     source_dsl = build_terse_nested2(component_id, invocation, task_spec, style_id)
 
@@ -344,6 +406,9 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
 
     assert len(genui.splitlines()) == 3
     assert '"linearGradient"' in genui
+    if component_id == "ring-split-metric-action":
+        assert 'Image("resources/base/media/bell.svg"' in source_dsl
+        assert 'Image("resources/base/media/moon.svg"' in source_dsl
 
 
 @pytest.mark.parametrize(
@@ -368,7 +433,9 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
             "ring-split-metric-action",
             RingSplitMetricInvocation(
                 caption=BindingRef(path="/data/metric/caption"),
+                caption_icon="bell",
                 progress=BindingRef(path="/data/metric/progress"),
+                center_icon="moon",
                 major_value=BindingRef(path="/data/metric/major"),
                 major_unit="小时",
                 minor_value=BindingRef(path="/data/metric/minor"),
@@ -408,11 +475,19 @@ def test_direct_a2ui_templates_use_original_aesthetic_component_tree(
     ids = {component["id"] for component in update["components"]}
     expected_original_ids = {
         "compact-metrics-primary-action": {"compact-rings-row", "hero-card"},
-        "ring-split-metric-action": {"hero-icon-disc", "split-values"},
+        "ring-split-metric-action": {"hero-ring", "hero-icon", "split-values"},
         "schedule-detail-action": {"time-range", "flex-spacer"},
     }
     assert update["root"] == "root"
     assert expected_original_ids[component_id] <= ids
+    if component_id == "ring-split-metric-action":
+        components = {component["id"]: component for component in update["components"]}
+        assert components["caption-icon"]["component"] == "Image"
+        assert components["caption-icon"]["src"] == "resources/base/media/bell.svg"
+        assert components["hero-icon"]["component"] == "Image"
+        assert components["hero-icon"]["src"] == "resources/base/media/moon.svg"
+        assert components["hero-ring"]["styles"]["alignContent"] == "center"
+        assert components["hero-ring"]["children"] == ["hero-progress", "hero-icon"]
 
 
 def _template_task_spec():
@@ -436,6 +511,18 @@ def _template_task_spec():
                 }
             }
         },
+        assetCandidates=[
+            {
+                "id": "bell",
+                "src": "resources/base/media/bell.svg",
+                "description": "状态图标",
+            },
+            {
+                "id": "moon",
+                "src": "resources/base/media/moon.svg",
+                "description": "睡眠图标",
+            },
+        ],
     )
 
 

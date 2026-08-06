@@ -36,8 +36,7 @@ class Invocation(BaseModel):
         description="顶部状态说明文本的数据绑定，例如睡眠状态；绑定字段可以是字符串或数值。"
     )
     caption_icon: str = Field(
-        default="bell",
-        description="顶部状态说明旁的语义图标名称，应选择与业务含义匹配的简短图标标识。",
+        description="顶部状态说明旁的图片资源，必须填写 assetCandidates 中的资源 id。",
     )
     progress: BindingRef = Field(
         description="环形进度值的数据绑定，必须选择 fields 中的 number 或 integer 字段。"
@@ -48,8 +47,7 @@ class Invocation(BaseModel):
         description="环形进度的最大值，必须大于 0；百分制评分通常填写 100。",
     )
     center_icon: str = Field(
-        default="moon",
-        description="环形进度中央的语义图标名称，例如睡眠场景使用 moon。",
+        description="环形进度中央的图片资源，必须填写 assetCandidates 中的资源 id。",
     )
     major_value: BindingRef = Field(
         description="右侧第一行的主要展示值绑定，可选择数值或已格式化的字符串字段。"
@@ -80,6 +78,24 @@ SPEC = ComponentSpec(
 )
 
 
+def _asset_src(asset_id: str, task_spec: TaskSpec) -> str:
+    for candidate in task_spec.assetCandidates:
+        if candidate.get("id") == asset_id and candidate.get("src"):
+            return str(candidate["src"])
+    raise ValueError(f"asset is not in TaskSpec or has no src: {asset_id}")
+
+
+def _offline_asset_ids(task_spec: TaskSpec) -> tuple[str, str]:
+    asset_ids = [
+        str(candidate["id"])
+        for candidate in task_spec.assetCandidates
+        if candidate.get("id") and candidate.get("src")
+    ]
+    if not asset_ids:
+        raise ValueError("ring split component requires at least one asset candidate")
+    return asset_ids[0], asset_ids[min(1, len(asset_ids) - 1)]
+
+
 def build_rows(
     invocation: Invocation,
     tokens: dict[str, object],
@@ -95,11 +111,13 @@ def build_rows(
         ],
         [
             "caption-icon",
-            "Text",
+            "Image",
             {
-                "content": invocation.caption_icon,
-                "design": "caption-m",
-                "fontColor": tokens["secondary"],
+                "src": _asset_src(invocation.caption_icon, task_spec),
+                "width": 11,
+                "height": 11,
+                "objectFit": "contain",
+                "flexShrink": 0,
             },
         ],
         [
@@ -135,11 +153,12 @@ def build_rows(
         ],
         [
             "ring-icon",
-            "Text",
+            "Image",
             {
-                "content": invocation.center_icon,
-                "design": "subtitle-s",
-                "fontColor": tokens["primary"],
+                "src": _asset_src(invocation.center_icon, task_spec),
+                "width": 24,
+                "height": 24,
+                "objectFit": "contain",
             },
         ],
         ["values", "Column", {"layoutWeight": 1, "itemMargin": 2}, ["major-row", "minor-row"]],
@@ -225,9 +244,9 @@ def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
         },
         {
             "id": "caption-icon",
-            "component": "Text",
-            "content": invocation.caption_icon,
-            "styles": {"fontSize": 11, "fontColor": tokens["textSecondary"]},
+            "component": "Image",
+            "src": _asset_src(invocation.caption_icon, task_spec),
+            "styles": {"width": 11, "height": 11, "objectFit": "contain", "flexShrink": 0},
         },
         {
             "id": "caption-text",
@@ -252,7 +271,7 @@ def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
             "id": "hero-ring",
             "component": "Stack",
             "styles": {"width": 76, "height": 76, "alignContent": "center"},
-            "children": ["hero-progress", "hero-icon-disc"],
+            "children": ["hero-progress", "hero-icon"],
         },
         {
             "id": "hero-progress",
@@ -273,27 +292,10 @@ def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
             "accessibility": {"label": "核心进度"},
         },
         {
-            "id": "hero-icon-disc",
-            "component": "Column",
-            "styles": {
-                "width": 24,
-                "height": 24,
-                "borderRadius": 12,
-                "backgroundColor": "#FFFFFFFF",
-                "alignItems": "center",
-                "justifyContent": "center",
-            },
-            "children": ["hero-icon"],
-        },
-        {
             "id": "hero-icon",
-            "component": "Text",
-            "content": "sleep-moon"
-            if invocation.center_icon in {"moon", "sleep", "sleep-moon"}
-            else invocation.center_icon,
-            "iconChrome": False,
-            "iconUseStyleColor": True,
-            "styles": {"fontSize": 16, "fontColor": "#FF5630A4"},
+            "component": "Image",
+            "src": _asset_src(invocation.center_icon, task_spec),
+            "styles": {"width": 24, "height": 24, "objectFit": "contain"},
         },
         {
             "id": "split-values",
@@ -392,9 +394,12 @@ def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
     caption = next(
         (field for field in data_shape.fields if field.data_type == "string"), numeric_fields[0]
     )
+    caption_icon, center_icon = _offline_asset_ids(task_spec)
     return Invocation(
         caption=BindingRef(path=caption.path),
+        caption_icon=caption_icon,
         progress=BindingRef(path=numeric_fields[0].path),
+        center_icon=center_icon,
         major_value=BindingRef(path=numeric_fields[0].path),
         major_unit="",
         minor_value=BindingRef(path=numeric_fields[min(1, len(numeric_fields) - 1)].path),
@@ -407,6 +412,8 @@ def validate(invocation: Invocation, task_spec: TaskSpec) -> None:
     # Progress 参与环形进度计算，必须是数值；左右摘要仅用于 Text 展示，
     # 可以绑定数值，也可以绑定诸如“7小时30分钟”的格式化字符串。
     validate_numeric_paths([invocation.progress.path], task_spec)
+    _asset_src(invocation.caption_icon, task_spec)
+    _asset_src(invocation.center_icon, task_spec)
 
 
 PLUGIN = register_component(

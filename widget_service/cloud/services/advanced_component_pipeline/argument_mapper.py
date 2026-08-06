@@ -32,6 +32,7 @@ def build_argument_mapper_prompt(
         "eventCandidates": [
             event.model_dump(exclude_none=True) for event in task_spec.eventCandidates
         ],
+        "assetCandidates": task_spec.assetCandidates,
         "invocationSchema": model.model_json_schema(),
     }
     return [
@@ -40,6 +41,7 @@ def build_argument_mapper_prompt(
             "content": (
                 "你只负责为已选高级组件填写 Invocation JSON。"
                 "BindingRef.path 必须来自 fields；action.event_id 必须来自 eventCandidates；"
+                "字段说明要求使用资源时，资源 id 必须来自 assetCandidates；"
                 "严格遵守 invocationSchema 的字段说明和类型约束；"
                 "不得新增业务数据、事件、颜色、布局或组件。只输出 JSON 对象。"
             ),

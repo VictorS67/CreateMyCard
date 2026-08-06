@@ -586,7 +586,9 @@ class WidgetGenerationService:
                 )
         advanced_source_dsl = advanced_output.source_dsl if advanced_output is not None else ""
         advanced_source_format = (
-            advanced_output.source_format if advanced_output is not None else "terse"
+            getattr(advanced_output, "source_format", "terse")
+            if advanced_output is not None
+            else "terse"
         )
         model_protocol_profile = {
             "id": policy.model_profile_id,

@@ -87,7 +87,14 @@ def build_hybrid_prompt(
         for event in task_spec.eventCandidates
         if event.id
     )
+    if getattr(ui_brief, "action_placement", "auto") == "none":
+        actions = ()
     selected_definitions = [registry.require_template(wire_id) for wire_id in requested]
+    content_action_ids = _resolve_content_action_ids(
+        ui_brief=ui_brief,
+        actions=actions,
+        definitions=selected_definitions,
+    )
     design_tokens = _unique(
         [
             *_PLAIN_DESIGNS,
@@ -143,6 +150,7 @@ def build_hybrid_prompt(
         required_literals=tuple(dict.fromkeys(string_facts)),
         protected_literals=tuple(dict.fromkeys(string_facts)),
         action_bindings=actions,
+        content_action_ids=content_action_ids,
         limits=limits,
     )
     system = _system_prompt(contract, requested, registry)
@@ -156,7 +164,7 @@ def build_hybrid_prompt(
             for item in task_spec.assetCandidates
             if item.get("src")
         ],
-        "actionCandidates": [
+        "cardActionCandidates": [
             {
                 "id": action.action_id,
                 "label": action.display_label,
@@ -164,9 +172,27 @@ def build_hybrid_prompt(
                 "materialHint": action.material_hint,
             }
             for action in actions
+            if action.action_id not in content_action_ids
+        ],
+        "contentActionCandidates": [
+            {
+                "id": action.action_id,
+                "label": action.display_label,
+                "importance": action.importance,
+                "materialHint": action.material_hint,
+            }
+            for action in actions
+            if action.action_id in content_action_ids
         ],
         "required": (
-            {"actionId": actions[0].action_id} if len(actions) == 1 else {}
+            {"actionId": actions[0].action_id}
+            if len(actions) == 1 and not content_action_ids
+            else {}
+        ),
+        "cardParamsPolicy": (
+            "independent-chrome-without-action"
+            if content_action_ids
+            else "candidate-chrome"
         ),
     }
     user = "\n".join(
@@ -193,7 +219,14 @@ def build_hybrid_prompt(
 
 def selection_candidates(task_spec: TaskSpec, registry: CardPlanRegistry) -> dict[str, Any]:
     semantic_text = _semantic_text(task_spec, None)
-    templates = _ranked_templates(semantic_text, registry)[:12]
+    ranked = _ranked_templates(semantic_text, registry)
+    if task_spec.eventCandidates:
+        action_templates = [item for item in ranked if item.action_policy != "none"][:6]
+        content_templates = [item for item in ranked if item.action_policy == "none"]
+        templates = [*action_templates, *content_templates[: 12 - len(action_templates)]]
+        templates.sort(key=ranked.index)
+    else:
+        templates = ranked[:12]
     return {
         "themes": [
             {
@@ -210,6 +243,7 @@ def selection_candidates(task_spec: TaskSpec, registry: CardPlanRegistry) -> dic
                 "domainTags": definition.domain_tags,
                 "supportedSizes": definition.supported_sizes,
                 "compatibleThemeIds": definition.compatible_theme_profile_ids,
+                "actionPolicy": definition.action_policy,
             }
             for definition in templates
         ],
@@ -237,11 +271,34 @@ def _system_prompt(
                 f"- Template({wire_id!r}, {variant.size!r}, params): "
                 f"{definition.description}; params={json.dumps(params, ensure_ascii=False)}"
             )
-    action_rule = (
-        "card action 必须从批准的 label/id 对中选择；content 禁止 Button 和事件。"
-        if contract.action_bindings
-        else "本次没有批准 Action；card params 省略 action，content 禁止 Button 和事件。"
-    )
+    content_actions = [
+        item for item in contract.action_bindings if item.action_id in contract.content_action_ids
+    ]
+    action_templates = [
+        registry.require_template(wire_id).wire_id
+        for wire_id in requested
+        if registry.require_template(wire_id).action_policy != "none"
+    ]
+    if content_actions:
+        content_action_json = json.dumps(
+            [item.model_dump() for item in content_actions],
+            ensure_ascii=False,
+        )
+        action_rule = (
+            "card params 必须省略 action。title、subtitle、titleIcon 仅在表达未被 content "
+            "消费的独立上下文时使用；否则一并省略。"
+            f"contentActionCandidates={content_action_json}；"
+            "每个批准 ID 必须由一个 actionPolicy!=none 的局部 Template 恰好消费一次，"
+            f"可用 Action Template={json.dumps(action_templates, ensure_ascii=False)}；"
+            "content 禁止标准 Button。"
+        )
+    elif contract.action_bindings:
+        action_rule = (
+            "card action 必须从 cardActionCandidates 的批准 label/id 对中选择；"
+            "content 禁止 Button 和事件。"
+        )
+    else:
+        action_rule = "本次没有批准 Action；card params 省略 action，content 禁止 Button 和事件。"
     return "\n".join(
         (
             BODY_SYSTEM_PROMPT_KERNEL,
@@ -272,6 +329,28 @@ def _system_prompt(
 
 def _resolve_theme(task_spec: TaskSpec, ui_brief: Any, registry: CardPlanRegistry) -> str:
     requested = getattr(ui_brief, "theme_id", None)
+    requested_templates = [
+        registry.templates[item]
+        for item in (getattr(ui_brief, "local_template_ids", []) or [])
+        if item in registry.templates
+    ]
+    themed_templates = [
+        item for item in requested_templates if item.compatible_theme_profile_ids
+    ]
+    if themed_templates:
+        support = {
+            theme_id: sum(
+                theme_id in definition.compatible_theme_profile_ids
+                for definition in themed_templates
+            )
+            for theme_id in registry.themes
+        }
+        best_support = max(support.values(), default=0)
+        requested_support = support.get(requested, 0) if isinstance(requested, str) else 0
+        if best_support > requested_support:
+            return min(
+                theme_id for theme_id, score in support.items() if score == best_support
+            )
     if isinstance(requested, str) and requested in registry.themes:
         return requested
     text = _semantic_text(task_spec, ui_brief)
@@ -332,9 +411,36 @@ def _semantic_text(task_spec: TaskSpec, ui_brief: Any) -> str:
 
 
 def _token_overlap(left: str, right: str) -> int:
-    left_tokens = set(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", left.casefold()))
-    right_tokens = set(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", right.casefold()))
-    return len(left_tokens & right_tokens)
+    overlap = _semantic_tokens(left) & _semantic_tokens(right)
+    return sum(max(1, len(token) - 1) for token in overlap)
+
+
+def _semantic_tokens(value: str) -> set[str]:
+    normalized = value.casefold()
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    for run in re.findall(r"[\u4e00-\u9fff]+", normalized):
+        for width in range(2, min(4, len(run)) + 1):
+            tokens.update(run[index : index + width] for index in range(len(run) - width + 1))
+    return tokens
+
+
+def _resolve_content_action_ids(
+    *,
+    ui_brief: Any,
+    actions: tuple[ActionBinding, ...],
+    definitions: list[Any],
+) -> tuple[str, ...]:
+    if not actions:
+        return ()
+    placement = getattr(ui_brief, "action_placement", "auto")
+    if placement in {"card", "none"}:
+        return ()
+    has_action_template = any(
+        definition.action_policy != "none" for definition in definitions
+    )
+    if placement == "content" or (placement == "auto" and has_action_template):
+        return tuple(action.action_id for action in actions)
+    return ()
 
 
 def _collect_facts(value: Any, path: str = "", source: str = "task") -> list[Fact]:

@@ -121,7 +121,9 @@ Design Compact DSL，再由服务内转换器读取该 Design profile 下的 `pr
 模板候选评分。高置信度继续填充整卡模板；低置信度的第二次模型调用生成 `card@1` 外壳以及局部
 Template/标准组件混排内容。受限 Parser 不执行 Python 或 JavaScript；Registry 中的 Template 在服务端
 静态展开并复用现有 Terse UI IR/A2UI Adapter，最终 artifact 不含 `Template`。动态数据、点击事件和素材
-都只允许引用能力裁决后的 TaskSpec 候选。edit 继续使用既有 `enable_widget_edit` 和完整
+都只允许引用能力裁决后的 TaskSpec 候选。UIBrief 可用 `actionPlacement=card|content|none|auto` 表达
+Action 所属语义区；`content` 必须配合可信 Action Template，服务端拒绝根 Action 与内容 Action 重复绑定。
+Theme 会与所选 Template 的兼容列表做确定性校正。edit 继续使用既有 `enable_widget_edit` 和完整
 `designcompactdsl` Token 协议。第五接口沿用 Design Compact 后端配置；两项后端配置都可取 `mep` 或
 `openai`，其它配置值在启动校验阶段直接报错。
 

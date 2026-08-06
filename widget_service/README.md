@@ -90,6 +90,11 @@ The service follows `docs/AGENTS.md`:
 See `docs/cardplan_template_production.md` for the CardPlan Registry/Compiler mapping, SHA drift checks, bypass security,
 Golden evaluation commands, deployment, observability, and rollback guidance.
 
+The extended `UIBrief` may set `actionPlacement` to `card`, `content`, `none`, or the backward-compatible `auto`.
+Content actions require an allowed action-capable local Template and cannot also be emitted by the `card@1` shell.
+Theme/Template compatibility and Chinese phrase-level candidate ranking are resolved by the trusted service before the
+second model call.
+
 ## Run
 
 ```bash

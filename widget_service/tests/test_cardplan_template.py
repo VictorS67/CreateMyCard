@@ -18,7 +18,8 @@ from custom.deepseek_call_budget import DeepSeekCallBudget, DeepSeekCallBudgetEx
 from custom.model_transport import ModelTransportError
 from custom.unified_model_client import UnifiedModelClient
 from models.generation import EventAction, TaskSpec
-from services.advanced_component_pipeline.models import UIBrief
+from services.advanced_component_pipeline.models import DataShape, UIBrief
+from services.advanced_component_pipeline.ui_planner import plan_ui_with_llm
 from services.cardplan_template.compiler import (
     _normalize_card_params,
     _normalize_component_values,
@@ -26,7 +27,7 @@ from services.cardplan_template.compiler import (
 )
 from services.cardplan_template.framer import HybridCardFramer
 from services.cardplan_template.parser import parse_hybrid_card
-from services.cardplan_template.prompt import build_hybrid_prompt
+from services.cardplan_template.prompt import build_hybrid_prompt, selection_candidates
 from services.cardplan_template.registry import CardPlanRegistry, get_cardplan_registry
 from services.protocol_registry import TERSE_DSL_NESTED2_PROFILE_ID, A2UIProtocolRegistry
 from services.terse_dsl_nested2_converter import TerseDslNested2ConversionError
@@ -258,6 +259,100 @@ def test_hybrid_prompt_exposes_template_parameter_json_types() -> None:
     system_prompt = projection.messages[0]["content"]
     assert '"type": "string"' in system_prompt
     assert "看起来像数字的 string 仍需加引号" in system_prompt
+
+
+def test_action_placement_splits_card_and_content_actions() -> None:
+    payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+    family = next(item for item in payload["scenarios"] if item["id"] == "family-care-weather")
+    result, task_spec, projection = _compile_scenario(family)
+    assert projection.contract.content_action_ids == ("event.call.phone",)
+    assert '"contentActionCandidates"' in projection.messages[1]["content"]
+    assert "Button(" not in result.effective_output
+
+    profile = A2UIProtocolRegistry.read_design_protocol_profile(
+        TERSE_DSL_NESTED2_PROFILE_ID
+    )
+    invalid = family["rawHybridSource"].replace(
+        'Template("card@1", {},',
+        'Template("card@1", {action: {label: "拨打电话", id: "event.call.phone"}},',
+    )
+    with pytest.raises(TerseDslNested2ConversionError, match="content Action"):
+        compile_hybrid_card(
+            invalid,
+            task_spec=task_spec,
+            contract=projection.contract,
+            protocol_profile=profile,
+            registry=get_cardplan_registry(),
+        )
+
+    duplicate = (
+        'Template("card@1", {}, Column("section", '
+        'Template("ux-icon-action@1", "small", '
+        '{icon: "resources/base/media/ux_golden_asset_call_white.svg", '
+        'actionId: "event.call.phone"}), '
+        'Template("ux-icon-action@1", "small", '
+        '{icon: "resources/base/media/ux_golden_asset_call_white.svg", '
+        'actionId: "event.call.phone"})));'
+    )
+    with pytest.raises(TerseDslNested2ConversionError, match="do not match"):
+        compile_hybrid_card(
+            duplicate,
+            task_spec=task_spec,
+            contract=projection.contract,
+            protocol_profile=profile,
+            registry=get_cardplan_registry(),
+        )
+
+
+def test_theme_template_reconciliation_and_chinese_phrase_ranking() -> None:
+    payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+    race = next(item for item in payload["scenarios"] if item["id"] == "race-countdown")
+    task_spec, card_spec, brief = _scenario_inputs(race)
+    candidates = selection_candidates(task_spec, get_cardplan_registry())
+    candidate_ids = {item["id"] for item in candidates["localTemplates"]}
+    assert {"ux-countdown@1", "ux-action-summary@1"} <= candidate_ids
+
+    mismatched = brief.model_copy(update={"theme_id": "race-sunrise-action"})
+    projection = build_hybrid_prompt(
+        task_spec=task_spec,
+        card_spec=card_spec,
+        ui_brief=mismatched,
+        registry=get_cardplan_registry(),
+    )
+    assert projection.theme_id == "race-night-violet"
+
+
+def test_card_action_and_capsule_progress_lower_to_basic_projection() -> None:
+    payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+    digital = next(
+        item for item in payload["scenarios"] if item["id"] == "digital-wellbeing"
+    )
+    result, _task_spec, _projection = _compile_scenario(digital)
+    assert "Progress(" not in result.effective_output
+    assert "Button(" not in result.effective_output
+    assert 'Stack("overlay"' in result.effective_output
+    assert 'Text(" "' in result.effective_output
+
+
+@pytest.mark.asyncio
+async def test_content_action_placement_requires_action_template() -> None:
+    scenario = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))["scenarios"][0]
+    task_spec, _card_spec, _brief = _scenario_inputs(scenario)
+
+    async def invalid_brief(_messages, _phase):
+        return {
+            "purpose": "show summary",
+            "primaryInformation": ["summary"],
+            "informationHierarchy": ["summary", "action"],
+            "visualTone": "clear",
+            "actionPlacement": "content",
+            "localTemplateIds": [],
+            "contentPriorities": ["summary"],
+            "reason": "content action",
+        }
+
+    with pytest.raises(ValueError, match="requires an Action Template"):
+        await plan_ui_with_llm(task_spec, DataShape(action_count=1), invalid_brief)
 
 
 def test_ts_layout_design_and_card_icon_aliases_lower_to_existing_adapter() -> None:

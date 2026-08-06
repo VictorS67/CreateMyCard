@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,6 +65,7 @@ class HybridCompilation:
 class _ExpansionState:
     template_ids: list[str]
     action_ids: list[str]
+    action_occurrences: list[str]
     template_calls: int = 0
     expanded_components: int = 0
 
@@ -86,7 +89,7 @@ def compile_hybrid_card(
         raise TerseDslNested2ConversionError("Hybrid raw component budget exceeded.")
     _reject_direct_events(composition.children[0])
     _validate_raw_components(composition.children[0], contract)
-    state = _ExpansionState(template_ids=[], action_ids=[])
+    state = _ExpansionState(template_ids=[], action_ids=[], action_occurrences=[])
     content = _expand_call(
         composition.children[0],
         parent="$root",
@@ -94,10 +97,23 @@ def compile_hybrid_card(
         registry=registry,
         state=state,
     )
+    content = _lower_capsule_progress(content)
+    card_params = _drop_duplicate_chrome(card_params, content)
     root = _compile_card_shell(card_params, content, task_spec, contract, registry)
     card_action = card_params.get("action")
-    if isinstance(card_action, dict) and card_action["id"] not in state.action_ids:
-        state.action_ids.append(card_action["id"])
+    if isinstance(card_action, dict):
+        if card_action["id"] not in state.action_ids:
+            state.action_ids.append(card_action["id"])
+        state.action_occurrences.append(card_action["id"])
+    expected_content_actions = Counter({item: 1 for item in contract.content_action_ids})
+    actual_content_actions = Counter(state.action_occurrences)
+    if isinstance(card_action, dict):
+        actual_content_actions.subtract({card_action["id"]: 1})
+        actual_content_actions += Counter()
+    if actual_content_actions != expected_content_actions:
+        raise TerseDslNested2ConversionError(
+            "Hybrid content Actions do not match the contract."
+        )
     count, depth = _shape(root)
     if count > contract.limits.max_expanded_components:
         raise TerseDslNested2ConversionError("Hybrid expanded component budget exceeded.")
@@ -161,6 +177,8 @@ def _validate_card_params(
     approved = {(item.display_label, item.action_id) for item in contract.action_bindings}
     if pair not in approved:
         raise TerseDslNested2ConversionError("card@1 action label/id pair is not approved.")
+    if action["id"] in contract.content_action_ids:
+        raise TerseDslNested2ConversionError("content Action cannot be used by card@1.")
     event_ids = {item.id for item in task_spec.eventCandidates}
     if action["id"] not in event_ids:
         raise TerseDslNested2ConversionError("card@1 action is not in TaskSpec.")
@@ -224,6 +242,7 @@ def _expand_call(
     if wire_id not in state.template_ids:
         state.template_ids.append(wire_id)
     for action_id in action_ids:
+        state.action_occurrences.append(action_id)
         if action_id not in state.action_ids:
             state.action_ids.append(action_id)
     return root
@@ -329,7 +348,12 @@ def _bind_template_actions(
         if handler.get("call") != "sendToAssistant":
             raise TerseDslNested2ConversionError("Template Action call is not a placeholder.")
         binding = next(
-            (item for item in contract.action_bindings if item.action_id == action_id),
+            (
+                item
+                for item in contract.action_bindings
+                if item.action_id == action_id
+                and item.action_id in contract.content_action_ids
+            ),
             None,
         )
         if binding is None:
@@ -377,9 +401,90 @@ def _compile_card_shell(
             item for item in contract.action_bindings if item.action_id == action["id"]
         )
         event = next(item for item in task_spec.eventCandidates if item.id == binding.action_id)
-        options = {"onClick": [{"call": event.call, "args": event.args}]}
-        children.append(Nested2Node("Button", (binding.display_label, "primary", options), ()))
+        options = {
+            "width": "100%",
+            "height": 30,
+            "padding": 2,
+            "borderRadius": 15,
+            "backgroundColor": "#24FFFFFF",
+            "alignContent": "center",
+            "onClick": [{"call": event.call, "args": event.args}],
+        }
+        label = Nested2Node("Text", (binding.display_label, "body"), ())
+        row = Nested2Node("Row", ("actions",), (label,))
+        children.append(Nested2Node("Stack", ("overlay", options), (row,)))
     return Nested2Node("Column", ("card", root_options), tuple(children))
+
+
+def _drop_duplicate_chrome(
+    params: dict[str, Any],
+    content: Nested2Node,
+) -> dict[str, Any]:
+    visible = {
+        value
+        for node in _walk_nodes(content)
+        for raw in node.values
+        for value in _primitive_values(raw)
+        if isinstance(value, str)
+    }
+    normalized = dict(params)
+    for key in ("subtitle", "title"):
+        if normalized.get(key) in visible:
+            normalized.pop(key, None)
+    return normalized
+
+
+def _lower_capsule_progress(node: Nested2Node) -> Nested2Node:
+    children = tuple(_lower_capsule_progress(child) for child in node.children)
+    if node.component_type != "Progress" or not node.values:
+        return Nested2Node(node.component_type, node.values, children)
+    options = next((value for value in node.values if isinstance(value, dict)), None)
+    if options is None or options.get("type") != "capsule":
+        return Nested2Node(node.component_type, node.values, children)
+    total = options.get("total")
+    value = options.get("value")
+    if not isinstance(total, (int, float)) or total <= 0 or not isinstance(value, (int, float)):
+        return Nested2Node(node.component_type, node.values, children)
+    ratio = max(0.0, min(1.0, value / total))
+    height = options.get("height", options.get("strokeWidth", 8))
+    width = options.get("width", "100%")
+    fill_width: int | float | str
+    if isinstance(width, (int, float)):
+        fill_width = round(width * ratio, 2)
+    else:
+        fill_width = f"{round(ratio * 100, 2)}%"
+    fill = Nested2Node(
+        "Text",
+        (
+            " ",
+            {
+                "width": fill_width,
+                "height": height,
+                "backgroundColor": options.get("color"),
+                "borderRadius": height / 2 if isinstance(height, (int, float)) else 4,
+                "maxLines": 1,
+            },
+        ),
+        (),
+    )
+    return Nested2Node(
+        "Row",
+        (
+            {
+                "width": width,
+                "height": height,
+                "justifyContent": "start",
+                "alignItems": "center",
+            },
+        ),
+        (fill,),
+    )
+
+
+def _walk_nodes(node: Nested2Node) -> Iterator[Nested2Node]:
+    yield node
+    for child in node.children:
+        yield from _walk_nodes(child)
 
 
 def _reject_direct_events(node: ParsedCall) -> None:

@@ -50,6 +50,10 @@ class UIBrief(BaseModel):
     theme_semantics: list[str] = Field(default_factory=list, alias="themeSemantics")
     layout_semantics: list[str] = Field(default_factory=list, alias="layoutSemantics")
     local_template_ids: list[str] = Field(default_factory=list, alias="localTemplateIds")
+    action_placement: Literal["auto", "card", "content", "none"] = Field(
+        default="auto",
+        alias="actionPlacement",
+    )
     content_priorities: list[str] = Field(alias="contentPriorities", min_length=1)
     reason: str
 

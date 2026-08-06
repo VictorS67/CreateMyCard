@@ -129,15 +129,19 @@ PYTHONPATH=cloud python scripts/reanalyze_cardplan_golden.py \
 
 同一场景在后一个输入报告中出现时覆盖前一个证据，但不会修改原始模型调用内容，也不会预留预算。
 
-当前确定性结果：10/10 `finalReady`、0 fallback、7/10 达到结构阈值。`focus-mode`、`low-power` 和
-`digital-wellbeing` 的业务文案及 Action 均完整，仅 `component-type-similarity<0.7`；该结构指标不影响
-A2UI 编译成功，也没有以 Golden 覆盖模型或编译结果。
+Action 位置、Theme/Template 联动、整卡 Action 基础组件外壳和 capsule Progress 投影优化后的确定性结果：
+10/10 `finalReady`、0 fallback、10/10 达到结构阈值；最低组件类型相似度为 0.7727。该结果仍由机械导出的
+Hybrid Source 经过正式 Parser、Registry、Compiler 和 A2UI Adapter 得到，没有以 Golden A2UI 覆盖结果。
 
 当前真实 DeepSeek 最终重分析结果：10/10 原始双阶段协议成功、10/10 `finalReady`、0 fallback，供应商
 原始 Token 合计 53,326，场景累计时延 56,224ms，6/10 达到严格 Golden 阈值。`focus-mode`、
 `family-care-weather`、`digital-wellbeing` 仅组件类型相似度低于 0.7；`race-countdown` 还存在根样式相似度
-低于 0.25。四个场景均无文案或 Action 缺失。最终证据对应预算区间 89→113；预算库当前累计已用 113、
-剩余 287。报告位于忽略目录，不提交原始业务 Prompt/输出。
+低于 0.25。四个场景均无文案或 Action 缺失。最终证据对应预算区间 89→113；报告位于忽略目录，不提交
+原始业务 Prompt/输出。
+
+上述真实结果是本轮结构优化前的完整证据。优化后的四场景定向复评必须重新执行两阶段真实调用；若部署
+环境未提供 DeepSeek 凭据或网络不可达，评估必须保持失败且 `fallback=false`，不得用确定性结果替代真模型
+结论。预算状态以评估报告中的原子预留快照为准，不在版本库文档中持续更新运行时数据库计数。
 
 ## 上线、观测与回滚
 

@@ -48,6 +48,7 @@ class HybridBodyContract(StrictModel):
     required_literals: tuple[str, ...]
     protected_literals: tuple[str, ...]
     action_bindings: tuple[ActionBinding, ...] = ()
+    content_action_ids: tuple[str, ...] = ()
     limits: HybridLimits
 
 

@@ -237,6 +237,16 @@ def test_ring_split_invocation_allows_string_display_values():
     validate_invocation("ring-split-metric-action", invocation, task_spec)
 
 
+def test_ring_split_invocation_schema_describes_binding_semantics():
+    schema = RingSplitMetricInvocation.model_json_schema()
+    properties = schema["properties"]
+
+    assert "number 或 integer" in properties["progress"]["description"]
+    assert "格式化的字符串" in properties["minor_value"]["description"]
+    assert "已包含单位" in properties["minor_unit"]["description"]
+    assert properties["progress_total"]["exclusiveMinimum"] == 0
+
+
 @pytest.mark.asyncio
 async def test_advanced_template_converts_to_standard_a2ui():
     output = await AdvancedComponentPipeline().generate(

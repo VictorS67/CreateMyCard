@@ -1,6 +1,6 @@
 """环形核心进度、双数值摘要和主要操作。"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from models.generation import TaskSpec
 
@@ -24,18 +24,50 @@ from ..base import (
 
 
 class Invocation(BaseModel):
-    title: str = "状态摘要"
-    description: str = "查看核心状态并执行改善操作"
-    caption: BindingRef
-    caption_icon: str = "bell"
-    progress: BindingRef
-    progress_total: float = 100.0
-    center_icon: str = "moon"
-    major_value: BindingRef
-    major_unit: str
-    minor_value: BindingRef
-    minor_unit: str
-    action: ActionRef
+    title: str = Field(
+        default="状态摘要",
+        description="卡片标题元数据，简短概括当前状态，不直接作为模板中的大标题展示。",
+    )
+    description: str = Field(
+        default="查看核心状态并执行改善操作",
+        description="卡片用途说明，描述用户能查看的信息和执行的操作。",
+    )
+    caption: BindingRef = Field(
+        description="顶部状态说明文本的数据绑定，例如睡眠状态；绑定字段可以是字符串或数值。"
+    )
+    caption_icon: str = Field(
+        default="bell",
+        description="顶部状态说明旁的语义图标名称，应选择与业务含义匹配的简短图标标识。",
+    )
+    progress: BindingRef = Field(
+        description="环形进度值的数据绑定，必须选择 fields 中的 number 或 integer 字段。"
+    )
+    progress_total: float = Field(
+        default=100.0,
+        gt=0,
+        description="环形进度的最大值，必须大于 0；百分制评分通常填写 100。",
+    )
+    center_icon: str = Field(
+        default="moon",
+        description="环形进度中央的语义图标名称，例如睡眠场景使用 moon。",
+    )
+    major_value: BindingRef = Field(
+        description="右侧第一行的主要展示值绑定，可选择数值或已格式化的字符串字段。"
+    )
+    major_unit: str = Field(
+        description="主要展示值后的短单位；若 major_value 本身已包含单位，必须填写空字符串。"
+    )
+    minor_value: BindingRef = Field(
+        description="右侧第二行的次要展示值绑定，可选择数值或已格式化的字符串字段。"
+    )
+    minor_unit: str = Field(
+        description="次要展示值后的短单位；若 minor_value 本身已包含单位，必须填写空字符串。"
+    )
+    action: ActionRef = Field(
+        description=(
+            "底部主操作；event_id 必须来自 eventCandidates，label 使用面向用户的简短按钮文案。"
+        )
+    )
 
 
 SPEC = ComponentSpec(

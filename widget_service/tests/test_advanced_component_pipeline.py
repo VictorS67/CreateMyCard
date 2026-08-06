@@ -217,6 +217,26 @@ def test_invocation_rejects_string_binding_for_progress():
         validate_invocation("ring-split-metric-action", invocation, task_spec)
 
 
+def test_ring_split_invocation_allows_string_display_values():
+    task_spec = _metric_task_spec()
+    task_spec.dataModelSchema["data"]["memory"]["durationText"] = {
+        "type": "string",
+        "description": "格式化时长文本",
+        "sampleValue": "7小时30分钟",
+    }
+    invocation = RingSplitMetricInvocation(
+        caption=BindingRef(path="/data/memory/durationText"),
+        progress=BindingRef(path="/data/memory/usedPercent"),
+        major_value=BindingRef(path="/data/memory/usedPercent"),
+        major_unit="分",
+        minor_value=BindingRef(path="/data/memory/durationText"),
+        minor_unit="时长",
+        action=ActionRef(event_id="event.clean.memory", label="查看详情"),
+    )
+
+    validate_invocation("ring-split-metric-action", invocation, task_spec)
+
+
 @pytest.mark.asyncio
 async def test_advanced_template_converts_to_standard_a2ui():
     output = await AdvancedComponentPipeline().generate(

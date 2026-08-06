@@ -372,10 +372,9 @@ def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
 
 
 def validate(invocation: Invocation, task_spec: TaskSpec) -> None:
-    validate_numeric_paths(
-        [invocation.progress.path, invocation.major_value.path, invocation.minor_value.path],
-        task_spec,
-    )
+    # Progress 参与环形进度计算，必须是数值；左右摘要仅用于 Text 展示，
+    # 可以绑定数值，也可以绑定诸如“7小时30分钟”的格式化字符串。
+    validate_numeric_paths([invocation.progress.path], task_spec)
 
 
 PLUGIN = register_component(

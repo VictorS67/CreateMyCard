@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.logger import logger
+from app.logger import json_for_log, logger
 from config.config import get_settings
 from custom.a2ui_model_client import A2UIModelClient
 from models.generation import TaskSpec
@@ -34,7 +34,11 @@ class AdvancedComponentPipeline:
             prompt: list[dict[str, str]],
             phase: str,
         ) -> dict[str, Any]:
-            return await model_client.generate_json(prompt, phase=phase)
+            response = await model_client.generate_json(prompt, phase=phase)
+            logger.info(
+                f"{_MODULE} model_response_received phase={phase} response={json_for_log(response)}"
+            )
+            return response
 
         planner_mode = "llm"
         try:
@@ -43,6 +47,10 @@ class AdvancedComponentPipeline:
             planner_mode = "offline"
             ui_brief = plan_ui_offline(task_spec, data_shape)
             logger.warning(f"{_MODULE} ui_brief_fallback exception_type={type(exc).__name__}")
+        logger.info(
+            f"{_MODULE} ui_brief_resolved mode={planner_mode} "
+            f"ui_brief={json_for_log(ui_brief.model_dump(mode='json'))}"
+        )
 
         selection = select_component(
             data_shape,
@@ -53,8 +61,17 @@ class AdvancedComponentPipeline:
             ),
         )
         if selection is None:
-            logger.info(f"{_MODULE} component_not_selected fallback=terse")
+            logger.info(
+                f"{_MODULE} component_selection_completed selected_component_id=none fallback=terse"
+            )
             return None
+
+        selection_candidates = [item.model_dump(mode="json") for item in selection.candidates]
+        logger.info(
+            f"{_MODULE} component_selection_completed "
+            f"selection={json_for_log(selection.model_dump(mode='json'))} "
+            f"candidates={json_for_log(selection_candidates)}"
+        )
 
         style_id, _tokens = select_style(ui_brief)
         mapper_mode = "llm"
@@ -81,6 +98,12 @@ class AdvancedComponentPipeline:
                 )
                 return None
             logger.warning(f"{_MODULE} invocation_fallback exception_type={type(exc).__name__}")
+
+        logger.info(
+            f"{_MODULE} invocation_resolved mode={mapper_mode} "
+            f"component_id={selection.component_id} "
+            f"invocation={json_for_log(invocation.model_dump(mode='json'))}"
+        )
 
         output_format = get_settings().advanced_component_output_format
         source_dsl = build_component_output(

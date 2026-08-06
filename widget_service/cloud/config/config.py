@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     enable_a2ui_model_mock: bool = True
     a2ui_form_model_backend: Literal["mep", "openai"] = "mep"
     design_compact_model_backend: Literal["mep", "openai"] = "openai"
+    advanced_component_output_format: Literal["terse", "a2ui"] = "terse"
     openai_master_client: Literal["deepseek_platform", "llmclient"] = "deepseek_platform"
     openai_fallback_client: Literal["deepseek_platform", "llmclient"] = "llmclient"
     enable_openai_fallback: bool = True

@@ -12,7 +12,6 @@ from ..base import (
     primary_action,
     root_props,
     select_field,
-    serialize,
     validate_numeric_paths,
 )
 
@@ -46,7 +45,11 @@ SPEC = ComponentSpec(
 )
 
 
-def build(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec) -> str:
+def build_rows(
+    invocation: Invocation,
+    tokens: dict[str, object],
+    task_spec: TaskSpec,
+) -> list[list[object]]:
     metric_ids = [f"metric-{index}" for index in range(len(invocation.compact_metrics))]
     palette = tokens.get("metricPalette", [tokens["accent"]])
     rows = [
@@ -130,7 +133,7 @@ def build(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec
             ],
         ]
     )
-    return serialize(rows, task_spec)
+    return rows
 
 
 def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
@@ -166,10 +169,10 @@ PLUGIN = register_component(
         component_id=SPEC.component_id,
         spec=SPEC,
         invocation_model=Invocation,
-        build=build,
+        build_rows=build_rows,
         map_offline=map_offline,
         validate=validate,
     )
 )
 
-__all__ = ["CompactMetricArg", "Invocation", "PLUGIN"]
+__all__ = ["CompactMetricArg", "Invocation", "PLUGIN", "build_rows"]

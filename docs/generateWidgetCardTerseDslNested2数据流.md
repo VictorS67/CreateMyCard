@@ -61,6 +61,20 @@ generate_widget_card_terse_dsl_nested2_ws
 `ComponentSpec`、Invocation Schema、离线映射、槽位校验和 `build()`。注册中心通过包扫描自动发现插件；
 外部选择、参数映射、编译和服务编排不得导入具体组件，也不得按 `componentId` 编写分支。新增组件只需
 增加组件子目录并注册 `ComponentPlugin`，无需修改外部流程。
+
+高级组件支持双输出诊断开关：
+
+```bash
+# 默认：模板行结构 → TerseDSL-Nested-2 → 标准 A2UI
+WIDGET_SERVICE_ADVANCED_COMPONENT_OUTPUT_FORMAT=terse
+
+# 对照：模板行结构 → 原 Design Compact 编译函数 → 标准 A2UI（绕过 Terse 转换器）
+WIDGET_SERVICE_ADVANCED_COMPONENT_OUTPUT_FORMAT=a2ui
+```
+
+两条路径复用同一次组件选择、Invocation、Design Token 和模板行结构，只有最终协议序列化路径不同。
+`a2ui` 模式用于定位 Terse 序列化或转换问题，结果直接交给 Standard A2UI Processor 校验；`terse`
+模式保持正式接口的默认行为。
 - 路由策略和 Processor：`../widget_service/cloud/services/generation_pipeline.py`
 - Terse 解析转换：`../widget_service/cloud/services/terse_dsl_nested2_converter.py`
 - Prompt：`../widget_service/cloud/services/prompt_builder.py`

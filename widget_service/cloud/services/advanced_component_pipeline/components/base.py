@@ -193,3 +193,10 @@ def serialize(rows: list[list[Any]], task_spec: TaskSpec) -> str:
         raise ValueError("advanced component template must define root")
     data = sample_data(task_spec.dataModelSchema.get("data", {}))
     return _component_call("root", rows_by_id) + ";\ndata = " + _literal(data) + ";"
+
+
+def serialize_compact(rows: list[list[Any]], task_spec: TaskSpec) -> str:
+    """恢复高级组件最初使用的 Design Compact 行格式。"""
+    output = [list(row) for row in rows]
+    output.append(["/data", sample_data(task_spec.dataModelSchema.get("data", {}))])
+    return "\n".join(_literal(row) for row in output)

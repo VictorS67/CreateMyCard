@@ -6,7 +6,7 @@ from models.generation import TaskSpec
 
 from ...component_registry import ComponentPlugin, register_component
 from ...models import ActionRef, BindingRef, ComponentSpec, DataShape
-from ..base import binding, event_handler, primary_action, root_props, select_field, serialize
+from ..base import binding, event_handler, primary_action, root_props, select_field
 
 
 class Invocation(BaseModel):
@@ -34,7 +34,11 @@ SPEC = ComponentSpec(
 )
 
 
-def build(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec) -> str:
+def build_rows(
+    invocation: Invocation,
+    tokens: dict[str, object],
+    task_spec: TaskSpec,
+) -> list[list[object]]:
     rows = [
         [
             "root",
@@ -156,7 +160,7 @@ def build(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec
             },
         ],
     ]
-    return serialize(rows, task_spec)
+    return rows
 
 
 def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
@@ -184,10 +188,10 @@ PLUGIN = register_component(
         component_id=SPEC.component_id,
         spec=SPEC,
         invocation_model=Invocation,
-        build=build,
+        build_rows=build_rows,
         map_offline=map_offline,
         validate=validate,
     )
 )
 
-__all__ = ["Invocation", "PLUGIN"]
+__all__ = ["Invocation", "PLUGIN", "build_rows"]

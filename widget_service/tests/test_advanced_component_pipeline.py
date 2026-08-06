@@ -2,10 +2,10 @@
 # ruff: noqa: E402
 """高级组件两轮模型、回退和模板编译测试。"""
 
-import importlib
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,16 +14,20 @@ CLOUD_ROOT = PROJECT_ROOT / "cloud"
 if str(CLOUD_ROOT) not in sys.path:
     sys.path.insert(0, str(CLOUD_ROOT))
 
+import services.advanced_component_pipeline.pipeline as advanced_pipeline_module
 from api.schemas import GenerateWidgetCardRequest
+from config.config import get_settings
 from core.errors import GenerationStatus
 from custom.a2ui_model_client import A2UIModelClient
 from models.generation import EventAction, TaskSpec
 from models.service import ArtifactSaveResult
 from services.advanced_component_pipeline import AdvancedComponentPipeline
 from services.advanced_component_pipeline.argument_mapper import validate_invocation
-from services.advanced_component_pipeline.compiler import build_terse_nested2
+from services.advanced_component_pipeline.compiler import (
+    build_standard_a2ui,
+    build_terse_nested2,
+)
 from services.advanced_component_pipeline.component_registry import component_plugins
-from services.advanced_component_pipeline.components.base import sample_data
 from services.advanced_component_pipeline.components.compact_metrics_primary_action.plugin import (
     CompactMetricArg,
 )
@@ -42,9 +46,7 @@ from services.advanced_component_pipeline.models import (
     BindingRef,
     UIBrief,
 )
-from services.advanced_component_pipeline.styles import STYLE_TOKENS
 from services.artifact_store import ArtifactStore
-from services.compact_dsl_a2ui_converter import convert_compact_dsl_to_a2ui
 from services.generation_pipeline import (
     DslProcessorKind,
     GenerationRoutePolicy,
@@ -92,7 +94,7 @@ def test_component_plugins_are_discovered_from_component_directories():
         "schedule-detail-action",
     }
     assert all(plugin.invocation_model for plugin in plugins)
-    assert all(callable(plugin.build) for plugin in plugins)
+    assert all(callable(plugin.build_rows) for plugin in plugins)
     assert all(callable(plugin.map_offline) for plugin in plugins)
     assert all(callable(plugin.validate) for plugin in plugins)
 
@@ -163,6 +165,25 @@ async def test_pipeline_uses_offline_fallback_when_structured_model_fails():
     assert output is not None
     assert output.planner_mode == "offline"
     assert output.mapper_mode == "offline"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_output_format_switch_can_emit_standard_a2ui(monkeypatch):
+    monkeypatch.setattr(
+        advanced_pipeline_module,
+        "get_settings",
+        lambda: SimpleNamespace(advanced_component_output_format="a2ui"),
+    )
+
+    output = await AdvancedComponentPipeline().generate(
+        _metric_task_spec(),
+        OfflineModelClient(),
+    )
+
+    assert output is not None
+    assert output.source_format == "a2ui"
+    assert len(output.source_dsl.splitlines()) == 3
+    assert '"createSurface"' in output.source_dsl
 
 
 @pytest.mark.asyncio
@@ -296,12 +317,10 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
 
 
 @pytest.mark.parametrize(
-    ("component_id", "module_name", "builder_name", "invocation", "style_id"),
+    ("component_id", "invocation", "style_id"),
     [
         (
             "compact-metrics-primary-action",
-            "services.advanced_component_pipeline.components.compact_metrics_primary_action.plugin",
-            "build",
             CompactMetricsInvocation(
                 compact_metrics=[
                     CompactMetricArg(
@@ -317,8 +336,6 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
         ),
         (
             "ring-split-metric-action",
-            "services.advanced_component_pipeline.components.ring_split_metric_action.plugin",
-            "build",
             RingSplitMetricInvocation(
                 caption=BindingRef(path="/data/metric/caption"),
                 progress=BindingRef(path="/data/metric/progress"),
@@ -332,8 +349,6 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
         ),
         (
             "schedule-detail-action",
-            "services.advanced_component_pipeline.components.schedule_detail_action.plugin",
-            "build",
             ScheduleDetailInvocation(
                 caption="下一个日程",
                 entity_title=BindingRef(path="/data/metric/title"),
@@ -346,35 +361,19 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
         ),
     ],
 )
-def test_terse_templates_produce_same_a2ui_as_previous_compact_templates(
-    monkeypatch,
+def test_terse_templates_produce_same_a2ui_as_direct_a2ui_templates(
     component_id,
-    module_name,
-    builder_name,
     invocation,
     style_id,
 ):
     task_spec = _template_task_spec()
     profile = {"version": "v0.9", "sizes": {"2x2": {"width": 160, "height": 160}}}
-    module = importlib.import_module(module_name)
-    original_serialize = module.serialize
-
-    def serialize_compact(rows, current_task_spec):
-        rows.append(["/data", sample_data(current_task_spec.dataModelSchema["data"])])
-        return "\n".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) for row in rows)
-
-    monkeypatch.setattr(module, "serialize", serialize_compact)
-    compact_source = getattr(module, builder_name)(
+    expected = build_standard_a2ui(
+        component_id,
         invocation,
-        STYLE_TOKENS[style_id],
         task_spec,
+        style_id,
     )
-    expected = convert_compact_dsl_to_a2ui(
-        compact_source,
-        size="2x2",
-        protocol_profile=profile,
-    )
-    monkeypatch.setattr(module, "serialize", original_serialize)
 
     terse_source = build_terse_nested2(component_id, invocation, task_spec, style_id)
     actual = convert_terse_dsl_nested2_to_a2ui(
@@ -412,8 +411,12 @@ def _template_task_spec():
     )
 
 
+@pytest.mark.parametrize("output_format", ["terse", "a2ui"])
 @pytest.mark.asyncio
-async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(monkeypatch):
+async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
+    monkeypatch,
+    output_format,
+):
     saved_genui: list[str] = []
     saved_design_tokens: list[str | None] = []
 
@@ -434,6 +437,11 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(monkeypatch):
     monkeypatch.setattr(A2UIModelClient, "generate_json", unavailable_json)
     monkeypatch.setattr(A2UIModelClient, "generate", must_not_generate_terse)
     monkeypatch.setattr(ArtifactStore, "save", save_artifact)
+    monkeypatch.setattr(
+        get_settings(),
+        "advanced_component_output_format",
+        output_format,
+    )
     request = GenerateWidgetCardRequest(
         uid="advanced-e2e",
         prdVer="11.7.5.205",
@@ -471,7 +479,11 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(monkeypatch):
     assert response.artifactUrl == "https://artifact.test/advanced"
     assert len(saved_genui[0].splitlines()) == 3
     assert saved_design_tokens[0] is not None
-    assert saved_design_tokens[0].startswith('Column("card"')
+    if output_format == "terse":
+        assert saved_design_tokens[0].startswith('Column("card"')
+    else:
+        assert saved_design_tokens[0].startswith('{"version"')
+        assert saved_design_tokens[0] == saved_genui[0]
 
 
 @pytest.mark.asyncio
@@ -483,6 +495,7 @@ async def test_invalid_advanced_template_falls_back_to_original_terse(monkeypatc
             component_id="ring-split-metric-action",
             style_id="night-violet",
             source_dsl='["broken","Text",{}]',
+            source_format="terse",
             ui_brief=UIBrief(
                 purpose="wellbeing-coaching",
                 primaryInformation=["状态"],

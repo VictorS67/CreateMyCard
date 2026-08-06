@@ -21,7 +21,7 @@ class ComponentPlugin:
     component_id: str
     spec: ComponentSpec
     invocation_model: type[BaseModel]
-    build: Callable[[BaseModel, dict[str, object], TaskSpec], str]
+    build_rows: Callable[[BaseModel, dict[str, object], TaskSpec], list[list[object]]]
     map_offline: Callable[[TaskSpec, DataShape], BaseModel]
     validate: Callable[[BaseModel, TaskSpec], None]
 

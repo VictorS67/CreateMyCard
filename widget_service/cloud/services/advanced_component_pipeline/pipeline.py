@@ -5,11 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.logger import logger
+from config.config import get_settings
 from custom.a2ui_model_client import A2UIModelClient
 from models.generation import TaskSpec
 
 from .argument_mapper import map_arguments_offline, map_arguments_with_llm
-from .compiler import build_terse_nested2
+from .compiler import build_component_output
 from .component_selector import select_component
 from .data_shape import extract_data_shape
 from .models import AdvancedPipelineOutput, SelectionConstraints
@@ -81,20 +82,24 @@ class AdvancedComponentPipeline:
                 return None
             logger.warning(f"{_MODULE} invocation_fallback exception_type={type(exc).__name__}")
 
-        source_dsl = build_terse_nested2(
+        output_format = get_settings().advanced_component_output_format
+        source_dsl = build_component_output(
             selection.component_id,
             invocation,
             task_spec,
             style_id,
+            output_format,
         )
         logger.info(
             f"{_MODULE} generation_completed component_id={selection.component_id} "
-            f"style_id={style_id} planner_mode={planner_mode} mapper_mode={mapper_mode}"
+            f"style_id={style_id} output_format={output_format} "
+            f"planner_mode={planner_mode} mapper_mode={mapper_mode}"
         )
         return AdvancedPipelineOutput(
             component_id=selection.component_id,
             style_id=style_id,
             source_dsl=source_dsl,
+            source_format=output_format,
             ui_brief=ui_brief,
             invocation=invocation.model_dump(mode="json"),
             planner_mode=planner_mode,

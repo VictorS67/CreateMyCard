@@ -106,6 +106,7 @@ class AdvancedPipelineOutput(BaseModel):
     component_id: str
     style_id: str
     source_dsl: str
+    source_format: Literal["terse", "a2ui"]
     ui_brief: UIBrief
     invocation: dict[str, Any]
     planner_mode: Literal["llm", "offline"]

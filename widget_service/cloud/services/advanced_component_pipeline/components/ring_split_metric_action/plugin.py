@@ -11,7 +11,6 @@ from ..base import (
     event_handler,
     primary_action,
     root_props,
-    serialize,
     validate_numeric_paths,
 )
 
@@ -41,7 +40,11 @@ SPEC = ComponentSpec(
 )
 
 
-def build(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec) -> str:
+def build_rows(
+    invocation: Invocation,
+    tokens: dict[str, object],
+    task_spec: TaskSpec,
+) -> list[list[object]]:
     rows = [
         ["root", "Column", root_props(tokens), ["caption-row", "metrics", "action"]],
         [
@@ -152,7 +155,7 @@ def build(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec
             },
         ],
     ]
-    return serialize(rows, task_spec)
+    return rows
 
 
 def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
@@ -187,10 +190,10 @@ PLUGIN = register_component(
         component_id=SPEC.component_id,
         spec=SPEC,
         invocation_model=Invocation,
-        build=build,
+        build_rows=build_rows,
         map_offline=map_offline,
         validate=validate,
     )
 )
 
-__all__ = ["Invocation", "PLUGIN"]
+__all__ = ["Invocation", "PLUGIN", "build_rows"]

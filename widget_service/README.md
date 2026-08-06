@@ -18,10 +18,10 @@ The service follows `docs/AGENTS.md`:
   profile's `protocol.json` before validation and storage. The three generation routes share one policy-driven
   generation pipeline and the same model-failure, quality-repair, and validation switches. Tool callers cannot
   select or override either backend.
-- `generateWidgetCardTerseDslNested2` uses the local `tersedsl-nested-2/0.1` Prompt and a restricted
-  literal-only parser. It never executes model output and deterministically converts the nested component tree to
-  standard A2UI. It supports static create/edit requests and shares the edit switch with the other generation
-  routes; dynamic data bindings and events remain unsupported.
+- `generateWidgetCardTerseDslNested2` uses the local `tersedsl-nested-2/0.1` Prompt and a restricted parser.
+  Registered advanced components support dynamic TaskSpec bindings and events. Their output defaults to
+  `WIDGET_SERVICE_ADVANCED_COMPONENT_OUTPUT_FORMAT=terse`; set it to `a2ui` to use the restored direct A2UI
+  template compiler and bypass Terse serialization/conversion for visual diagnosis.
 - Temporary route `generateWidgetCardCompactDslWithDirective` directly reuses the fourth route's generation service
   and schema, but always emits widget directive command frames even when the global directive switch is disabled.
   Its forced behavior is isolated in the router so the route can be removed without changing the generation pipeline.

@@ -585,6 +585,9 @@ class WidgetGenerationService:
                     f"exception_type={type(exc).__name__} fallback=terse"
                 )
         advanced_source_dsl = advanced_output.source_dsl if advanced_output is not None else ""
+        advanced_source_format = (
+            advanced_output.source_format if advanced_output is not None else "terse"
+        )
         model_protocol_profile = {
             "id": policy.model_profile_id,
             "format": policy.model_format,
@@ -622,6 +625,7 @@ class WidgetGenerationService:
             if advanced_source_dsl:
                 logger.info(
                     f"{_MODULE} advanced_component_template_generated "
+                    f"source_format={advanced_source_format} "
                     f"source_length={len(advanced_source_dsl)}"
                 )
                 return advanced_source_dsl
@@ -685,7 +689,15 @@ class WidgetGenerationService:
 
         def evaluate_source_dsl_sync(source_dsl: str) -> list[str]:
             nonlocal latest_processing_result
-            processing_result = processor.process(source_dsl, processing_context)
+            is_advanced_a2ui = (
+                bool(advanced_source_dsl)
+                and source_dsl == advanced_source_dsl
+                and advanced_source_format == "a2ui"
+            )
+            active_processor = (
+                get_dsl_processor(DslProcessorKind.STANDARD_A2UI) if is_advanced_a2ui else processor
+            )
+            processing_result = active_processor.process(source_dsl, processing_context)
             latest_processing_result = processing_result
             warnings = [
                 item.repair_message()
@@ -1189,6 +1201,11 @@ class WidgetGenerationService:
         """用目标接口对应 Processor 验证上一轮 Token，防止跨源格式编辑。"""
         if source is None:
             return False
+        if (
+            get_settings().advanced_component_output_format == "a2ui"
+            and design_token.strip() == source.artifact.genui.strip()
+        ):
+            return True
         source_card_spec = source.artifact.cardSpec
         source_size = source_card_spec.get("suggestSize")
         if not isinstance(source_size, str) or not source_size:

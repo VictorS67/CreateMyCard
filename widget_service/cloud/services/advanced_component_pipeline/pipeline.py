@@ -34,7 +34,11 @@ class AdvancedComponentPipeline:
             prompt: list[dict[str, str]],
             phase: str,
         ) -> dict[str, Any]:
-            if phase == "advanced-argument-map":
+            if phase == "advanced-ui-brief":
+                logger.info(
+                    f"{_MODULE} ui_planner_prompt_built phase={phase} prompt={json_for_log(prompt)}"
+                )
+            elif phase == "advanced-argument-map":
                 logger.info(
                     f"{_MODULE} argument_mapper_prompt_built "
                     f"phase={phase} prompt={json_for_log(prompt)}"

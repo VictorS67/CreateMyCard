@@ -88,7 +88,14 @@ WIDGET_SERVICE_ENABLE_OPENAI_FALLBACK=false
 WIDGET_SERVICE_DEEPSEEK_API_KEY=替换为本地密钥
 WIDGET_SERVICE_DEEPSEEK_API_URL=https://api.deepseek.com
 WIDGET_SERVICE_DEEPSEEK_MODEL=deepseek-v4-flash
+WIDGET_SERVICE_DEEPSEEK_ENABLE_THINKING=false
 ```
+
+直连 HTTP 请求按 DeepSeek OpenAI 兼容协议显式发送
+`"thinking":{"type":"disabled"}`；不能只依赖本地布尔配置，因为 V4 默认启用 thinking。HTTP 流在应用
+事件循环中执行，达到 `WIDGET_SERVICE_MODEL_REQUEST_TIMEOUT_SECONDS` 后会关闭连接；内部 WebSocket 和测试
+注入的同步 Transport 继续持有并发令牌直到物理调用结束。路由单测必须把
+`WIDGET_SERVICE_DEEPSEEK_CALL_BUDGET_PATH` 指向测试临时目录，不能污染生产/真实评估预算。
 
 ## 生成物和 SHA 门禁
 
@@ -162,6 +169,12 @@ Hybrid Source 经过正式 Parser、Registry、Compiler 和 A2UI Adapter 得到�
 | device-clean | `ux-device-metric@1` | 26 | 5,329 | 4,535 | 0.8077 / 0.8077 / 0.7000 | pass |
 | digital-wellbeing | `ux-segmented-limit@1`, `ux-dual-metric@1` | 23 | 15,214 | 115,526 | 0.8333 / 0.9130 / 0.7000 | pass |
 | race-countdown | `ux-countdown@1`, `ux-action-summary@1` | 17 | 15,944 | 122,991 | 0.8235 / 0.8235 / 0.7778 | pass |
+
+关闭 thinking 后对历史最慢的 `focus-mode` 做了单场 A/B：请求日志确认发送
+`thinking.type=disabled`、`fallback=false`，但 UI Brief 第一阶段在 120 秒内仍未返回最终 `content`，因此没有
+进入第二阶段，也没有生成可宣称成功的场景报告。旧线程桥接随后继续等待物理流，人工在 336,176ms 中止；
+据此新增了 HTTP 原生异步取消和回归测试。该失败说明此前的高 Token 确实包含大量 reasoning，但本次慢响应
+不能再只归因于 thinking，仍需结合上游服务状态和首字节/流事件观测排查。
 
 最终合并报告的预算快照为 331/400（剩余 69）。预算由并发任务共享，报告不把相邻快照之间的全部增长
 归因于本评估。原始 Prompt/输出报告位于忽略目录并保持 `0600`，不提交。若部署环境未提供 DeepSeek

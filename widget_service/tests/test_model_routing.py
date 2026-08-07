@@ -254,8 +254,12 @@ class _SequenceRuntime:
 
 
 @pytest.mark.asyncio
-async def test_unified_model_client_master_success_does_not_call_fallback():
-    settings = Settings(_env_file=None, enable_model_failure_retry=True)
+async def test_unified_model_client_master_success_does_not_call_fallback(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        enable_model_failure_retry=True,
+        deepseek_call_budget_path=str(tmp_path / "budget.sqlite3"),
+    )
     runtime = _SequenceRuntime({"deepseek_platform": ["master-result"]})
     client = UnifiedModelClient(settings, runtime, operation_name="compact")
 
@@ -272,8 +276,12 @@ async def test_unified_model_client_master_success_does_not_call_fallback():
 
 
 @pytest.mark.asyncio
-async def test_unified_model_client_does_not_treat_quality_candidate_as_fallback_error():
-    settings = Settings(_env_file=None, enable_model_failure_retry=True)
+async def test_unified_model_client_does_not_treat_quality_candidate_as_fallback_error(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        enable_model_failure_retry=True,
+        deepseek_call_budget_path=str(tmp_path / "budget.sqlite3"),
+    )
     runtime = _SequenceRuntime({"deepseek_platform": ["invalid-design-token"]})
     client = UnifiedModelClient(settings, runtime, operation_name="compact")
 
@@ -291,8 +299,12 @@ async def test_unified_model_client_does_not_treat_quality_candidate_as_fallback
 
 
 @pytest.mark.asyncio
-async def test_unified_model_client_retry_disabled_never_calls_fallback():
-    settings = Settings(_env_file=None, enable_model_failure_retry=False)
+async def test_unified_model_client_retry_disabled_never_calls_fallback(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        enable_model_failure_retry=False,
+        deepseek_call_budget_path=str(tmp_path / "budget.sqlite3"),
+    )
     error = ModelTransportError("master unavailable", code="MODEL_UNAVAILABLE")
     runtime = _SequenceRuntime({"deepseek_platform": [error]})
     client = UnifiedModelClient(settings, runtime, operation_name="compact")
@@ -310,13 +322,14 @@ async def test_unified_model_client_retry_disabled_never_calls_fallback():
 
 
 @pytest.mark.asyncio
-async def test_unified_model_client_fallback_disabled_retries_only_master():
+async def test_unified_model_client_fallback_disabled_retries_only_master(tmp_path):
     settings = Settings(
         _env_file=None,
         enable_model_failure_retry=True,
         enable_openai_fallback=False,
         model_failure_max_retry_attempts=1,
         model_failure_retry_jitter_ratio=0.0,
+        deepseek_call_budget_path=str(tmp_path / "budget.sqlite3"),
     )
     failure = ModelTransportError("master unavailable", code="MODEL_UNAVAILABLE")
     runtime = _SequenceRuntime({"deepseek_platform": [failure, failure]})
@@ -344,13 +357,14 @@ async def test_unified_model_client_fallback_disabled_retries_only_master():
 
 
 @pytest.mark.asyncio
-async def test_unified_model_client_exhausts_master_then_uses_fallback_retries():
+async def test_unified_model_client_exhausts_master_then_uses_fallback_retries(tmp_path):
     settings = Settings(
         _env_file=None,
         enable_model_failure_retry=True,
         model_failure_max_retry_attempts=2,
         fallback_model_failure_max_retry_attempts=1,
         model_failure_retry_jitter_ratio=0.0,
+        deepseek_call_budget_path=str(tmp_path / "budget.sqlite3"),
     )
     failure = ModelTransportError("temporarily unavailable")
     runtime = _SequenceRuntime(
@@ -391,12 +405,13 @@ async def test_unified_model_client_exhausts_master_then_uses_fallback_retries()
 
 
 @pytest.mark.asyncio
-async def test_unified_model_client_can_swap_master_and_fallback_and_restart_master():
+async def test_unified_model_client_can_swap_master_and_fallback_and_restart_master(tmp_path):
     settings = Settings(
         _env_file=None,
         enable_model_failure_retry=True,
         openai_master_client="llmclient",
         openai_fallback_client="deepseek_platform",
+        deepseek_call_budget_path=str(tmp_path / "budget.sqlite3"),
     )
     runtime = _SequenceRuntime({"llmclient": ["invalid-token", "repaired-token"]})
     client = UnifiedModelClient(settings, runtime, operation_name="compact")

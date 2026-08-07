@@ -77,7 +77,7 @@ from custom.a2ui_model_client import (
     build_prompt_log_summary,
     require_generated_dsl,
 )
-from custom.llmclient import LLMClientOptions
+from custom.llmclient import LLMClientOptions, _http_request_payload
 from custom.mep_model_transport import MepModelTransport, PredictEventDecoder
 from custom.model_transport import ModelTransportError
 from custom.model_runtime import ModelExecutionRuntime, _generate_with_llmclient
@@ -415,7 +415,7 @@ def test_llmclient_settings_are_complete_and_keep_previous_defaults():
     assert settings.deepseek_temperature == 0.7
     assert settings.deepseek_top_p == 0.9
     assert settings.deepseek_top_k == 1
-    assert settings.deepseek_max_tokens == 128_000
+    assert settings.deepseek_max_tokens == 8_192
     assert settings.deepseek_enable_thinking is False
     assert settings.deepseek_include_usage is True
     assert settings.deepseek_debug_usage is True
@@ -423,6 +423,22 @@ def test_llmclient_settings_are_complete_and_keep_previous_defaults():
     assert options.api_key == settings.deepseek_api_key
     assert options.model == settings.deepseek_model
     assert options.ws_url == settings.deepseek_ws_url
+
+
+def test_llmclient_http_payload_explicitly_controls_deepseek_thinking():
+    messages = [{"role": "user", "content": "return JSON"}]
+    disabled = _http_request_payload(
+        LLMClientOptions(enable_thinking=False),
+        messages,
+    )
+    enabled = _http_request_payload(
+        LLMClientOptions(enable_thinking=True),
+        messages,
+    )
+
+    assert disabled["thinking"] == {"type": "disabled"}
+    assert enabled["thinking"] == {"type": "enabled"}
+    assert disabled["messages"] is messages
 
 
 @pytest.mark.parametrize(
@@ -2993,6 +3009,35 @@ async def test_llmclient_timeout_keeps_shared_permit_until_physical_completion()
         await runtime.aclose()
 
     assert mep_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_http_llmclient_timeout_closes_native_async_stream(monkeypatch):
+    settings = Settings(
+        _env_file=None,
+        deepseek_api_key="test-key",
+        deepseek_api_url="https://api.deepseek.test",
+        model_request_timeout_seconds=0.01,
+    )
+    stream_closed = asyncio.Event()
+
+    async def slow_stream(_options, _messages, *, trace=None):
+        del trace
+        try:
+            await asyncio.sleep(1.0)
+            yield "late-result"
+        finally:
+            stream_closed.set()
+
+    monkeypatch.setattr("custom.model_runtime.stream_genui", slow_stream)
+    runtime = ModelExecutionRuntime(settings)
+    try:
+        with pytest.raises(ModelTransportError) as request_error:
+            await runtime.generate("llmclient", [])
+        assert request_error.value.code == "MODEL_REQUEST_TIMEOUT"
+        assert stream_closed.is_set() is True
+    finally:
+        await runtime.aclose()
 
 
 @pytest.mark.asyncio

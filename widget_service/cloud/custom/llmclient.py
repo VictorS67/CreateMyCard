@@ -48,14 +48,16 @@ class LLMClientOptions:
 
 
 async def stream_genui(
-        options: LLMClientOptions,
-        messages: list[dict],
+    options: LLMClientOptions,
+    messages: list[dict],
+    *,
+    trace: dict[str, object] | None = None,
 ) -> AsyncGenerator[str, None]:
     """流式调用 LLM，逐 token yield content。"""
     if not options.api_key:
         raise ValueError("Missing API key")
     if options.api_url.startswith(("http://", "https://")):
-        async for chunk in _stream_http_genui(options, messages):
+        async for chunk in _stream_http_genui(options, messages, trace=trace):
             yield chunk
         return
 
@@ -91,9 +93,9 @@ async def stream_genui(
     usage = None
     try:
         async with websockets.connect(
-                options.ws_url,
-                additional_headers=headers,
-                open_timeout=options.recv_timeout,
+            options.ws_url,
+            additional_headers=headers,
+            open_timeout=options.recv_timeout,
         ) as websocket:
             await websocket.send(json.dumps(body, ensure_ascii=False))
 
@@ -105,6 +107,8 @@ async def stream_genui(
 
                 if "usage" in response:
                     usage = response["usage"]
+                    if trace is not None and isinstance(usage, dict):
+                        trace["usage"] = usage
 
                 choices = response.get("choices", [])
                 if not choices:
@@ -124,6 +128,8 @@ async def stream_genui(
                     yield content_text
 
                 if choice.get("finish_reason"):
+                    if trace is not None:
+                        trace["finishReason"] = choice["finish_reason"]
                     logger.info(f"{_MODULE} stream_finished reason={choice['finish_reason']}")
                     break
 
@@ -143,20 +149,14 @@ async def stream_genui(
 async def _stream_http_genui(
     options: LLMClientOptions,
     messages: list[dict],
+    *,
+    trace: dict[str, object] | None = None,
 ) -> AsyncGenerator[str, None]:
     """调用 DeepSeek/OpenAI 兼容 HTTP SSE 接口。"""
     endpoint = options.api_url.rstrip("/")
     if not endpoint.endswith("/chat/completions"):
         endpoint += "/chat/completions"
-    payload = {
-        "model": options.model,
-        "messages": messages,
-        "stream": True,
-        "stream_options": {"include_usage": options.include_usage},
-        "temperature": options.temperature,
-        "top_p": options.top_p,
-        "max_tokens": options.max_tokens,
-    }
+    payload = _http_request_payload(options, messages)
     headers = {
         "Authorization": f"Bearer {options.api_key}",
         "Content-Type": "application/json",
@@ -165,7 +165,8 @@ async def _stream_http_genui(
     timeout = httpx.Timeout(float(options.recv_timeout))
     logger.info(
         f"{_MODULE} http_stream_started endpoint={endpoint} "
-        f"model={options.model} message_count={len(messages)}"
+        f"model={options.model} message_count={len(messages)} "
+        f"thinking_enabled={options.enable_thinking}"
     )
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", endpoint, headers=headers, json=payload) as response:
@@ -179,11 +180,35 @@ async def _stream_http_genui(
                 event = json.loads(data)
                 if isinstance(event.get("usage"), dict):
                     usage = event["usage"]
+                    if trace is not None:
+                        trace["usage"] = usage
                 choices = event.get("choices") or []
                 if not choices:
                     continue
-                content = (choices[0].get("delta") or {}).get("content", "")
+                choice = choices[0]
+                if trace is not None and choice.get("finish_reason"):
+                    trace["finishReason"] = choice["finish_reason"]
+                content = (choice.get("delta") or {}).get("content", "")
                 if isinstance(content, str) and content:
                     yield content
     if usage:
         logger.info(f"{_MODULE} usage_stats usage={json_for_log(usage)}")
+
+
+def _http_request_payload(
+    options: LLMClientOptions,
+    messages: list[dict],
+) -> dict[str, object]:
+    """Build the official DeepSeek Chat Completions payload."""
+    return {
+        "model": options.model,
+        "messages": messages,
+        "stream": True,
+        "stream_options": {"include_usage": options.include_usage},
+        "thinking": {
+            "type": "enabled" if options.enable_thinking else "disabled",
+        },
+        "temperature": options.temperature,
+        "top_p": options.top_p,
+        "max_tokens": options.max_tokens,
+    }

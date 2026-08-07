@@ -292,7 +292,7 @@ class A2UIModelClient:
         if not is_design_compact and not is_terse_nested2:
             dsl_text = self.convert_dsl(dsl_text)
         logger.info(
-            f"{_MODULE} dsl_processed backend={self.backend} dsl_content={json_for_log(dsl_text)}"
+            f"{_MODULE} dsl_processed backend={self.backend} dsl_length={len(dsl_text)}"
         )
         return dsl_text
 
@@ -401,7 +401,7 @@ class A2UIModelClient:
             )
             logger.info(
                 f"{_MODULE} design_dsl_conversion_completed "
-                f"converted_dsl={json_for_log(converted_dsl)}"
+                f"converted_length={len(converted_dsl)}"
             )
             return converted_dsl
         except CompactDslConversionError as exc:

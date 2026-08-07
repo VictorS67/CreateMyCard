@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -45,6 +46,14 @@ class UIBrief(BaseModel):
     interaction: Literal["none", "one-primary-action", "multiple-actions"] = "one-primary-action"
     attention: Literal["normal", "prominent", "warning-capable", "urgent"] = "normal"
     visual_tone: str = Field(alias="visualTone")
+    theme_id: str | None = Field(default=None, alias="themeId")
+    theme_semantics: list[str] = Field(default_factory=list, alias="themeSemantics")
+    layout_semantics: list[str] = Field(default_factory=list, alias="layoutSemantics")
+    local_template_ids: list[str] = Field(default_factory=list, alias="localTemplateIds")
+    action_placement: Literal["auto", "card", "content", "none"] = Field(
+        default="auto",
+        alias="actionPlacement",
+    )
     content_priorities: list[str] = Field(alias="contentPriorities", min_length=1)
     reason: str
 
@@ -54,6 +63,16 @@ class UIBrief(BaseModel):
         if not value.strip():
             raise ValueError("must not be empty")
         return value.strip()
+
+    @field_validator("local_template_ids")
+    @classmethod
+    def versioned_template_ids(cls, values: list[str]) -> list[str]:
+        pattern = re.compile(r"^[a-z][a-z0-9-]{0,63}@[1-9][0-9]*$")
+        if len(values) != len(set(values)):
+            raise ValueError("localTemplateIds must be unique")
+        if any(pattern.fullmatch(value) is None for value in values):
+            raise ValueError("localTemplateIds must contain versioned IDs")
+        return values
 
 
 class SelectionConstraints(BaseModel):
@@ -111,3 +130,14 @@ class AdvancedPipelineOutput(BaseModel):
     invocation: dict[str, Any]
     planner_mode: Literal["llm", "offline"]
     mapper_mode: Literal["llm", "offline"]
+    route: Literal["whole-card-template", "hybrid-template"] = "whole-card-template"
+    whole_card_confidence: float = 0.0
+    whole_card_candidates: list[CandidateScore] = Field(default_factory=list)
+    confidence_bypassed: bool = False
+    raw_output: str = ""
+    effective_output: str = ""
+    compiled_a2ui: str = ""
+    fallback_used: bool = False
+    template_call_count: int = 0
+    template_used_ids: list[str] = Field(default_factory=list)
+    expanded_component_count: int = 0

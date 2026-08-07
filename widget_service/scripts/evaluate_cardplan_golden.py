@@ -384,6 +384,7 @@ async def _live_scene(scenario: dict[str, Any]) -> dict[str, Any]:
             client,
             card_spec,
             force_hybrid=True,
+            allow_offline_fallback=False,
         )
     except DeepSeekCallBudgetExceeded:
         raise

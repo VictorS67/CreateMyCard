@@ -198,6 +198,16 @@ async def test_pipeline_uses_offline_fallback_when_structured_model_fails():
 
 
 @pytest.mark.asyncio
+async def test_pipeline_can_disable_offline_fallback_for_strict_evaluation():
+    with pytest.raises(RuntimeError, match="offline: advanced-ui-brief"):
+        await AdvancedComponentPipeline().generate(
+            _metric_task_spec(),
+            OfflineModelClient(),
+            allow_offline_fallback=False,
+        )
+
+
+@pytest.mark.asyncio
 async def test_pipeline_output_format_switch_can_emit_standard_a2ui(monkeypatch):
     monkeypatch.setattr(
         advanced_pipeline_module,

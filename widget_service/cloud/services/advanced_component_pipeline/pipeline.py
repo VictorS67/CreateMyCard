@@ -36,6 +36,7 @@ class AdvancedComponentPipeline:
         card_spec: dict[str, Any] | None = None,
         *,
         force_hybrid: bool = False,
+        allow_offline_fallback: bool = True,
     ) -> AdvancedPipelineOutput | None:
         data_shape = extract_data_shape(task_spec)
         registry = get_cardplan_registry()
@@ -68,6 +69,8 @@ class AdvancedComponentPipeline:
         except DeepSeekCallBudgetExceeded:
             raise
         except (RuntimeError, ValueError) as exc:
+            if not allow_offline_fallback:
+                raise
             planner_mode = "offline"
             ui_brief = plan_ui_offline(task_spec, data_shape)
             logger.warning(f"{_MODULE} ui_brief_fallback exception_type={type(exc).__name__}")
@@ -178,6 +181,8 @@ class AdvancedComponentPipeline:
                 generate_json,
             )
         except (RuntimeError, ValueError) as exc:
+            if not allow_offline_fallback:
+                raise
             mapper_mode = "offline"
             try:
                 invocation = map_arguments_offline(

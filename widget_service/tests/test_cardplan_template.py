@@ -305,6 +305,42 @@ def test_theme_template_reconciliation_and_chinese_phrase_ranking() -> None:
     assert projection.theme_id == "race-night-violet"
 
 
+def test_ui_brief_candidates_expose_variant_parameter_semantics() -> None:
+    payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+    sleep = next(item for item in payload["scenarios"] if item["id"] == "sleep")
+    task_spec, _card_spec, _brief = _scenario_inputs(sleep)
+
+    candidates = selection_candidates(task_spec, get_cardplan_registry())
+    sleep_metric = next(
+        item for item in candidates["localTemplates"] if item["id"] == "ux-sleep-metric@1"
+    )
+    hero = next(item for item in sleep_metric["variants"] if item["size"] == "hero")
+    kinds = {item["name"]: item["valueKind"] for item in hero["requiredParameters"]}
+
+    assert kinds["hours"] == "literal"
+    assert kinds["minutes"] == "literal"
+    assert kinds["sleepIcon"] == "asset-source"
+
+
+def test_card_action_contract_hides_content_action_variants() -> None:
+    payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+    meeting = next(item for item in payload["scenarios"] if item["id"] == "current-meeting")
+    task_spec, card_spec, brief = _scenario_inputs(meeting)
+    brief = brief.model_copy(update={"action_placement": "card"})
+
+    projection = build_hybrid_prompt(
+        task_spec=task_spec,
+        card_spec=card_spec,
+        ui_brief=brief,
+        registry=get_cardplan_registry(),
+    )
+    system = projection.messages[0]["content"]
+
+    assert projection.contract.content_action_ids == ()
+    assert "Template('ux-meeting-metadata@1', 'medium'" in system
+    assert "Template('ux-meeting-metadata@1', 'hero'" not in system
+
+
 def test_redundant_generic_action_template_returns_action_to_card_shell() -> None:
     payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
     focus = next(item for item in payload["scenarios"] if item["id"] == "focus-mode")
@@ -458,15 +494,30 @@ def test_budget_is_atomic_across_threads_and_enforces_exact_hard_limit(tmp_path:
     with sqlite3.connect(capped.path) as connection:
         connection.execute("UPDATE budget SET used = 399 WHERE id = 1")
     assert capped.reserve("deepseek_platform").used == 400
+    assert capped.status().remaining == 0
     with pytest.raises(DeepSeekCallBudgetExceeded, match="used=400"):
         capped.reserve("deepseek_platform")
 
 
-def test_settings_parse_env_budget_but_reject_limit_override() -> None:
+def test_settings_keep_production_budget_default_and_allow_explicit_unlimited_mode() -> None:
     settings = Settings(_env_file=None, deepseek_call_budget_limit="400")  # type: ignore[arg-type]
     assert settings.deepseek_call_budget_limit == 400
-    with pytest.raises(ValueError, match="must remain exactly 400"):
-        Settings(_env_file=None, deepseek_call_budget_limit=401)
+    assert Settings(_env_file=None, deepseek_call_budget_limit=0).deepseek_call_budget_limit == 0
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        Settings(_env_file=None, deepseek_call_budget_limit=-1)
+
+
+def test_unlimited_budget_preserves_counter_and_reserves_beyond_default_cap(tmp_path: Path) -> None:
+    budget = DeepSeekCallBudget(tmp_path / "unlimited.sqlite3", limit=0)
+    budget.reserve("llmclient")
+    with sqlite3.connect(budget.path) as connection:
+        connection.execute("UPDATE budget SET used = 400 WHERE id = 1")
+
+    status = budget.reserve("llmclient")
+
+    assert status.used == 401
+    assert status.remaining is None
+    assert status.limit is None
 
 
 @pytest.mark.asyncio

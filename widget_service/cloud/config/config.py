@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,20 +65,13 @@ class Settings(BaseSettings):
     deepseek_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     deepseek_top_p: float = Field(default=0.9, ge=0.0, le=1.0)
     deepseek_top_k: int = Field(default=1, ge=1)
-    deepseek_max_tokens: int = Field(default=128_000, ge=1)
+    deepseek_max_tokens: int = Field(default=8_192, ge=1)
     deepseek_enable_thinking: bool = False
     deepseek_include_usage: bool = True
     deepseek_debug_usage: bool = True
     deepseek_recv_timeout: int = Field(default=120, ge=1)
-    deepseek_call_budget_limit: int = 400
+    deepseek_call_budget_limit: int = Field(default=400, ge=0)
     deepseek_call_budget_path: str = "workspace/runtime/deepseek_call_budget.sqlite3"
-
-    @field_validator("deepseek_call_budget_limit")
-    @classmethod
-    def enforce_deepseek_call_budget_limit(cls, value: int) -> int:
-        if value != 400:
-            raise ValueError("deepseek_call_budget_limit must remain exactly 400")
-        return value
 
     system_prompt_file: str = "docs/system_prompt.txt"
     edit_system_prompt_file: str = "docs/edit_system_prompt.txt"

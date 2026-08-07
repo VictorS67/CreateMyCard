@@ -45,7 +45,9 @@ def build_ui_planner_prompt(
                 "所选局部 Template 的 compatibleThemeIds 一致。actionPlacement 只表达 Action "
                 "属于整卡主操作(card)、某个内容摘要/图标控制(content)、无操作(none)，不确定"
                 "时用 auto；选择 content 时 localTemplateIds 必须包含 actionPolicy 非 none 的"
-                "Template，否则选择 card；不得借此输出具体组件。\n"
+                "Template，否则选择 card；选择局部 Template 时优先选择 requiredParameters 能逐项"
+                "覆盖独立 fields、素材和 Action 的 variant，不要把多个独立字段拼成一个字符串来"
+                "迁就参数较少的 Template；不得借此输出具体组件。\n"
                 + json.dumps(UIBrief.model_json_schema(by_alias=True), ensure_ascii=False)
             ),
         },

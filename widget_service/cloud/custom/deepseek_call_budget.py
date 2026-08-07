@@ -9,26 +9,26 @@ from pathlib import Path
 
 
 class DeepSeekCallBudgetExceeded(RuntimeError):
-    """Raised before transport invocation when the immutable hard limit is exhausted."""
+    """Raised before transport invocation when the configured limit is exhausted."""
 
 
 @dataclass(frozen=True)
 class DeepSeekBudgetStatus:
     used: int
-    remaining: int
-    limit: int
+    remaining: int | None
+    limit: int | None
 
 
 class DeepSeekCallBudget:
     """Reserve every physical DeepSeek attempt under one durable SQLite counter."""
 
-    HARD_LIMIT = 400
+    DEFAULT_LIMIT = 400
 
-    def __init__(self, path: Path, limit: int = HARD_LIMIT) -> None:
-        if limit != self.HARD_LIMIT:
-            raise ValueError("DeepSeek call budget hard limit must remain 400")
+    def __init__(self, path: Path, limit: int = DEFAULT_LIMIT) -> None:
+        if limit < 0:
+            raise ValueError("DeepSeek call budget limit cannot be negative")
         self.path = path
-        self.limit = limit
+        self.limit = limit or None
 
     def reserve(self, provider: str) -> DeepSeekBudgetStatus:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +48,7 @@ class DeepSeekCallBudget:
             )
             connection.execute("INSERT OR IGNORE INTO budget(id, used) VALUES (1, 0)")
             used = int(connection.execute("SELECT used FROM budget WHERE id = 1").fetchone()[0])
-            if used >= self.limit:
+            if self.limit is not None and used >= self.limit:
                 connection.execute("ROLLBACK")
                 raise DeepSeekCallBudgetExceeded(
                     f"DeepSeek call budget exhausted: used={used}, limit={self.limit}"
@@ -62,7 +62,7 @@ class DeepSeekCallBudget:
             connection.execute("COMMIT")
             return DeepSeekBudgetStatus(
                 used=reserved,
-                remaining=self.limit - reserved,
+                remaining=None if self.limit is None else self.limit - reserved,
                 limit=self.limit,
             )
         except Exception:
@@ -83,4 +83,8 @@ class DeepSeekCallBudget:
         finally:
             connection.close()
         used = int(row[0]) if row else 0
-        return DeepSeekBudgetStatus(used=used, remaining=self.limit - used, limit=self.limit)
+        return DeepSeekBudgetStatus(
+            used=used,
+            remaining=None if self.limit is None else max(0, self.limit - used),
+            limit=self.limit,
+        )

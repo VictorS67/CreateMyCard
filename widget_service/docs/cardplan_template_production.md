@@ -74,8 +74,10 @@ WIDGET_SERVICE_DEEPSEEK_CALL_BUDGET_LIMIT=400
 WIDGET_SERVICE_DEEPSEEK_CALL_BUDGET_PATH=workspace/runtime/deepseek_call_budget.sqlite3
 ```
 
-配置值由 Pydantic 转为整数后再由 `field_validator` 强制等于 `400`，因此 `.env` 中的字符串形式可正常
-加载，但不能调高或调低。预算数据库属于运行状态，不提交、不删除、不重置。多进程可共享
+生产默认值仍为 `400`。经明确授权的隔离评估任务可在单次进程环境中设置
+`WIDGET_SERVICE_DEEPSEEK_CALL_BUDGET_LIMIT=0` 进入无限模式；该模式只取消拒绝门槛，仍会在每次调用前
+原子增加同一计数器，因此不会丢失或重置既有历史。不得把 `0` 写入生产部署配置。预算数据库属于运行状态，
+不提交、不删除、不重置。多进程可共享
 同一 SQLite 文件；多主机部署前必须提供具有可靠文件锁的共享持久卷，或迁移到等价的共享原子计数服务。
 
 使用直连 DeepSeek 的本地真实评估时，把凭据写入 `widget_service/.env`（已被 Git 忽略），不要写入 Shell
@@ -153,31 +155,27 @@ Action 位置、Theme/Template 联动、整卡 Action 基础组件外壳和 caps
 10/10 `finalReady`、0 fallback、10/10 达到结构阈值；最低组件类型相似度为 0.7727。该结果仍由机械导出的
 Hybrid Source 经过正式 Parser、Registry、Compiler 和 A2UI Adapter 得到，没有以 Golden A2UI 覆盖结果。
 
-当前真实 DeepSeek 最终重分析结果：10/10 原始双阶段协议成功、10/10 `finalReady`、0 fallback、10/10
-达到严格 Golden 阈值。供应商原始 Token 合计 131,828，场景累计时延 929,046ms；该时延是各场景串行
-证据的累计值，不代表生产并发吞吐。逐场结果如下：
+关闭 thinking 并把单阶段最大输出收紧为 8192 后，当前真实 DeepSeek 最终重分析结果：10/10 原始双阶段
+协议成功、10/10 `finalReady`、0 fallback、10/10 达到严格 Golden 阈值。供应商原始 Token 合计
+62,193，场景累计时延 146,616ms；相对旧报告 131,828 Token / 929,046ms，分别下降 52.8% / 84.2%。
+该时延是各场景串行证据的累计值，且 `headset-music` 单场受上游抖动影响占 103,121ms，不代表生产并发
+吞吐。逐场结果如下：
 
 | 场景 | Template | 展开组件 | Token | 时延 ms | 类型/数量/根样式相似度 | 严格对齐 |
 | --- | --- | ---: | ---: | ---: | --- | --- |
-| current-meeting | `ux-meeting-metadata@1` | 17 | 30,701 | 296,212 | 0.8000 / 0.8947 / 0.7778 | pass |
-| headset-music | `ux-audio-device-status@1` | 27 | 5,402 | 5,288 | 0.7857 / 0.8519 / 0.5455 | pass |
-| focus-mode | `ux-calendar-content@1` | 14 | 22,527 | 206,870 | 0.8000 / 0.9286 / 0.7273 | pass |
-| low-power | `ux-battery-status@1` | 18 | 13,188 | 83,252 | 0.8421 / 0.9444 / 0.7000 | pass |
-| sleep | `ux-sleep-metric@1` | 20 | 5,329 | 4,411 | 0.8095 / 0.9000 / 0.7273 | pass |
-| family-care-weather | `ux-weather-hero@1`, `ux-condition-index@1`, `ux-icon-action@1` | 21 | 12,968 | 85,196 | 0.7619 / 0.7619 / 0.6250 | pass |
-| rainy-commute | `ux-weather-hero@1`, `ux-context-summary@1` | 19 | 5,226 | 4,764 | 0.7895 / 0.7895 / 0.6667 | pass |
-| device-clean | `ux-device-metric@1` | 26 | 5,329 | 4,535 | 0.8077 / 0.8077 / 0.7000 | pass |
-| digital-wellbeing | `ux-segmented-limit@1`, `ux-dual-metric@1` | 23 | 15,214 | 115,526 | 0.8333 / 0.9130 / 0.7000 | pass |
-| race-countdown | `ux-countdown@1`, `ux-action-summary@1` | 17 | 15,944 | 122,991 | 0.8235 / 0.8235 / 0.7778 | pass |
+| current-meeting | `ux-meeting-metadata@1` | 17 | 7,037 | 4,369 | 0.8000 / 0.8947 / 0.7778 | pass |
+| headset-music | `ux-audio-device-status@1`, `ux-action-metric@1` | 21 | 6,153 | 103,121 | 0.7600 / 0.9130 / 0.5455 | pass |
+| focus-mode | `ux-calendar-content@1` | 14 | 5,498 | 3,795 | 0.8000 / 0.9286 / 0.7273 | pass |
+| low-power | `ux-battery-status@1` | 18 | 5,495 | 4,848 | 0.8421 / 0.9444 / 0.7000 | pass |
+| sleep | `ux-sleep-metric@1` | 20 | 7,469 | 3,742 | 0.8095 / 0.9000 / 0.7273 | pass |
+| family-care-weather | `ux-weather-hero@1`, `ux-condition-index@1`, `ux-icon-action@1` | 22 | 7,651 | 5,441 | 0.7273 / 0.7273 / 0.6250 | pass |
+| rainy-commute | `ux-weather-hero@1`, `ux-context-summary@1` | 19 | 5,586 | 5,385 | 0.7895 / 0.7895 / 0.6667 | pass |
+| device-clean | `ux-device-metric@1` | 26 | 5,906 | 5,157 | 0.8077 / 0.8077 / 0.7000 | pass |
+| digital-wellbeing | `ux-segmented-limit@1` | 23 | 5,595 | 5,668 | 0.8333 / 0.9130 / 0.7000 | pass |
+| race-countdown | `ux-countdown@1`, `ux-action-summary@1` | 18 | 5,803 | 5,090 | 0.7778 / 0.7778 / 0.7778 | pass |
 
-关闭 thinking 后对历史最慢的 `focus-mode` 做了单场 A/B：请求日志确认发送
-`thinking.type=disabled`、`fallback=false`，但 UI Brief 第一阶段在 120 秒内仍未返回最终 `content`，因此没有
-进入第二阶段，也没有生成可宣称成功的场景报告。旧线程桥接随后继续等待物理流，人工在 336,176ms 中止；
-据此新增了 HTTP 原生异步取消和回归测试。该失败说明此前的高 Token 确实包含大量 reasoning，但本次慢响应
-不能再只归因于 thinking，仍需结合上游服务状态和首字节/流事件观测排查。
-
-最终合并报告的预算快照为 331/400（剩余 69）。预算由并发任务共享，报告不把相邻快照之间的全部增长
-归因于本评估。原始 Prompt/输出报告位于忽略目录并保持 `0600`，不提交。若部署环境未提供 DeepSeek
+最终合并报告的持久计数快照为 428；本轮经明确授权使用无限评估模式，因此 limit/remaining 为 null，生产
+默认仍为 400。原始 Prompt/输出报告位于忽略目录并保持 `0600`，不提交。若部署环境未提供 DeepSeek
 凭据或网络不可达，评估必须保持失败且 `fallback=false`，不得用确定性结果替代真模型结论。预算状态以
 评估报告中的原子预留快照为准，不在版本库文档中持续更新运行时数据库计数。
 

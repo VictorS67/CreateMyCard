@@ -845,13 +845,18 @@ def test_generation_routes_lock_and_isolate_protocol_profiles(monkeypatch):
     assert model_calls[1]["prompt"][0]["content"] == design_prompt
 
 
-def test_websocket_request_context_reaches_deepseek_platform(monkeypatch):
+def test_websocket_request_context_reaches_deepseek_platform(monkeypatch, tmp_path):
     """验证真实 WebSocket 生成链路会把组合 requestId 传入模型日志上下文。"""
     settings = get_settings()
     monkeypatch.setattr(settings, "enable_a2ui_model_mock", False)
     monkeypatch.setattr(settings, "design_compact_model_backend", "openai")
     monkeypatch.setattr(settings, "openai_master_client", "deepseek_platform")
     monkeypatch.setattr(settings, "enable_model_failure_retry", False)
+    monkeypatch.setattr(
+        settings,
+        "deepseek_call_budget_path",
+        str(tmp_path / "deepseek-context-budget.sqlite3"),
+    )
     captured: dict[str, str | None] = {}
 
     async def capture_deepseek_context(_client, _messages, request_context):

@@ -415,7 +415,7 @@ def test_llmclient_settings_are_complete_and_keep_previous_defaults():
     assert settings.deepseek_temperature == 0.7
     assert settings.deepseek_top_p == 0.9
     assert settings.deepseek_top_k == 1
-    assert settings.deepseek_max_tokens == 128_000
+    assert settings.deepseek_max_tokens == 8_192
     assert settings.deepseek_enable_thinking is False
     assert settings.deepseek_include_usage is True
     assert settings.deepseek_debug_usage is True

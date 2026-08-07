@@ -239,6 +239,25 @@ def selection_candidates(task_spec: TaskSpec, registry: CardPlanRegistry) -> dic
                 "supportedSizes": definition.supported_sizes,
                 "compatibleThemeIds": definition.compatible_theme_profile_ids,
                 "actionPolicy": definition.action_policy,
+                "variants": [
+                    {
+                        "size": variant.size,
+                        "requiredParameters": [
+                            {
+                                "name": name,
+                                "description": variant.parameters_schema.get("properties", {})
+                                .get(name, {})
+                                .get("description", ""),
+                                "valueKind": _parameter_value_kind(
+                                    name,
+                                    variant.parameters_schema.get("properties", {}).get(name, {}),
+                                ),
+                            }
+                            for name in variant.parameters_schema.get("required", [])
+                        ],
+                    }
+                    for variant in definition.variants
+                ],
             }
             for definition in templates
         ],
@@ -254,11 +273,14 @@ def _system_prompt(
     for wire_id in requested:
         definition = registry.require_template(wire_id)
         for variant in definition.variants:
+            if not contract.content_action_ids and _variant_requires_action(variant):
+                continue
             properties = variant.parameters_schema.get("properties", {})
             params = {
                 name: {
                     "type": value.get("type", "value"),
                     "description": value.get("description", ""),
+                    "valueKind": _parameter_value_kind(name, value),
                 }
                 for name, value in properties.items()
             }
@@ -468,6 +490,37 @@ def _is_action_or_asset_parameter(name: str) -> bool:
     return any(
         token in normalized
         for token in ("action", "event", "icon", "image", "asset", "source", "src")
+    )
+
+
+def _parameter_value_kind(name: str, schema: dict[str, Any]) -> str:
+    semantic_text = f"{name} {schema.get('description', '')}".casefold()
+    if any(
+        token in semantic_text
+        for token in (
+            "icon",
+            "image",
+            "asset",
+            "source",
+            "src",
+            "图标",
+            "图片",
+            "素材",
+            "资源",
+        )
+    ):
+        return "asset-source"
+    if any(token in semantic_text for token in ("action", "event", "操作", "事件")):
+        return "action-id"
+    return "literal"
+
+
+def _variant_requires_action(variant: Any) -> bool:
+    required = variant.parameters_schema.get("required", [])
+    return any(
+        _parameter_value_kind(name, variant.parameters_schema.get("properties", {}).get(name, {}))
+        == "action-id"
+        for name in required
     )
 
 

@@ -28,6 +28,7 @@ _LAYOUT_ALIASES = {
     ("Column", "card"): "section",
     ("Column", "section-relaxed"): "section",
     ("Column", "metric-stack"): "section",
+    ("Column", "dense"): "compact",
     ("Column", "action-bottom-compact"): "compact",
     ("Row", "icon-control-group"): "between",
     ("Row", "inline"): "between",
@@ -111,9 +112,7 @@ def compile_hybrid_card(
         actual_content_actions.subtract({card_action["id"]: 1})
         actual_content_actions += Counter()
     if actual_content_actions != expected_content_actions:
-        raise TerseDslNested2ConversionError(
-            "Hybrid content Actions do not match the contract."
-        )
+        raise TerseDslNested2ConversionError("Hybrid content Actions do not match the contract.")
     count, depth = _shape(root)
     if count > contract.limits.max_expanded_components:
         raise TerseDslNested2ConversionError("Hybrid expanded component budget exceeded.")
@@ -268,14 +267,10 @@ def _validate_template_params(
             elif isinstance(item, str) and item not in contract.trusted_literals:
                 action_ids = {binding.action_id for binding in contract.action_bindings}
                 if item not in action_ids:
-                    raise TerseDslNested2ConversionError(
-                        f"Template literal is not trusted: {item}"
-                    )
+                    raise TerseDslNested2ConversionError(f"Template literal is not trusted: {item}")
             elif isinstance(item, (int, float)) and not isinstance(item, bool):
                 if item not in contract.trusted_numbers and item not in {0, 1, 100}:
-                    raise TerseDslNested2ConversionError(
-                        f"Template number is not trusted: {item}"
-                    )
+                    raise TerseDslNested2ConversionError(f"Template number is not trusted: {item}")
 
 
 def _primitive_values(value: Any) -> list[Any]:
@@ -333,32 +328,23 @@ def _bind_template_actions(
     values = list(node.values)
     used: list[str] = []
     for index, value in enumerate(values):
-        if not isinstance(value, dict) or "onClick" not in value:
+        if not isinstance(value, dict):
             continue
-        handlers = value["onClick"]
-        if not isinstance(handlers, list) or len(handlers) != 1:
-            raise TerseDslNested2ConversionError("Template Action placeholder is invalid.")
-        handler = handlers[0]
-        args = handler.get("args") if isinstance(handler, dict) else None
-        action_id = args.get("eventName") if isinstance(args, dict) else None
-        if not isinstance(args, dict) or not isinstance(action_id, str):
-            raise TerseDslNested2ConversionError("Template Action ID is invalid.")
-        if set(args) != {"eventName"}:
-            raise TerseDslNested2ConversionError("Template Action ID is invalid.")
-        if handler.get("call") != "sendToAssistant":
-            raise TerseDslNested2ConversionError("Template Action call is not a placeholder.")
+        action_id = _template_action_placeholder(value)
+        if action_id is None:
+            continue
         binding = next(
             (
                 item
                 for item in contract.action_bindings
-                if item.action_id == action_id
-                and item.action_id in contract.content_action_ids
+                if item.action_id == action_id and item.action_id in contract.content_action_ids
             ),
             None,
         )
         if binding is None:
             raise TerseDslNested2ConversionError(f"Template Action is not approved: {action_id}")
         bound = dict(value)
+        bound.pop("action", None)
         bound["onClick"] = [{"call": binding.call, "args": binding.args}]
         values[index] = bound
         used.append(action_id)
@@ -368,6 +354,38 @@ def _bind_template_actions(
         children.append(bound_child)
         used.extend(child_ids)
     return Nested2Node(node.component_type, tuple(values), tuple(children)), tuple(used)
+
+
+def _template_action_placeholder(value: dict[str, Any]) -> str | None:
+    if "onClick" in value:
+        handlers = value["onClick"]
+        if not isinstance(handlers, list) or len(handlers) != 1:
+            raise TerseDslNested2ConversionError("Template Action placeholder is invalid.")
+        handler = handlers[0]
+        args = handler.get("args") if isinstance(handler, dict) else None
+        action_id = args.get("eventName") if isinstance(args, dict) else None
+        if (
+            not isinstance(args, dict)
+            or not isinstance(action_id, str)
+            or set(args) != {"eventName"}
+            or handler.get("call") != "sendToAssistant"
+        ):
+            raise TerseDslNested2ConversionError("Template Action ID is invalid.")
+        return action_id
+    if "action" not in value:
+        return None
+    action = value["action"]
+    event = action.get("event") if isinstance(action, dict) else None
+    action_id = event.get("name") if isinstance(event, dict) else None
+    if (
+        not isinstance(action, dict)
+        or set(action) != {"event"}
+        or not isinstance(event, dict)
+        or set(event) != {"name"}
+        or not isinstance(action_id, str)
+    ):
+        raise TerseDslNested2ConversionError("Template Action ID is invalid.")
+    return action_id
 
 
 def _compile_card_shell(
@@ -397,9 +415,7 @@ def _compile_card_shell(
     children.append(content)
     action = params.get("action")
     if isinstance(action, dict):
-        binding = next(
-            item for item in contract.action_bindings if item.action_id == action["id"]
-        )
+        binding = next(item for item in contract.action_bindings if item.action_id == action["id"])
         event = next(item for item in task_spec.eventCandidates if item.id == binding.action_id)
         options = {
             "width": "100%",

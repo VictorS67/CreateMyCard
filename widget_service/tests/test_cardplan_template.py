@@ -53,10 +53,7 @@ def _sample_schema(value: object) -> object:
 
 
 def _scenario_inputs(scenario: dict) -> tuple[TaskSpec, dict, UIBrief]:
-    data = {
-        item["capabilityId"]: item["dataSlice"]
-        for item in scenario["dataEntries"]
-    }
+    data = {item["capabilityId"]: item["dataSlice"] for item in scenario["dataEntries"]}
     task_spec = TaskSpec(
         userQuery=scenario["userQuery"],
         size=scenario["cardSize"],
@@ -86,9 +83,7 @@ def _scenario_inputs(scenario: dict) -> tuple[TaskSpec, dict, UIBrief]:
         themeSemantics=[scenario["cardTemplate"]["themeProfileId"]],
         layoutSemantics=["compact 2x2"],
         localTemplateIds=[
-            item
-            for item in scenario["cardTemplate"]["requestTemplateIds"]
-            if item != "card@1"
+            item for item in scenario["cardTemplate"]["requestTemplateIds"] if item != "card@1"
         ],
         contentPriorities=["preserve supplied facts"],
         reason="Exercise the Python port against the exported TypeScript baseline.",
@@ -105,9 +100,7 @@ def _compile_scenario(scenario: dict):
         ui_brief=ui_brief,
         registry=registry,
     )
-    profile = A2UIProtocolRegistry.read_design_protocol_profile(
-        TERSE_DSL_NESTED2_PROFILE_ID
-    )
+    profile = A2UIProtocolRegistry.read_design_protocol_profile(TERSE_DSL_NESTED2_PROFILE_ID)
     result = compile_hybrid_card(
         scenario["rawHybridSource"],
         task_spec=task_spec,
@@ -144,9 +137,7 @@ def test_all_ten_cross_language_golden_programs_compile_without_template_leak() 
         result, _task_spec, projection = _compile_scenario(scenario)
         assert result.fallback_used is False
         assert result.stats.template_call_count >= 2
-        assert set(result.stats.template_used_ids) == set(
-            projection.requested_template_ids
-        )
+        assert set(result.stats.template_used_ids) == set(projection.requested_template_ids)
         assert "Template" not in result.effective_output
         assert "Template" not in result.a2ui
         rows = [json.loads(line) for line in result.a2ui.splitlines()]
@@ -169,8 +160,7 @@ def test_all_ten_cross_language_golden_programs_compile_without_template_leak() 
             "Direct events",
         ),
         (
-            'Template("card@1", {}, Column("section", '
-            'Template("missing@1", "small", {})));',
+            'Template("card@1", {}, Column("section", Template("missing@1", "small", {})));',
             "not allowed",
         ),
     ],
@@ -178,9 +168,7 @@ def test_all_ten_cross_language_golden_programs_compile_without_template_leak() 
 def test_illegal_hybrid_inputs_fail_closed(source: str, message: str) -> None:
     scenario = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))["scenarios"][0]
     _result, task_spec, projection = _compile_scenario(scenario)
-    profile = A2UIProtocolRegistry.read_design_protocol_profile(
-        TERSE_DSL_NESTED2_PROFILE_ID
-    )
+    profile = A2UIProtocolRegistry.read_design_protocol_profile(TERSE_DSL_NESTED2_PROFILE_ID)
     with pytest.raises(TerseDslNested2ConversionError, match=message):
         compile_hybrid_card(
             source,
@@ -194,9 +182,7 @@ def test_illegal_hybrid_inputs_fail_closed(source: str, message: str) -> None:
 def test_template_schema_and_asset_validation_fail_closed() -> None:
     scenario = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))["scenarios"][0]
     _result, task_spec, projection = _compile_scenario(scenario)
-    profile = A2UIProtocolRegistry.read_design_protocol_profile(
-        TERSE_DSL_NESTED2_PROFILE_ID
-    )
+    profile = A2UIProtocolRegistry.read_design_protocol_profile(TERSE_DSL_NESTED2_PROFILE_ID)
     invalid = scenario["rawHybridSource"].replace(
         '"resources/base/media/ux_golden_asset_time_beige.svg"',
         '"resources/base/media/unapproved.svg"',
@@ -243,10 +229,7 @@ def test_stream_framer_accepts_random_chunks_and_rejects_partial_or_crossed() ->
 
 
 def test_parser_accepts_safe_model_child_array_variant() -> None:
-    source = (
-        'Template("card@1", {}, Column({layout: "section"}, '
-        '[Text("事实", "body")]));'
-    )
+    source = 'Template("card@1", {}, Column({layout: "section"}, [Text("事实", "body")]));'
     parsed = parse_hybrid_card(source)
     content = parsed.children[0]
     assert content.values == ({"layout": "section"},)
@@ -259,6 +242,8 @@ def test_hybrid_prompt_exposes_template_parameter_json_types() -> None:
     system_prompt = projection.messages[0]["content"]
     assert '"type": "string"' in system_prompt
     assert "看起来像数字的 string 仍需加引号" in system_prompt
+    assert 'Text 严格写成 Text("可见文字", "designToken")' in system_prompt
+    assert "禁止写成 action: { action: {...} }" in system_prompt
 
 
 def test_action_placement_splits_card_and_content_actions() -> None:
@@ -269,9 +254,7 @@ def test_action_placement_splits_card_and_content_actions() -> None:
     assert '"contentActionCandidates"' in projection.messages[1]["content"]
     assert "Button(" not in result.effective_output
 
-    profile = A2UIProtocolRegistry.read_design_protocol_profile(
-        TERSE_DSL_NESTED2_PROFILE_ID
-    )
+    profile = A2UIProtocolRegistry.read_design_protocol_profile(TERSE_DSL_NESTED2_PROFILE_ID)
     invalid = family["rawHybridSource"].replace(
         'Template("card@1", {},',
         'Template("card@1", {action: {label: "拨打电话", id: "event.call.phone"}},',
@@ -322,11 +305,51 @@ def test_theme_template_reconciliation_and_chinese_phrase_ranking() -> None:
     assert projection.theme_id == "race-night-violet"
 
 
+def test_redundant_generic_action_template_returns_action_to_card_shell() -> None:
+    payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+    focus = next(item for item in payload["scenarios"] if item["id"] == "focus-mode")
+    task_spec, card_spec, brief = _scenario_inputs(focus)
+    brief = brief.model_copy(
+        update={
+            "local_template_ids": ["ux-calendar-content@1", "status-action@1"],
+            "action_placement": "content",
+        }
+    )
+    projection = build_hybrid_prompt(
+        task_spec=task_spec,
+        card_spec=card_spec,
+        ui_brief=brief,
+        registry=get_cardplan_registry(),
+    )
+    assert projection.requested_template_ids == ("ux-calendar-content@1",)
+    assert projection.contract.content_action_ids == ()
+    assert '"cardActionCandidates"' in projection.messages[1]["content"]
+
+
+def test_action_only_brief_adds_theme_content_and_prunes_generic_action() -> None:
+    payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+    low_power = next(item for item in payload["scenarios"] if item["id"] == "low-power")
+    task_spec, card_spec, brief = _scenario_inputs(low_power)
+    brief = brief.model_copy(
+        update={
+            "local_template_ids": ["status-action@1"],
+            "action_placement": "content",
+        }
+    )
+    projection = build_hybrid_prompt(
+        task_spec=task_spec,
+        card_spec=card_spec,
+        ui_brief=brief,
+        registry=get_cardplan_registry(),
+    )
+    assert projection.requested_template_ids == ("ux-battery-status@1",)
+    assert projection.contract.content_action_ids == ()
+    assert '"cardActionCandidates"' in projection.messages[1]["content"]
+
+
 def test_card_action_and_capsule_progress_lower_to_basic_projection() -> None:
     payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
-    digital = next(
-        item for item in payload["scenarios"] if item["id"] == "digital-wellbeing"
-    )
+    digital = next(item for item in payload["scenarios"] if item["id"] == "digital-wellbeing")
     result, _task_spec, _projection = _compile_scenario(digital)
     assert "Progress(" not in result.effective_output
     assert "Button(" not in result.effective_output
@@ -334,8 +357,63 @@ def test_card_action_and_capsule_progress_lower_to_basic_projection() -> None:
     assert 'Text(" "' in result.effective_output
 
 
+def test_status_action_template_binds_trusted_event_alias() -> None:
+    payload = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+    focus = next(item for item in payload["scenarios"] if item["id"] == "focus-mode")
+    task_spec, card_spec, brief = _scenario_inputs(focus)
+    brief = brief.model_copy(
+        update={
+            "local_template_ids": ["ux-calendar-content@1", "status-action@1"],
+            "action_placement": "content",
+        }
+    )
+    registry = get_cardplan_registry()
+    projection = build_hybrid_prompt(
+        task_spec=task_spec,
+        card_spec=card_spec,
+        ui_brief=brief,
+        registry=registry,
+    )
+    source = (
+        'Template("card@1", {title: "下一个日程", '
+        'titleIcon: "resources/base/media/icon_schedule.svg"}, Column("compact", '
+        'Template("ux-calendar-content@1", "small", '
+        '{title: "Agent需求评审会", time: "14:00–15:30"}), '
+        'Template("status-action@1", "medium", {status: "还有15分钟开启", '
+        'actionLabel: "专注模式", actionId: "event.open.settings.dnd"})));'
+    )
+    profile = A2UIProtocolRegistry.read_design_protocol_profile(TERSE_DSL_NESTED2_PROFILE_ID)
+    compiler_contract = projection.contract.model_copy(
+        update={
+            "allowed_template_ids": (
+                "ux-calendar-content@1",
+                "status-action@1",
+            ),
+            "allowed_design_tokens": (
+                *projection.contract.allowed_design_tokens,
+                "body",
+                "action-frosted",
+            ),
+            "allowed_layout_tokens": (
+                *projection.contract.allowed_layout_tokens,
+                "action-bottom-compact",
+            ),
+            "content_action_ids": ("event.open.settings.dnd",),
+        }
+    )
+    result = compile_hybrid_card(
+        source,
+        task_spec=task_spec,
+        contract=compiler_contract,
+        protocol_profile=profile,
+        registry=registry,
+    )
+    assert result.stats.action_used_ids == ("event.open.settings.dnd",)
+    assert "Template" not in result.a2ui
+
+
 @pytest.mark.asyncio
-async def test_content_action_placement_requires_action_template() -> None:
+async def test_content_action_placement_without_action_template_normalizes_to_card() -> None:
     scenario = json.loads(GOLDEN_FIXTURE.read_text(encoding="utf-8"))["scenarios"][0]
     task_spec, _card_spec, _brief = _scenario_inputs(scenario)
 
@@ -351,20 +429,19 @@ async def test_content_action_placement_requires_action_template() -> None:
             "reason": "content action",
         }
 
-    with pytest.raises(ValueError, match="requires an Action Template"):
-        await plan_ui_with_llm(task_spec, DataShape(action_count=1), invalid_brief)
+    brief = await plan_ui_with_llm(task_spec, DataShape(action_count=1), invalid_brief)
+    assert brief.action_placement == "card"
 
 
 def test_ts_layout_design_and_card_icon_aliases_lower_to_existing_adapter() -> None:
     assert _normalize_component_values("Column", ("metric-stack",)) == ("section",)
+    assert _normalize_component_values("Column", ("dense",)) == ("compact",)
     assert _normalize_component_values("Row", ("compact",)) == ("between",)
     assert _normalize_component_values("Text", ("42", "metric-hero")) == (
         "42",
         "title",
     )
-    assert _normalize_card_params({"icon": "asset.svg"}) == {
-        "titleIcon": "asset.svg"
-    }
+    assert _normalize_card_params({"icon": "asset.svg"}) == {"titleIcon": "asset.svg"}
     with pytest.raises(TerseDslNested2ConversionError, match="icon and titleIcon"):
         _normalize_card_params({"icon": "a.svg", "titleIcon": "b.svg"})
 
@@ -383,6 +460,13 @@ def test_budget_is_atomic_across_threads_and_enforces_exact_hard_limit(tmp_path:
     assert capped.reserve("deepseek_platform").used == 400
     with pytest.raises(DeepSeekCallBudgetExceeded, match="used=400"):
         capped.reserve("deepseek_platform")
+
+
+def test_settings_parse_env_budget_but_reject_limit_override() -> None:
+    settings = Settings(_env_file=None, deepseek_call_budget_limit="400")  # type: ignore[arg-type]
+    assert settings.deepseek_call_budget_limit == 400
+    with pytest.raises(ValueError, match="must remain exactly 400"):
+        Settings(_env_file=None, deepseek_call_budget_limit=401)
 
 
 @pytest.mark.asyncio

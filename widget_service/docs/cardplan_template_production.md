@@ -74,8 +74,21 @@ WIDGET_SERVICE_DEEPSEEK_CALL_BUDGET_LIMIT=400
 WIDGET_SERVICE_DEEPSEEK_CALL_BUDGET_PATH=workspace/runtime/deepseek_call_budget.sqlite3
 ```
 
-上限类型固定为 `Literal[400]`，不能调高。预算数据库属于运行状态，不提交、不删除、不重置。多进程可共享
+配置值由 Pydantic 转为整数后再由 `field_validator` 强制等于 `400`，因此 `.env` 中的字符串形式可正常
+加载，但不能调高或调低。预算数据库属于运行状态，不提交、不删除、不重置。多进程可共享
 同一 SQLite 文件；多主机部署前必须提供具有可靠文件锁的共享持久卷，或迁移到等价的共享原子计数服务。
+
+使用直连 DeepSeek 的本地真实评估时，把凭据写入 `widget_service/.env`（已被 Git 忽略），不要写入 Shell
+历史、测试 Fixture、报告或提交：
+
+```dotenv
+WIDGET_SERVICE_OPENAI_MASTER_CLIENT=llmclient
+WIDGET_SERVICE_OPENAI_FALLBACK_CLIENT=deepseek_platform
+WIDGET_SERVICE_ENABLE_OPENAI_FALLBACK=false
+WIDGET_SERVICE_DEEPSEEK_API_KEY=替换为本地密钥
+WIDGET_SERVICE_DEEPSEEK_API_URL=https://api.deepseek.com
+WIDGET_SERVICE_DEEPSEEK_MODEL=deepseek-v4-flash
+```
 
 ## 生成物和 SHA 门禁
 
@@ -133,15 +146,27 @@ Action 位置、Theme/Template 联动、整卡 Action 基础组件外壳和 caps
 10/10 `finalReady`、0 fallback、10/10 达到结构阈值；最低组件类型相似度为 0.7727。该结果仍由机械导出的
 Hybrid Source 经过正式 Parser、Registry、Compiler 和 A2UI Adapter 得到，没有以 Golden A2UI 覆盖结果。
 
-当前真实 DeepSeek 最终重分析结果：10/10 原始双阶段协议成功、10/10 `finalReady`、0 fallback，供应商
-原始 Token 合计 53,326，场景累计时延 56,224ms，6/10 达到严格 Golden 阈值。`focus-mode`、
-`family-care-weather`、`digital-wellbeing` 仅组件类型相似度低于 0.7；`race-countdown` 还存在根样式相似度
-低于 0.25。四个场景均无文案或 Action 缺失。最终证据对应预算区间 89→113；报告位于忽略目录，不提交
-原始业务 Prompt/输出。
+当前真实 DeepSeek 最终重分析结果：10/10 原始双阶段协议成功、10/10 `finalReady`、0 fallback、10/10
+达到严格 Golden 阈值。供应商原始 Token 合计 131,828，场景累计时延 929,046ms；该时延是各场景串行
+证据的累计值，不代表生产并发吞吐。逐场结果如下：
 
-上述真实结果是本轮结构优化前的完整证据。优化后的四场景定向复评必须重新执行两阶段真实调用；若部署
-环境未提供 DeepSeek 凭据或网络不可达，评估必须保持失败且 `fallback=false`，不得用确定性结果替代真模型
-结论。预算状态以评估报告中的原子预留快照为准，不在版本库文档中持续更新运行时数据库计数。
+| 场景 | Template | 展开组件 | Token | 时延 ms | 类型/数量/根样式相似度 | 严格对齐 |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| current-meeting | `ux-meeting-metadata@1` | 17 | 30,701 | 296,212 | 0.8000 / 0.8947 / 0.7778 | pass |
+| headset-music | `ux-audio-device-status@1` | 27 | 5,402 | 5,288 | 0.7857 / 0.8519 / 0.5455 | pass |
+| focus-mode | `ux-calendar-content@1` | 14 | 22,527 | 206,870 | 0.8000 / 0.9286 / 0.7273 | pass |
+| low-power | `ux-battery-status@1` | 18 | 13,188 | 83,252 | 0.8421 / 0.9444 / 0.7000 | pass |
+| sleep | `ux-sleep-metric@1` | 20 | 5,329 | 4,411 | 0.8095 / 0.9000 / 0.7273 | pass |
+| family-care-weather | `ux-weather-hero@1`, `ux-condition-index@1`, `ux-icon-action@1` | 21 | 12,968 | 85,196 | 0.7619 / 0.7619 / 0.6250 | pass |
+| rainy-commute | `ux-weather-hero@1`, `ux-context-summary@1` | 19 | 5,226 | 4,764 | 0.7895 / 0.7895 / 0.6667 | pass |
+| device-clean | `ux-device-metric@1` | 26 | 5,329 | 4,535 | 0.8077 / 0.8077 / 0.7000 | pass |
+| digital-wellbeing | `ux-segmented-limit@1`, `ux-dual-metric@1` | 23 | 15,214 | 115,526 | 0.8333 / 0.9130 / 0.7000 | pass |
+| race-countdown | `ux-countdown@1`, `ux-action-summary@1` | 17 | 15,944 | 122,991 | 0.8235 / 0.8235 / 0.7778 | pass |
+
+最终合并报告的预算快照为 331/400（剩余 69）。预算由并发任务共享，报告不把相邻快照之间的全部增长
+归因于本评估。原始 Prompt/输出报告位于忽略目录并保持 `0600`，不提交。若部署环境未提供 DeepSeek
+凭据或网络不可达，评估必须保持失败且 `fallback=false`，不得用确定性结果替代真模型结论。预算状态以
+评估报告中的原子预留快照为准，不在版本库文档中持续更新运行时数据库计数。
 
 ## 上线、观测与回滚
 

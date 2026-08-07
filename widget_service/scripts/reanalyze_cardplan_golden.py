@@ -72,6 +72,10 @@ def _reanalyze_scene(
             modelRawProtocolSuccess=False,
             finalReady=False,
             fallback=False,
+            goldenAlignment=_failed_alignment(
+                evidence.get("goldenAlignment"),
+                "Expected exactly two saved model calls.",
+            ),
             failureReason="Expected exactly two saved model calls.",
         )
         return result
@@ -86,9 +90,7 @@ def _reanalyze_scene(
             ui_brief=brief,
             registry=registry,
         )
-        profile = A2UIProtocolRegistry.read_design_protocol_profile(
-            TERSE_DSL_NESTED2_PROFILE_ID
-        )
+        profile = A2UIProtocolRegistry.read_design_protocol_profile(TERSE_DSL_NESTED2_PROFILE_ID)
         compilation = compile_hybrid_card(
             calls[1]["raw_output"],
             task_spec=task_spec,
@@ -113,9 +115,7 @@ def _reanalyze_scene(
             candidateTemplates=list(projection.requested_template_ids),
             wholeCardConfidence=selection.confidence if selection else 0.0,
             wholeCardCandidates=(
-                [item.model_dump(mode="json") for item in selection.candidates]
-                if selection
-                else []
+                [item.model_dump(mode="json") for item in selection.candidates] if selection else []
             ),
             confidenceBypassed=True,
             route="hybrid-template",
@@ -134,14 +134,14 @@ def _reanalyze_scene(
             },
             tokens=_aggregate_usage(calls),
             latencyMs=round(
-                float(evidence.get("latencyMs", 0))
-                + (time.perf_counter() - started) * 1000,
+                float(evidence.get("latencyMs", 0)) + (time.perf_counter() - started) * 1000,
                 2,
             ),
             goldenAlignment=_alignment(actual, fixture["goldenSummary"]),
             failureReason="",
         )
     except Exception as exc:
+        failure_reason = f"{type(exc).__name__}: {exc}"
         if calls:
             calls[0]["protocol_success"] = bool(calls[0].get("raw_output", "").strip())
         if len(calls) > 1:
@@ -151,9 +151,17 @@ def _reanalyze_scene(
             modelRawProtocolSuccess=False,
             finalReady=False,
             fallback=False,
-            failureReason=f"{type(exc).__name__}: {exc}",
+            goldenAlignment=_failed_alignment(evidence.get("goldenAlignment"), failure_reason),
+            failureReason=failure_reason,
         )
     return result
+
+
+def _failed_alignment(existing: Any, reason: str) -> dict[str, Any]:
+    alignment = dict(existing) if isinstance(existing, dict) else {}
+    alignment["passed"] = False
+    alignment["failureReasons"] = [reason]
+    return alignment
 
 
 def main() -> int:
@@ -163,15 +171,13 @@ def main() -> int:
     args = parser.parse_args()
     evidence, reports = _sources(args.input)
     fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-    results = [
-        _reanalyze_scene(scene, evidence[scene["id"]])
-        for scene in fixture["scenarios"]
-    ]
+    results = [_reanalyze_scene(scene, evidence[scene["id"]]) for scene in fixture["scenarios"]]
     settings = get_settings()
     budget = DeepSeekCallBudget(
         settings.resolved_deepseek_call_budget_path,
         settings.deepseek_call_budget_limit,
     )
+    summary = _summary(results)
     report = {
         "schemaVersion": "cardplan-template-python-evaluation/1",
         "mode": "live-reanalysis",
@@ -180,7 +186,7 @@ def main() -> int:
         "fallbackRequired": False,
         "budgetBefore": reports[0].get("budgetBefore"),
         "budgetAfter": asdict(budget.status()),
-        "summary": _summary(results),
+        "summary": summary,
         "scenarios": results,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -189,9 +195,9 @@ def main() -> int:
         encoding="utf-8",
     )
     os.chmod(args.output, 0o600)
-    print(json.dumps({"output": str(args.output), "summary": report["summary"]}))
-    passed = report["summary"]["finalReadyCount"] == len(results)
-    no_fallback = report["summary"]["fallbackCount"] == 0
+    print(json.dumps({"output": str(args.output), "summary": summary}))
+    passed = summary["finalReadyCount"] == len(results)
+    no_fallback = summary["fallbackCount"] == 0
     return 0 if passed and no_fallback else 1
 
 

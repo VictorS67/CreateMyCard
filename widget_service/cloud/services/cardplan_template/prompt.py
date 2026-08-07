@@ -105,10 +105,7 @@ def build_hybrid_prompt(
         [
             *_PLAIN_LAYOUTS,
             *(token for item in selected_definitions for token in item.allowed_layout_tokens),
-            *(
-                item.recommended_container_layout_token or ""
-                for item in selected_definitions
-            ),
+            *(item.recommended_container_layout_token or "" for item in selected_definitions),
             *(
                 item.recommended_variant_layout.inline_layout_token
                 for item in selected_definitions
@@ -190,9 +187,7 @@ def build_hybrid_prompt(
             else {}
         ),
         "cardParamsPolicy": (
-            "independent-chrome-without-action"
-            if content_action_ids
-            else "candidate-chrome"
+            "independent-chrome-without-action" if content_action_ids else "candidate-chrome"
         ),
     }
     user = "\n".join(
@@ -305,12 +300,18 @@ def _system_prompt(
             "",
             "标准组件投影：Text/Image/Button 使用批准 DesignToken；"
             "Column/Row/List/Stack 使用批准 LayoutToken；Progress 使用字面量对象。",
+            "基础容器的规范组合为 Column(section|compact)、Row(between|actions)、"
+            "List(list|dense)、Stack(overlay)；Registry 展开的专用别名由服务端静态归一化。",
+            'Text 严格写成 Text("可见文字", "designToken")，可见文字在前、DesignToken '
+            "在后，禁止交换两个位置。",
             '容器严格写成 Column("layoutToken", child1, child2)；不要把 layoutToken '
             "包装成对象，不要用数组包装 children。",
             "Template 参数必须逐项遵守签名中的 JSON type；看起来像数字的 string 仍需加引号。",
             'Card 外壳必须是 Template("card@1", cardParams, content)。',
             "cardParams 只允许 title、subtitle、titleIcon、action；禁止 icon 等别名。"
             "title/subtitle 必须逐字来自候选或 dataFacts，否则省略。",
+            '整卡 Action 直接写成 action: { label: "批准文案", id: "批准ID" }；'
+            "禁止写成 action: { action: {...} } 或增加任何包装层。",
             "素材 src 只能填入参数名或描述明确表示 icon/image/asset/source/src 的字段；"
             "symbol、文字、标签和数值字段禁止使用素材。",
             f"允许 DesignToken={json.dumps(contract.allowed_design_tokens)}",
@@ -334,9 +335,7 @@ def _resolve_theme(task_spec: TaskSpec, ui_brief: Any, registry: CardPlanRegistr
         for item in (getattr(ui_brief, "local_template_ids", []) or [])
         if item in registry.templates
     ]
-    themed_templates = [
-        item for item in requested_templates if item.compatible_theme_profile_ids
-    ]
+    themed_templates = [item for item in requested_templates if item.compatible_theme_profile_ids]
     if themed_templates:
         support = {
             theme_id: sum(
@@ -348,9 +347,7 @@ def _resolve_theme(task_spec: TaskSpec, ui_brief: Any, registry: CardPlanRegistr
         best_support = max(support.values(), default=0)
         requested_support = support.get(requested, 0) if isinstance(requested, str) else 0
         if best_support > requested_support:
-            return min(
-                theme_id for theme_id, score in support.items() if score == best_support
-            )
+            return min(theme_id for theme_id, score in support.items() if score == best_support)
     if isinstance(requested, str) and requested in registry.themes:
         return requested
     text = _semantic_text(task_spec, ui_brief)
@@ -387,7 +384,91 @@ def _resolve_templates(
                 allowed.append(definition.wire_id)
             if len(allowed) >= 6:
                 break
-    return tuple(dict.fromkeys(allowed))
+    resolved = tuple(dict.fromkeys(allowed))
+    resolved = _supplement_action_only_templates(
+        resolved,
+        task_spec=task_spec,
+        ui_brief=ui_brief,
+        theme_id=theme_id,
+        registry=registry,
+    )
+    return _prune_redundant_action_templates(resolved, registry)
+
+
+def _supplement_action_only_templates(
+    requested: tuple[str, ...],
+    *,
+    task_spec: TaskSpec,
+    ui_brief: Any,
+    theme_id: str,
+    registry: CardPlanRegistry,
+) -> tuple[str, ...]:
+    if not requested:
+        return requested
+    definitions = [registry.require_template(item) for item in requested]
+    if any(definition.action_policy == "none" for definition in definitions):
+        return requested
+    text = _semantic_text(task_spec, ui_brief)
+    supplement = next(
+        (
+            definition.wire_id
+            for definition in _ranked_templates(text, registry)
+            if definition.action_policy == "none"
+            and theme_id in definition.compatible_theme_profile_ids
+        ),
+        None,
+    )
+    return (*requested, supplement) if supplement is not None else requested
+
+
+def _prune_redundant_action_templates(
+    requested: tuple[str, ...],
+    registry: CardPlanRegistry,
+) -> tuple[str, ...]:
+    definitions = [registry.require_template(item) for item in requested]
+    covered_content_parameters = {
+        name.casefold()
+        for definition in definitions
+        if definition.action_policy == "none"
+        for variant in definition.variants
+        for name in variant.parameters_schema.get("required", [])
+        if isinstance(name, str)
+    }
+    covered_domain_tags = {
+        tag.casefold()
+        for definition in definitions
+        if definition.action_policy == "none"
+        for tag in definition.domain_tags
+    }
+    retained: list[str] = []
+    for definition in definitions:
+        if definition.action_policy == "none" or definition.compatible_theme_profile_ids:
+            retained.append(definition.wire_id)
+            continue
+        semantic_parameters = {
+            name.casefold()
+            for variant in definition.variants
+            for name in variant.parameters_schema.get("required", [])
+            if isinstance(name, str) and not _is_action_or_asset_parameter(name)
+        }
+        semantic_tags = {
+            tag.casefold() for tag in definition.domain_tags if tag.casefold() != "action"
+        }
+        content_is_covered = (
+            semantic_parameters and semantic_parameters <= covered_content_parameters
+        ) or (semantic_tags and semantic_tags <= covered_domain_tags)
+        if content_is_covered:
+            continue
+        retained.append(definition.wire_id)
+    return tuple(retained)
+
+
+def _is_action_or_asset_parameter(name: str) -> bool:
+    normalized = name.casefold()
+    return any(
+        token in normalized
+        for token in ("action", "event", "icon", "image", "asset", "source", "src")
+    )
 
 
 def _ranked_templates(text: str, registry: CardPlanRegistry):
@@ -435,10 +516,8 @@ def _resolve_content_action_ids(
     placement = getattr(ui_brief, "action_placement", "auto")
     if placement in {"card", "none"}:
         return ()
-    has_action_template = any(
-        definition.action_policy != "none" for definition in definitions
-    )
-    if placement == "content" or (placement == "auto" and has_action_template):
+    has_action_template = any(definition.action_policy != "none" for definition in definitions)
+    if has_action_template and placement in {"content", "auto"}:
         return tuple(action.action_id for action in actions)
     return ()
 

@@ -44,7 +44,8 @@ def build_ui_planner_prompt(
                 "局部 Template 是可选能力，不适合时输出空列表。选择 Theme 时优先保证它与"
                 "所选局部 Template 的 compatibleThemeIds 一致。actionPlacement 只表达 Action "
                 "属于整卡主操作(card)、某个内容摘要/图标控制(content)、无操作(none)，不确定"
-                "时用 auto；不得借此输出具体组件。\n"
+                "时用 auto；选择 content 时 localTemplateIds 必须包含 actionPolicy 非 none 的"
+                "Template，否则选择 card；不得借此输出具体组件。\n"
                 + json.dumps(UIBrief.model_json_schema(by_alias=True), ensure_ascii=False)
             ),
         },
@@ -74,7 +75,9 @@ async def plan_ui_with_llm(
     if brief.action_placement == "content":
         definitions = [registry.require_template(item) for item in brief.local_template_ids]
         if not any(item.action_policy != "none" for item in definitions):
-            raise ValueError("content actionPlacement requires an Action Template")
+            brief = brief.model_copy(
+                update={"action_placement": "card" if data_shape.action_count else "none"}
+            )
     return brief
 
 

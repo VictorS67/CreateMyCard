@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,9 +20,7 @@ class Settings(BaseSettings):
     enable_sensitive_log_fields: bool = True
     capability_registry_version: str = "app-11.7.5.205_rom-6.0"
     enable_default_capability_registry_fallback: bool = True
-    ids_installation_filter_package_names: tuple[str, ...] = (
-        "com.huawei.hmos.health.core",
-    )
+    ids_installation_filter_package_names: tuple[str, ...] = ("com.huawei.hmos.health.core",)
     protocol_profile_id: str = "a2ui-form-rom6.0-v1"
     design_compact_profile_id: str = "design-compact-dsl"
     enable_default_protocol_profile_fallback: bool = True
@@ -72,8 +70,16 @@ class Settings(BaseSettings):
     deepseek_include_usage: bool = True
     deepseek_debug_usage: bool = True
     deepseek_recv_timeout: int = Field(default=120, ge=1)
-    deepseek_call_budget_limit: Literal[400] = 400
+    deepseek_call_budget_limit: int = 400
     deepseek_call_budget_path: str = "workspace/runtime/deepseek_call_budget.sqlite3"
+
+    @field_validator("deepseek_call_budget_limit")
+    @classmethod
+    def enforce_deepseek_call_budget_limit(cls, value: int) -> int:
+        if value != 400:
+            raise ValueError("deepseek_call_budget_limit must remain exactly 400")
+        return value
+
     system_prompt_file: str = "docs/system_prompt.txt"
     edit_system_prompt_file: str = "docs/edit_system_prompt.txt"
     repair_system_prompt_file: str = "docs/repair_system_prompt.txt"
@@ -219,6 +225,7 @@ def get_settings() -> Settings:
     出参：缓存后的 Settings 对象。
     """
     return Settings()
+
 
 class LoggingConfig:
     PROJECT_ROOT = get_settings().PROJECT_ROOT

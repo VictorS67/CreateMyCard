@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from config.config import get_settings
+from services.advanced_component_pipeline.models import (
+    AdaptiveTemplateFamily,
+    AdvancedComponentCapability,
+    CardSizeContentBudget,
+)
 
 from .models import TemplateDefinition, TemplateVariant, ThemeDefinition
 
@@ -22,15 +27,14 @@ class CardPlanRegistry:
 
     def __init__(self, source_root: Path | None = None) -> None:
         settings = get_settings()
-        self.source_root = source_root or (
-            settings.data_root / "cardplan_template" / "source"
-        )
+        self.source_root = source_root or (settings.data_root / "cardplan_template" / "source")
         generated_root = Path(__file__).with_name("generated")
         self.manifest_path = generated_root / "prompt-manifest.json"
         self.manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         self._verify_manifest()
         template_payload = self._load_json("template-registry.json")
         theme_payload = self._load_json("theme-profiles.json")
+        advanced_payload = self._load_json("advanced-component-registry.json")
         if template_payload.get("registryVersion") != "terse-template-registry/0.7":
             raise ValueError("unsupported CardPlan Template Registry version")
         templates = tuple(
@@ -42,6 +46,29 @@ class CardPlanRegistry:
         )
         self.templates = self._unique_by_wire_id(templates)
         self.themes = self._unique_themes(themes)
+        advanced_version = "advanced-component-registry/1"
+        if self.manifest.get("advancedComponentRegistryVersion") != advanced_version:
+            raise ValueError("Advanced Component Manifest version mismatch")
+        if advanced_payload.get("registryVersion") != advanced_version:
+            raise ValueError("unsupported Advanced Component Registry version")
+        components = tuple(
+            AdvancedComponentCapability.model_validate(item)
+            for item in advanced_payload.get("components", [])
+        )
+        adaptive_templates = tuple(
+            AdaptiveTemplateFamily.model_validate(item)
+            for item in advanced_payload.get("adaptiveTemplates", [])
+        )
+        size_budgets = tuple(
+            CardSizeContentBudget.model_validate(item)
+            for item in advanced_payload.get("sizeBudgets", [])
+        )
+        self.advanced_registry_version = str(advanced_payload["registryVersion"])
+        self.advanced_components = self._unique_by_name(components, "Advanced Component")
+        self.adaptive_templates = self._unique_by_template_id(adaptive_templates)
+        self.size_budgets = {item.size: item for item in size_budgets}
+        self.domain_groups = self._domain_groups(advanced_payload.get("domainGroups"))
+        self._validate_advanced_registry()
 
     def _load_json(self, relative_path: str) -> dict[str, Any]:
         value = json.loads((self.source_root / relative_path).read_text(encoding="utf-8"))
@@ -122,6 +149,77 @@ class CardPlanRegistry:
             return self.themes[theme_id]
         except KeyError as exc:
             raise ValueError(f"unknown CardPlan theme: {theme_id}") from exc
+
+    @staticmethod
+    def _unique_by_name(
+        values: tuple[AdvancedComponentCapability, ...],
+        label: str,
+    ) -> dict[str, AdvancedComponentCapability]:
+        result: dict[str, AdvancedComponentCapability] = {}
+        for value in values:
+            if value.name in result:
+                raise ValueError(f"duplicate {label}: {value.name}")
+            result[value.name] = value
+        return result
+
+    @staticmethod
+    def _unique_by_template_id(
+        values: tuple[AdaptiveTemplateFamily, ...],
+    ) -> dict[str, AdaptiveTemplateFamily]:
+        result: dict[str, AdaptiveTemplateFamily] = {}
+        for value in values:
+            if value.template_id in result:
+                raise ValueError(f"duplicate Adaptive Template: {value.template_id}")
+            result[value.template_id] = value
+        return result
+
+    @staticmethod
+    def _domain_groups(value: Any) -> dict[str, tuple[str, ...]]:
+        if not isinstance(value, dict):
+            raise ValueError("Advanced Component domainGroups must be an object")
+        result: dict[str, tuple[str, ...]] = {}
+        for group_id, domains in value.items():
+            if not isinstance(group_id, str) or not isinstance(domains, list):
+                raise ValueError("invalid Advanced Component domain group")
+            if any(not isinstance(domain, str) for domain in domains):
+                raise ValueError("invalid Advanced Component domain")
+            result[group_id] = tuple(domains)
+        return result
+
+    def _validate_advanced_registry(self) -> None:
+        if set(self.size_budgets) != {"2x2", "2x4"}:
+            raise ValueError("Advanced Component size budgets are incomplete")
+        domain_ids: set[str] = set()
+        for capability in self.advanced_components.values():
+            if capability.domain_id in domain_ids:
+                raise ValueError(f"duplicate Advanced Component domain: {capability.domain_id}")
+            domain_ids.add(capability.domain_id)
+            if not capability.local_template_ids:
+                raise ValueError(f"Advanced Component has no Template: {capability.name}")
+            field_groups = capability.field_priorities
+            if not field_groups.get("mustShow"):
+                raise ValueError(f"Advanced Component has no mustShow field: {capability.name}")
+            flattened = [field for group in field_groups.values() for field in group]
+            if len(flattened) != len(set(flattened)):
+                raise ValueError(f"Advanced Component field priorities overlap: {capability.name}")
+            for wire_id in capability.local_template_ids:
+                self.require_template(wire_id)
+        known_domains = {domain for domains in self.domain_groups.values() for domain in domains}
+        if not domain_ids.issubset(known_domains):
+            missing = sorted(domain_ids - known_domains)
+            raise ValueError(f"Advanced Component domains have no composition group: {missing}")
+
+    def require_advanced_component(self, component_id: str) -> AdvancedComponentCapability:
+        try:
+            return self.advanced_components[component_id]
+        except KeyError as exc:
+            raise ValueError(f"unknown Advanced Component: {component_id}") from exc
+
+    def require_adaptive_template(self, template_id: str) -> AdaptiveTemplateFamily:
+        try:
+            return self.adaptive_templates[template_id]
+        except KeyError as exc:
+            raise ValueError(f"unknown Adaptive Template: {template_id}") from exc
 
 
 @lru_cache(maxsize=1)

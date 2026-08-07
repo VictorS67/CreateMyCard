@@ -19,6 +19,7 @@ edit 路径保持既有完整 Design Token 编辑协议。模型 mock 下的旧�
 | --- | --- |
 | card-plan-template 模型和 Contract | `cloud/services/cardplan_template/models.py` |
 | terse-template-registry | `registry.py` 和 `cloud/data/cardplan_template/source` |
+| advanced-component-registry | `advanced_component_pipeline/composition.py` 和机械导出的 `advanced-component-registry.json` |
 | hybrid-fragment / Nested-2 Parser | `parser.py`、`framer.py` |
 | template-expander / composition | `compiler.py` |
 | prompt-runtime | `prompt.py`、`generated/prompts.py` |
@@ -27,6 +28,21 @@ edit 路径保持既有完整 Design Token 编辑协议。模型 mock 下的旧�
 | Manifest / SHA gate | `scripts/build_cardplan_bundle.py` 与两个 TS export 脚本 |
 
 生产代码不读取 Golden。`tests/fixtures/cardplan_golden_scenarios.json` 仅由测试脚本机械导出，用于跨语言回归。
+
+## 高级组件补齐
+
+正式服务从 TypeScript 行为基线机械导入 15 个高级组件族、8 个自适应模板族、领域组合白名单和 2x2/2x4
+内容预算。`AdvancedComponentPipeline` 在第一次 UIBrief 调用前根据 Query 与 TaskSpec Schema 生成只读
+`advancedComposition`；模型可以省略这些字段，服务端会覆盖模型同名值，不增加第三次调用。
+
+高级组件不是端侧新 Catalog 节点。每个组件族只声明领域语义、角色、presentation、variant、隐私、
+Action/Chart 能力和版本化局部 Template 映射；第二轮 Hybrid 输出仍只允许标准组件与批准的局部
+Template。服务端展开并转成 A2UI 后出现 `Template` 或高级组件名即失败。
+
+`composition.py` 负责主领域排序、跨领域共同目标、尺寸角色、forecast 前置条件和预算；
+`domain_rules.py` 负责日程、待办、通话、电量、App 使用、运动、睡眠、位置、系统模式与蓝牙等确定性派生。
+位置、电话、日程正文、睡眠窗口等默认使用 `masked`，真实 `0` 不能按空值裁掉。计划 Validator 在模型前
+拒绝两个 Hero、多个主 Action/Chart、无共同目标组合、未填槽位、敏感全量展示和所有超预算输入。
 
 ## 安全边界
 

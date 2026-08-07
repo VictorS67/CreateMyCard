@@ -198,6 +198,15 @@ def build_hybrid_prompt(
             f"cardComposition={json.dumps(card_composition, ensure_ascii=False)}",
             f"dataFacts={json.dumps([fact.model_dump() for fact in facts], ensure_ascii=False)}",
             f"mustKeep={json.dumps(contract.required_literals, ensure_ascii=False)}",
+            "advancedComposition="
+            + json.dumps(
+                {
+                    "primaryDomain": getattr(ui_brief, "primary_domain", None),
+                    "adaptiveTemplateId": getattr(ui_brief, "adaptive_template_id", None),
+                    "advancedComponentIds": getattr(ui_brief, "advanced_component_ids", []),
+                },
+                ensure_ascii=False,
+            ),
             '只输出一个以分号结束、以 Template("card@1", ...) 为根的完整 Card。',
         )
     )

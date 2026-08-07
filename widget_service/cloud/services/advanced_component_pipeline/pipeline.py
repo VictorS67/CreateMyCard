@@ -18,6 +18,7 @@ from services.protocol_registry import TERSE_DSL_NESTED2_PROFILE_ID, A2UIProtoco
 from .argument_mapper import map_arguments_offline, map_arguments_with_llm
 from .compiler import build_component_output
 from .component_selector import select_component
+from .composition import build_advanced_composition_plan
 from .data_shape import extract_data_shape
 from .models import AdvancedPipelineOutput, SelectionConstraints
 from .styles import select_style
@@ -40,6 +41,7 @@ class AdvancedComponentPipeline:
     ) -> AdvancedPipelineOutput | None:
         data_shape = extract_data_shape(task_spec)
         registry = get_cardplan_registry()
+        composition_plan = build_advanced_composition_plan(task_spec, data_shape, registry)
 
         async def generate_json(
             prompt: list[dict[str, str]],
@@ -65,20 +67,35 @@ class AdvancedComponentPipeline:
 
         planner_mode: Literal["llm", "offline"] = "llm"
         try:
-            ui_brief = await plan_ui_with_llm(task_spec, data_shape, generate_json)
+            ui_brief = await plan_ui_with_llm(
+                task_spec,
+                data_shape,
+                generate_json,
+                composition_plan,
+            )
         except DeepSeekCallBudgetExceeded:
             raise
         except (RuntimeError, ValueError) as exc:
             if not allow_offline_fallback:
                 raise
             planner_mode = "offline"
-            ui_brief = plan_ui_offline(task_spec, data_shape)
+            ui_brief = plan_ui_offline(task_spec, data_shape, composition_plan)
             logger.warning(f"{_MODULE} ui_brief_fallback exception_type={type(exc).__name__}")
         logger.info(
             f"{_MODULE} ui_brief_resolved mode={planner_mode} "
             f"template_candidate_count={len(ui_brief.local_template_ids)} "
             f"theme_selected={ui_brief.theme_id is not None}"
         )
+        if composition_plan is not None:
+            logger.info(
+                f"{_MODULE} advanced_composition_resolved "
+                f"registry_version={composition_plan.registry_version} "
+                f"primary_domain={composition_plan.primary_domain} "
+                f"adaptive_template_id={composition_plan.adaptive_template_id or 'none'} "
+                f"component_count={len(composition_plan.assignments)} "
+                f"action_count={composition_plan.action_count} "
+                f"chart_count={composition_plan.primary_chart_count}"
+            )
 
         selection = select_component(
             data_shape,
@@ -165,6 +182,7 @@ class AdvancedComponentPipeline:
                 template_call_count=compilation.stats.template_call_count,
                 template_used_ids=list(compilation.stats.template_used_ids),
                 expanded_component_count=compilation.stats.expanded_component_count,
+                advanced_composition=composition_plan,
             )
 
         if selection is None:
@@ -231,6 +249,7 @@ class AdvancedComponentPipeline:
             whole_card_candidates=selection.candidates,
             raw_output=source_dsl,
             effective_output=source_dsl,
+            advanced_composition=composition_plan,
         )
 
 
@@ -242,8 +261,7 @@ async def _generate_hybrid_body(
     generate = model_client.generate
     parameters = inspect.signature(generate).parameters
     accepts_keywords = any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values()
+        parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
     )
     if accepts_keywords or "suppress_prompt_log" in parameters:
         result = generate(

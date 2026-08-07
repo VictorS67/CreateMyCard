@@ -1,21 +1,23 @@
 {
   "a2uiTargetSpecVersion": "v0.9.1",
   "a2uiWireVersion": "v0.9",
+  "advancedComponentRegistryVersion": "advanced-component-registry/1",
   "bodyProtocolVersion": "tersedsl-nested-2-hybrid/0.2",
   "bundleVersion": "cardplan-template-python-bundle/1",
   "catalogId": "ohos.a2ui.extended.catalog",
   "contractVersion": "hybrid-body-contract/0.4",
   "files": {
+    "advanced-component-registry.json": "sha256:b3d746744fc639d7c511d11238477d04eecfb62c31f34bcc5faf2da09b6b1916",
     "prompts/card-template-planner/00-chrome-kernel.md": "sha256:af96ada042901e2554f4c323695174c67d5de28d0aa140568cb22724726a8652",
     "prompts/card-template-planner/10-dsl-and-boundary.md": "sha256:43e13eedfc305ce2848622890cd97cfd81e42b6df950a9047e0e086a56e76ced",
-    "prompts/hybrid-body-generator/00-hybrid-kernel.md": "sha256:240bf965e9333d907da63a72ead36230ca7afc3126530b285a964b8dd0245601",
-    "prompts/hybrid-body-generator/10-template-composition.md": "sha256:ce66d19a5c55fba095fabf2f75be1a4910971c55057ee6e1d04b8fd8bd074f30",
-    "prompts/hybrid-body-generator/20-action-and-budget.md": "sha256:3ff785722324600990026678eda5dbf2fe04931a34997fcef80cde68958056c8",
+    "prompts/hybrid-body-generator/00-hybrid-kernel.md": "sha256:3ec51e339be510ac23c39388565412011fc0b61f5138bef6710b2d3c3924dd74",
+    "prompts/hybrid-body-generator/10-template-composition.md": "sha256:468187cd39a945ee43454e1298b02acdc452a7e6f453d9e42e070e3396753513",
+    "prompts/hybrid-body-generator/20-action-and-budget.md": "sha256:c6a70d7972ab3ccacb1a8cf818831034c0737a1a6833a9d7e1244ee911be889a",
     "template-registry.json": "sha256:f96cc087080d96c7eae6f05e465e7acef4f795e072d1a08bc53208eaa7dfc119",
     "theme-profiles.json": "sha256:6194dfd7314586ad0e228434527dadfdba4a0b1d0440b1ca458754e40a7eed4a"
   },
   "promptSha256": {
-    "body": "e9c93c87c2f2205578a25103e03b07a5ef152fa9a1462a8463d1019c29d521b0",
+    "body": "990cf244ce30b6d70e71f5e9dbf387227384449422b931e69ee6367b031b5c4b",
     "selection": "78431eb8cc0c69f3a98dfd76344af908784de61abeb54be83ed2b32c171af8a3"
   },
   "selectionProtocolVersion": "card-plan-template/0.2",

@@ -2,6 +2,7 @@
 .github
 **/.DS_Store
 **/.env
+**/env
 **/.pytest_cache
 **/.mypy_cache
 **/.ruff_cache

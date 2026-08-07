@@ -281,3 +281,8 @@ class GenerateWidgetCardResponse(BaseModel):
     removedCapabilities: list[RemovedCapability] = Field(default_factory=list)
     errorCode: str = ""
     effectiveCapabilities: dict[str, list[Any]] = Field(default_factory=dict)
+    # 仅供同进程的 CardTemplate WebSocket 兼容层增量下发；工具协议和日志均不序列化。
+    renderMessages: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
+    templateCallCount: int = Field(default=0, exclude=True)
+    expandedComponentCount: int = Field(default=0, exclude=True)
+    generationFallbackUsed: bool = Field(default=False, exclude=True)

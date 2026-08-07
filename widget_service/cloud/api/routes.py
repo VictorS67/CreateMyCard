@@ -2,6 +2,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 import asyncio
 import json
+import secrets
 import time
 import traceback
 import uuid
@@ -133,6 +134,129 @@ def get_service(
     出参：WidgetGenerationService 实例。
     """
     return WidgetGenerationService(model_runtime=model_runtime)
+
+
+def _card_template_authorized(websocket: WebSocket) -> bool:
+    """校验 CardTemplate UX 兼容入口的静态 Bearer Token。"""
+    expected = get_settings().websocket_bearer_token
+    authorization = websocket.headers.get("authorization", "")
+    prefix = "Bearer "
+    if not expected or not authorization.startswith(prefix):
+        return False
+    return secrets.compare_digest(authorization[len(prefix) :], expected)
+
+
+def _card_template_surface_metadata(messages: list[dict[str, Any]]) -> tuple[str, int]:
+    """从标准 A2UI 消息中提取 surfaceId 和最终 revision。"""
+    surface_id = ""
+    revision = 0
+    for message in messages:
+        create_surface = message.get("createSurface")
+        if isinstance(create_surface, dict):
+            surface_id = str(create_surface.get("surfaceId") or surface_id)
+        for key in ("updateComponents", "updateDataModel"):
+            update = message.get(key)
+            if isinstance(update, dict):
+                surface_id = str(update.get("surfaceId") or surface_id)
+                raw_revision = update.get("surfaceRevision")
+                if isinstance(raw_revision, int):
+                    revision = max(revision, raw_revision)
+    return surface_id, revision
+
+
+async def card_template_compat_ws(websocket: WebSocket) -> None:
+    """兼容端侧现有 card.generate 协议，并路由到 Python CardPlan 正式链路。"""
+    if not _card_template_authorized(websocket):
+        await websocket.close(code=1008, reason="invalid bearer token")
+        return
+    await websocket.accept()
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            request_id = str(payload.get("requestId") or "") if isinstance(payload, dict) else ""
+            started_at = time.perf_counter()
+            try:
+                if not isinstance(payload, dict) or payload.get("type") != "card.generate":
+                    raise ValueError("only card.generate is supported")
+                if payload.get("pipeline", "card-plan-template") != "card-plan-template":
+                    raise ValueError("only card-plan-template pipeline is supported")
+                context = payload.get("context")
+                if not isinstance(context, dict):
+                    raise ValueError("context must be an object")
+                request = GenerateWidgetCardRequest(
+                    uid="card-template-ux",
+                    prdVer=get_settings().default_prd_version,
+                    device={"romVersion": get_settings().default_device_rom_version},
+                    userQuery=context.get("userQuery"),
+                    size=context.get("size", "2x2"),
+                    title=context.get("title"),
+                    description=context.get("description"),
+                    candidateDataBindings=context.get("candidateDataBindings", []),
+                    candidateEventCandidates=context.get("candidateEventCandidates", []),
+                    candidateAssetIds=context.get("candidateAssetIds", []),
+                )
+                model_runtime = getattr(websocket.app.state, "model_runtime", None)
+                result = await get_service(model_runtime).generate_widget_card_terse_dsl_nested2(
+                    request
+                )
+                messages = result.renderMessages
+                surface_id, surface_revision = _card_template_surface_metadata(messages)
+                if messages:
+                    await websocket.send_json(
+                        {
+                            "serviceProtocolVersion": "widget-service-card-template/1.0",
+                            "type": "card.generate.delta",
+                            "requestId": request_id,
+                            "ok": True,
+                            "phase": "body",
+                            "messages": messages,
+                            "diagnostics": [],
+                        }
+                    )
+                completed = result.status.value in {"success", "degraded"}
+                diagnostics = [] if completed else [
+                    {
+                        "severity": "error",
+                        "code": result.errorCode or "GENERATION_FAILED",
+                        "message": result.message,
+                    }
+                ]
+                await websocket.send_json(
+                    {
+                        "serviceProtocolVersion": "widget-service-card-template/1.0",
+                        "type": "card.generate.result",
+                        "requestId": request_id,
+                        "ok": completed,
+                        "status": "completed" if completed else "rejected",
+                        "pipeline": "card-plan-template",
+                        "surfaceId": surface_id,
+                        "surfaceRevision": surface_revision,
+                        "messages": messages,
+                        "diagnostics": diagnostics,
+                        "metrics": {
+                            "totalLatencyMs": round((time.perf_counter() - started_at) * 1000, 2),
+                            "totalInputTokens": -1,
+                            "totalOutputTokens": -1,
+                            "firstBodySubtreeMs": -1,
+                            "templateCallCount": result.templateCallCount,
+                            "expandedComponentCount": result.expandedComponentCount,
+                            "chromeFallbackUsed": False,
+                            "bodyFallbackUsed": result.generationFallbackUsed or not completed,
+                        },
+                    }
+                )
+            except (ValueError, ValidationError) as exc:
+                await websocket.send_json(
+                    {
+                        "serviceProtocolVersion": "widget-service-card-template/1.0",
+                        "type": "error",
+                        "requestId": request_id,
+                        "ok": False,
+                        "error": {"code": "INVALID_ARGUMENTS", "message": str(exc)},
+                    }
+                )
+    except WebSocketDisconnect:
+        return
 
 
 def _request_id_from_envelope(envelope: ToolRequestEnvelope) -> str | None:
@@ -488,6 +612,9 @@ async def _serve_operation_websocket(
     出参：无；服务端通过 WebSocket 返回华为流处理插件格式消息。
     """
     # 每个 WS path 只承载一个业务能力，客户端不需要再传 operation 字段。
+    if get_settings().websocket_bearer_token and not _card_template_authorized(websocket):
+        await websocket.close(code=1008, reason="invalid bearer token")
+        return
     metrics = websocket_metrics
     await websocket.accept()
     metrics.connection_opened()

@@ -23,7 +23,7 @@ edit 路径保持既有完整 Design Token 编辑协议。模型 mock 下的旧�
 | template-expander / composition | `compiler.py` |
 | prompt-runtime | `prompt.py`、`generated/prompts.py` |
 | generation-runner | `advanced_component_pipeline/pipeline.py` |
-| UI IR / A2UI Adapter | 复用 `services/terse_dsl_nested2_a2ui_converter.py` |
+| UI IR / A2UI Adapter | 复用 `services/terse_dsl_nested2_a2ui_converter.py`，输出 `v0.9` / `ohos.a2ui.extended.catalog` |
 | Manifest / SHA gate | `scripts/build_cardplan_bundle.py` 与两个 TS export 脚本 |
 
 生产代码不读取 Golden。`tests/fixtures/cardplan_golden_scenarios.json` 仅由测试脚本机械导出，用于跨语言回归。
@@ -36,6 +36,8 @@ edit 路径保持既有完整 Design Token 编辑协议。模型 mock 下的旧�
 - Template 只在可信服务端展开；编译后 A2UI 出现 `Template` 即失败。
 - 模型只能引用本次 Contract 暴露的数据路径、素材和 Action。Template 的占位 Action 在展开后绑定回
   TaskSpec 中已批准的完整 `call/args`。
+- CardTemplate UX 测试页可在候选数据能力中携带受限 `previewData`，用于构造与真实数据同形的 TaskSpec
+  样例；服务端限制其类型、深度、节点数、数组/字符串和编码大小，并从 Pydantic 序列化及生产日志中排除。
 - 生产日志不记录业务正文、Prompt、原始输出或密钥。评估证据只写入忽略目录并设置为 `0600`。
 
 ## bypass
@@ -180,6 +182,17 @@ Hybrid Source 经过正式 Parser、Registry、Compiler 和 A2UI Adapter 得到�
 评估报告中的原子预留快照为准，不在版本库文档中持续更新运行时数据库计数。
 
 ## 上线、观测与回滚
+
+仓库根目录的 `.dockerignore` 与 `widget_service/Dockerfile` 用于构建 Python 3.12 运行镜像。运行时将
+`cloud/workspace` 挂载为持久卷，以保留预算 SQLite 与 mock artifact；环境文件必须位于宿主机受限权限路径，
+不得打入镜像。对 CardTemplate UX 替换旧 TS 服务时，先在旁路端口验证 `GET /health`、未授权连接以 1008
+拒绝、带 Token 的 `/ws` `card.generate` 返回 `card.generate.delta/result` 且最终消息为 ready A2UI，再切换
+原端口。`createSurface.catalogId` 必须为 `ohos.a2ui.extended.catalog`；带 `.form` 的历史值会被端侧扩展
+渲染器拒绝。切换前记录旧容器镜像 ID 与端口映射，回滚仅恢复旧容器，不删除 Python 持久卷。
+
+公网部署必须设置 `WIDGET_SERVICE_WEBSOCKET_BEARER_TOKEN`；该 Token 同时保护 `/ws` 与全部工具 WebSocket。
+端侧本地配置可用独立的 `cardTemplateWebSocketUrl` 指向旁路端口，未设置时兼容回退到 `webSocketUrl`。
+测试环境经明确授权可将预算上限设为 `0`，但必须保留已有计数数据库；正式生产仍不得使用无限预算。
 
 上线顺序：
 

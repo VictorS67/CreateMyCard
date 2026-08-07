@@ -66,7 +66,7 @@ def _build() -> tuple[str, str]:
         "templateRegistryVersion": "terse-template-registry/0.7",
         "a2uiWireVersion": "v0.9",
         "a2uiTargetSpecVersion": "v0.9.1",
-        "catalogId": "ohos.a2ui.extended.catalog.form",
+        "catalogId": "ohos.a2ui.extended.catalog",
         "promptSha256": prompt_hashes,
         "files": file_hashes,
     }

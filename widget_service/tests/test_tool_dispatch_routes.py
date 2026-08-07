@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from ws_response_parser import parse_legacy_stream_content
 
@@ -258,7 +259,7 @@ def _valid_model_output(_self, _prompt, protocol_profile: dict) -> str:
             "version": "v0.9",
             "createSurface": {
                 "surfaceId": "card",
-                "catalogId": "ohos.a2ui.extended.catalog.form",
+                "catalogId": "ohos.a2ui.extended.catalog",
                 "width": 300,
                 "height": 140,
             },
@@ -1569,3 +1570,109 @@ def test_third_interface_uses_default_registry_fallback():
 
     assert response["status"] == "success"
     assert response["errorCode"] == ""
+
+
+def test_card_template_compat_route_requires_bearer_token(monkeypatch):
+    """验证公网 CardTemplate 兼容入口默认拒绝缺失或错误的 Bearer Token。"""
+    monkeypatch.setattr(get_settings(), "websocket_bearer_token", "test-token")
+    client = TestClient(app)
+    try:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.receive_json()
+    except WebSocketDisconnect as exc:
+        assert exc.code == 1008
+    else:
+        raise AssertionError("unauthorized CardTemplate WebSocket must be rejected")
+
+
+def test_tool_route_requires_bearer_when_server_token_is_configured(monkeypatch):
+    """验证部署态同一 Token 同时保护工具 WebSocket，避免公网绕过兼容入口。"""
+    monkeypatch.setattr(get_settings(), "websocket_bearer_token", "test-token")
+    client = TestClient(app)
+    try:
+        with client.websocket_connect(
+            "/api/v1/ws/tools/getWidgetCapabilityOverview"
+        ) as websocket:
+            websocket.receive_json()
+    except WebSocketDisconnect as exc:
+        assert exc.code == 1008
+    else:
+        raise AssertionError("unauthorized tool WebSocket must be rejected")
+
+
+def test_card_template_compat_route_returns_standard_a2ui(monkeypatch):
+    """验证旧 card.generate 请求由 Python 路由返回标准 A2UI 增量和最终帧。"""
+    routes_module = importlib.import_module("api.routes")
+    schemas_module = importlib.import_module("api.schemas")
+    errors_module = importlib.import_module("core.errors")
+    monkeypatch.setattr(get_settings(), "websocket_bearer_token", "test-token")
+    messages = [
+        {"createSurface": {"surfaceId": "compat-surface", "width": 140, "height": 140}},
+        {
+            "updateComponents": {
+                "surfaceId": "compat-surface",
+                "surfaceRevision": 1,
+                "root": "root",
+                "components": [],
+            }
+        },
+    ]
+
+    class FakeService:
+        async def generate_widget_card_terse_dsl_nested2(self, request):
+            assert request.userQuery == "生成天气卡片"
+            assert request.candidateDataBindings[0].previewData == {"temperature": "31°"}
+            assert "previewData" not in request.model_dump(mode="json")[
+                "candidateDataBindings"
+            ][0]
+            return schemas_module.GenerateWidgetCardResponse(
+                status=errors_module.GenerationStatus.SUCCESS,
+                suggestSize="2x2",
+                message="ok",
+                renderMessages=messages,
+                templateCallCount=1,
+                expandedComponentCount=4,
+            )
+
+    monkeypatch.setattr(routes_module, "get_service", lambda _runtime=None: FakeService())
+    client = TestClient(app)
+    with client.websocket_connect(
+        "/ws", headers={"authorization": "Bearer test-token"}
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "card.generate",
+                "requestId": "compat-request",
+                "pipeline": "card-plan-template",
+                "context": {
+                    "userQuery": "生成天气卡片",
+                    "size": "2x2",
+                    "title": "天气",
+                    "description": "天气概览",
+                    "candidateDataBindings": [
+                        {
+                            "capabilityId": "ViewWeather",
+                            "arguments": {"districtName": "深圳"},
+                            "writeResultTo": "/data/weather",
+                            "candidateOutputFields": [],
+                            "previewData": {"temperature": "31°"},
+                        }
+                    ],
+                    "candidateEventCandidates": [],
+                    "candidateAssetIds": [],
+                },
+            }
+        )
+        delta = websocket.receive_json()
+        result = websocket.receive_json()
+
+    assert delta["type"] == "card.generate.delta"
+    assert delta["phase"] == "body"
+    assert delta["messages"] == messages
+    assert result["type"] == "card.generate.result"
+    assert result["status"] == "completed"
+    assert result["surfaceId"] == "compat-surface"
+    assert result["surfaceRevision"] == 1
+    assert result["messages"] == messages
+    assert result["metrics"]["templateCallCount"] == 1
+    assert result["metrics"]["expandedComponentCount"] == 4

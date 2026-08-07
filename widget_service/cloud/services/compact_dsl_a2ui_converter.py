@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 ThemeMode = Literal["light", "dark"]
 
-_A2UI_FORM_CATALOG_ID = "ohos.a2ui.extended.catalog.form"
+_A2UI_EXTENDED_CATALOG_ID = "ohos.a2ui.extended.catalog"
 _A2UI_ICON_BUTTON_LABEL = "\u200B"
 _COMPONENT_TYPES = frozenset(
     {
@@ -613,7 +613,7 @@ def convert_compact_dsl_to_a2ui(
             "version": version,
             "createSurface": {
                 "surfaceId": surface_id,
-                "catalogId": _A2UI_FORM_CATALOG_ID,
+                "catalogId": _A2UI_EXTENDED_CATALOG_ID,
                 "width": surface_dimensions["width"],
                 "height": surface_dimensions["height"],
             },

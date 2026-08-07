@@ -51,7 +51,7 @@ class CardPlanRegistry:
         return value
 
     def _verify_manifest(self) -> None:
-        if self.manifest.get("catalogId") != "ohos.a2ui.extended.catalog.form":
+        if self.manifest.get("catalogId") != "ohos.a2ui.extended.catalog":
             raise ValueError("CardPlan bundle Catalog mismatch")
         if self.manifest.get("a2uiWireVersion") != "v0.9":
             raise ValueError("CardPlan bundle wire version mismatch")

@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     advanced_whole_card_confidence_threshold: float = Field(default=0.75, ge=0.5, le=0.99)
     enable_hybrid_test_bypass: bool = False
     hybrid_test_bypass_token: str = ""
+    websocket_bearer_token: str = ""
     openai_master_client: Literal["deepseek_platform", "llmclient"] = "deepseek_platform"
     openai_fallback_client: Literal["deepseek_platform", "llmclient"] = "llmclient"
     enable_openai_fallback: bool = True

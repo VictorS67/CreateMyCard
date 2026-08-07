@@ -2,6 +2,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 import hashlib
 import inspect
+import json
 import secrets
 import time
 import uuid
@@ -573,6 +574,7 @@ class WidgetGenerationService:
             operation_name=policy.operation,
         )
         advanced_output = None
+        advanced_generation_fallback_used = False
         if (
             policy.processor_kind == DslProcessorKind.TERSE_NESTED2
             and generation_mode == "create"
@@ -585,9 +587,11 @@ class WidgetGenerationService:
                     card_spec.model_dump(mode="json", exclude_none=True),
                     force_hybrid=force_hybrid,
                 )
+                advanced_generation_fallback_used = advanced_output is None
             except DeepSeekCallBudgetExceeded:
                 raise
             except (RuntimeError, ValueError) as exc:
+                advanced_generation_fallback_used = True
                 logger.warning(
                     f"{_MODULE} advanced_component_generation_failed "
                     f"exception_type={type(exc).__name__} fallback=terse"
@@ -986,6 +990,17 @@ class WidgetGenerationService:
             removedCapabilities=removed,
             errorCode=response_plan.errorCode,
             effectiveCapabilities=artifact.effectiveCapabilities,
+            renderMessages=self._parse_render_messages(artifact.genui),
+            templateCallCount=(
+                advanced_output.template_call_count if advanced_output is not None else 0
+            ),
+            expandedComponentCount=(
+                advanced_output.expanded_component_count if advanced_output is not None else 0
+            ),
+            generationFallbackUsed=(
+                advanced_generation_fallback_used
+                or (advanced_output.fallback_used if advanced_output is not None else False)
+            ),
         )
         latency_by_stage["total"] = self._elapsed_ms(generation_started_at)
         self._log_generation_summary(
@@ -1006,6 +1021,22 @@ class WidgetGenerationService:
             source_artifact_url_hash=(source_load_result.url_hash if source_load_result else ""),
         )
         return response
+
+    @staticmethod
+    def _parse_render_messages(genui: str) -> list[dict]:
+        """解析已校验的标准 A2UI JSONL；兼容单测中的非协议占位 DSL。"""
+        messages: list[dict] = []
+        try:
+            for line in genui.splitlines():
+                if not line.strip():
+                    continue
+                message = json.loads(line)
+                if not isinstance(message, dict):
+                    return []
+                messages.append(message)
+        except json.JSONDecodeError:
+            return []
+        return messages
 
     @staticmethod
     def _elapsed_ms(started_at: float) -> float:

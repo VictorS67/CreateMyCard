@@ -30,7 +30,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.profile = {
             "version": "v0.9",
-            "catalogId": "ohos.a2ui.extended.catalog.form",
+            "catalogId": "ohos.a2ui.extended.catalog",
             "sizes": {
                 "2x2": {"width": 140, "height": 140},
                 "2x4": {"width": 300, "height": 140},
@@ -552,7 +552,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         event = data_model["data"]["calendar"]["events"][0]
         self.assertEqual(event["title"], "产品评审")
 
-    def test_always_uses_form_catalog_id(self) -> None:
+    def test_always_uses_extended_catalog_id(self) -> None:
         profile = dict(self.profile)
         profile["catalogId"] = "ohos.a2ui.extended.catalog"
 
@@ -565,7 +565,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
 
         self.assertEqual(
             create_surface["catalogId"],
-            "ohos.a2ui.extended.catalog.form",
+            "ohos.a2ui.extended.catalog",
         )
 
     def test_accepts_one_genui_fence(self) -> None:

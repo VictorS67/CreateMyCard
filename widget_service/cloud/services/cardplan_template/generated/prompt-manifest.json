@@ -3,7 +3,7 @@
   "a2uiWireVersion": "v0.9",
   "bodyProtocolVersion": "tersedsl-nested-2-hybrid/0.2",
   "bundleVersion": "cardplan-template-python-bundle/1",
-  "catalogId": "ohos.a2ui.extended.catalog.form",
+  "catalogId": "ohos.a2ui.extended.catalog",
   "contractVersion": "hybrid-body-contract/0.4",
   "files": {
     "prompts/card-template-planner/00-chrome-kernel.md": "sha256:af96ada042901e2554f4c323695174c67d5de28d0aa140568cb22724726a8652",

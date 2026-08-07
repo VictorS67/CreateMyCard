@@ -40,6 +40,21 @@ class TaskSpecBuilder:
             if capability is None:
                 continue
 
+            write_parts = parse_json_pointer(binding.writeResultTo)
+            if write_parts is None:
+                continue
+            if binding.previewData is not None:
+                self._set_by_parts(
+                    data_model_schema,
+                    tuple(write_parts),
+                    self._preview_schema(binding.previewData),
+                )
+                logger.info(
+                    f"{_MODULE} preview_data_applied capability_id={binding.capabilityId} "
+                    f"field_count={self._preview_leaf_count(binding.previewData)}"
+                )
+                continue
+
             requested_paths = binding.candidateOutputFields
             valid_fields: list[tuple[tuple[PathPart, ...], dict[str, Any]]] = []
             invalid_paths: list[str] = []
@@ -57,7 +72,8 @@ class TaskSpecBuilder:
 
             if invalid_paths:
                 logger.warning(
-                    f"{_MODULE} candidate_output_fields_ignored capability_id={binding.capabilityId} "
+                    f"{_MODULE} candidate_output_fields_ignored "
+                    f"capability_id={binding.capabilityId} "
                     f"invalid_paths={json_for_log(invalid_paths)}"
                 )
 
@@ -65,14 +81,12 @@ class TaskSpecBuilder:
             if not requested_paths or not valid_fields:
                 valid_fields = list(self._iter_valid_leaves(capability.outputSchema))
                 logger.info(
-                    f"{_MODULE} candidate_output_fields_fallback capability_id={binding.capabilityId} "
+                    f"{_MODULE} candidate_output_fields_fallback "
+                    f"capability_id={binding.capabilityId} "
                     f"reason={'missing' if not requested_paths else 'all_invalid'} "
                     f"field_count={len(valid_fields)}"
                 )
 
-            write_parts = parse_json_pointer(binding.writeResultTo)
-            if write_parts is None:
-                continue
             generated_sample_count = 0
             for relative_parts, leaf in valid_fields:
                 if "sampleValue" in leaf:
@@ -103,6 +117,29 @@ class TaskSpecBuilder:
                 for item in asset_candidates
             ],
         )
+
+    def _preview_schema(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: self._preview_schema(child) for key, child in value.items()}
+        if isinstance(value, list):
+            return [self._preview_schema(value[0])] if value else []
+        data_type = "boolean" if isinstance(value, bool) else "number"
+        if value is None:
+            data_type = "null"
+        elif not isinstance(value, (bool, int, float)):
+            data_type = "string"
+        return {
+            "type": data_type,
+            "description": "Trusted request preview",
+            "sampleValue": deepcopy(value),
+        }
+
+    def _preview_leaf_count(self, value: Any) -> int:
+        if isinstance(value, dict):
+            return sum(self._preview_leaf_count(child) for child in value.values())
+        if isinstance(value, list):
+            return sum(self._preview_leaf_count(child) for child in value)
+        return 1
 
     def _resolve_leaf(
         self,

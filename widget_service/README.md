@@ -176,12 +176,21 @@ py -3.12 -m pytest tests\test_service_units.py -s -q
 
 ```text
 GET  /health
+WS   /ws  (Bearer-protected CardTemplate UX `card.generate` compatibility endpoint)
 WS   /api/v1/ws/tools/getWidgetCapabilityOverview
 WS   /api/v1/ws/tools/getDataCapabilitySchemas
 WS   /api/v1/ws/tools/generateWidgetCard
 WS   /api/v1/ws/tools/generateWidgetCardCompactDsl
 WS   /api/v1/ws/tools/generateWidgetCardTerseDslNested2
 ```
+
+When `WIDGET_SERVICE_WEBSOCKET_BEARER_TOKEN` is configured, the same static Bearer token protects
+the compatibility endpoint and all `/api/v1/ws/tools/*` endpoints. The compatibility endpoint only
+accepts `card.generate` with `pipeline=card-plan-template`; it converts the trusted Python result to
+standard A2UI messages and never sends Template nodes to the client.
+
+The Docker image installs `requirements-runtime.txt`; `requirements.txt` additionally contains local
+test, lint, and type-check tooling and is intentionally not installed in the production image.
 
 Example request:
 

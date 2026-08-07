@@ -195,7 +195,7 @@ Column("card",
         selected_conversion_profiles.append(profile_id)
         return {
             "version": "v0.9",
-            "catalogId": "ohos.a2ui.extended.catalog.form",
+            "catalogId": "ohos.a2ui.extended.catalog",
             "sizes": {
                 "2x2": {"width": 138, "height": 138},
                 "2x4": {"width": 298, "height": 138},
@@ -1099,7 +1099,7 @@ def _write_protocol_ranges(root: Path, ranges: list[dict]) -> None:
             json_module.dumps(
                 {
                     "version": "v0.9",
-                    "catalogId": "ohos.a2ui.extended.catalog.form",
+                    "catalogId": "ohos.a2ui.extended.catalog",
                     "sizes": {
                         "2x2": {"width": 140, "height": 140},
                         "2x4": {"width": 300, "height": 140},
@@ -2046,6 +2046,61 @@ def test_candidate_data_binding_rejects_legacy_update_model():
         )
 
 
+def test_task_spec_builder_uses_bounded_preview_data_without_logging_it():
+    preview = {
+        "temperature": "31°",
+        "warning": "高温预警",
+        "value": 31,
+    }
+    registry = CapabilityRegistry(version=REGISTRY_VERSION_6)
+    resolver = DeviceCapabilityResolver(registry)
+    binding = CandidateDataBinding(
+        capabilityId="ViewWeather",
+        arguments={"districtName": "深圳"},
+        writeResultTo="/data/weather",
+        candidateOutputFields=[],
+        previewData=preview,
+    )
+
+    effective, capabilities, removed = resolver.resolve_generation_data_bindings([binding])
+    task_spec = TaskSpecBuilder().build(
+        user_query="天气卡片",
+        size="2x2",
+        effective_bindings=effective,
+        effective_data_capabilities=capabilities,
+        event_candidates=[],
+        asset_candidates=[],
+    )
+
+    assert removed == []
+    assert effective[0].previewData == preview
+    assert "previewData" not in binding.model_dump(mode="json")
+    weather = task_spec.dataModelSchema["data"]["weather"]
+    assert weather["temperature"]["sampleValue"] == "31°"
+    assert weather["warning"]["sampleValue"] == "高温预警"
+    assert weather["value"]["sampleValue"] == 31
+    assert "current" not in weather
+
+
+@pytest.mark.parametrize(
+    "preview",
+    [
+        {"__proto__": "forbidden"},
+        {"items": list(range(33))},
+        {"text": "x" * 513},
+        {"value": float("nan")},
+    ],
+)
+def test_candidate_data_binding_rejects_unsafe_preview_data(preview):
+    with pytest.raises(ValidationError):
+        CandidateDataBinding(
+            capabilityId="ViewWeather",
+            arguments={},
+            writeResultTo="/data/weather",
+            previewData=preview,
+        )
+
+
 def test_generation_options_rejects_inline_artifact_response():
     with pytest.raises(ValidationError):
         GenerationOptions(returnArtifactInline=True)
@@ -2317,7 +2372,7 @@ def test_prompt_builder_returns_model_messages():
         {
             "id": "a2ui-form-rom6.0-v1",
             "version": "v0.9",
-            "catalogId": "ohos.a2ui.extended.catalog.form",
+            "catalogId": "ohos.a2ui.extended.catalog",
             "sizes": {"2x4": {"width": 300, "height": 140}},
             "componentWhitelist": ["Text", "Column"],
         },
@@ -2417,7 +2472,7 @@ async def test_a2ui_model_client_returns_mock_dat_without_processing():
         {
             "version": "v0.9",
             "format": "a2ui-form",
-            "catalogId": "ohos.a2ui.extended.catalog.form",
+            "catalogId": "ohos.a2ui.extended.catalog",
             "sizes": {"2x4": {"width": 300, "height": 140}},
         },
     )
@@ -2663,7 +2718,7 @@ def test_design_converter_reads_protocol_file_from_selected_design_profile(monke
         selected_profiles.append(profile_id)
         return {
             "version": "v1.1",
-            "catalogId": "ohos.a2ui.extended.catalog.form",
+            "catalogId": "ohos.a2ui.extended.catalog",
             "sizes": {"2x4": {"width": 288, "height": 136}},
         }
 
@@ -4223,7 +4278,7 @@ def test_artifact_validator_rejects_legacy_component_shape():
         [
             (
                 '{"version":"v0.9","createSurface":'
-                '{"surfaceId":"card","catalogId":"ohos.a2ui.extended.catalog.form",'
+                '{"surfaceId":"card","catalogId":"ohos.a2ui.extended.catalog",'
                 '"width":300,"height":140}}'
             ),
             (
@@ -4329,7 +4384,7 @@ def _a2ui_genui_with_image(
                     "version": "v0.9",
                     "createSurface": {
                         "surfaceId": "card",
-                        "catalogId": "ohos.a2ui.extended.catalog.form",
+                        "catalogId": "ohos.a2ui.extended.catalog",
                     },
                 },
                 separators=(",", ":"),

@@ -94,4 +94,55 @@ def make_a2ui(components: list[dict[str, Any]], task_spec: TaskSpec) -> str:
     return "\n".join(json.dumps(line, ensure_ascii=False, separators=(",", ":")) for line in lines)
 
 
-__all__ = ["binding_expression", "event_handler", "make_a2ui", "root_styles"]
+_SEMANTIC_FIELDS: dict[str, set[str]] = {
+    "Text": {"content"},
+    "Image": {"src"},
+    "Progress": {"value", "total"},
+    "Button": {"label", "onClick"},
+}
+_CONTAINERS = {"Row", "Column", "Stack", "List"}
+
+
+def _a2ui_value(value: Any) -> Any:
+    if isinstance(value, dict) and set(value) == {"path"}:
+        return f"{{{{ ${{{value['path']}}} }}}}"
+    if isinstance(value, dict):
+        return {key: _a2ui_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_a2ui_value(item) for item in value]
+    return value
+
+
+def rows_to_a2ui(rows: list[list[Any]], task_spec: TaskSpec) -> str:
+    """将插件行模板直接编译成标准 A2UI，保证 Terse/A2UI 使用同一组件树。"""
+    components: list[dict[str, Any]] = []
+    for row in rows:
+        component_id, component_type, raw_props = row[:3]
+        props = deepcopy(raw_props)
+        component: dict[str, Any] = {"id": component_id, "component": component_type}
+        if len(row) > 3:
+            component["children"] = list(row[3])
+        styles: dict[str, Any] = {}
+        semantic = _SEMANTIC_FIELDS.get(component_type, set())
+        for key, value in props.items():
+            value = _a2ui_value(value)
+            if key in semantic or (key == "itemMargin" and component_type in _CONTAINERS):
+                component[key] = value
+            else:
+                styles[key] = value
+        if component_id == "root":
+            styles["width"] = "matchParent"
+            styles["height"] = "matchParent"
+        if styles:
+            component["styles"] = styles
+        components.append(component)
+    return make_a2ui(components, task_spec)
+
+
+__all__ = [
+    "binding_expression",
+    "event_handler",
+    "make_a2ui",
+    "root_styles",
+    "rows_to_a2ui",
+]

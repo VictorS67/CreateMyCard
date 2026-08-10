@@ -86,6 +86,29 @@ async def plan_ui_with_llm(
 def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
     """根据数据语义给出可预测的保守意图，保证选择器无需模型也能安全运行。"""
     query = task_spec.userQuery.lower()
+    scene_rules = [
+        (("亲人关怀", "家庭关怀", "电话关怀"), "family-care", "亲人天气与关怀"),
+        (("赛事", "马拉松", "距离比赛"), "race-countdown", "赛事倒计时"),
+        (("睡眠", "早睡", "深睡"), "sleep-coach", "睡眠时长"),
+        (("防沉迷", "使用时长", "管控时间", "屏幕时间"), "digital-wellbeing", "应用使用时长"),
+        (("低电量", "省电模式", "电量低"), "low-power", "低电量状态"),
+        (("专注模式", "会议倒计时"), "focus-mode", "下一个会议"),
+        (("当前会议", "加入会议", "会议号"), "current-meeting", "当前会议"),
+    ]
+    for keywords, purpose, primary in scene_rules:
+        if any(keyword in query for keyword in keywords):
+            return UIBrief(
+                purpose=purpose,
+                primaryInformation=[primary],
+                informationHierarchy=["主信息", "补充信息", "主要操作"],
+                temporality="upcoming" if purpose in {"race-countdown", "focus-mode"} else "now",
+                attention="warning-capable"
+                if purpose in {"low-power", "digital-wellbeing"}
+                else "prominent",
+                visualTone=purpose,
+                contentPriorities=[primary, "操作直接"],
+                reason="用户需求与已注册高级场景明确匹配。",
+            )
     if data_shape.time_range_count:
         return UIBrief(
             purpose="schedule-management",

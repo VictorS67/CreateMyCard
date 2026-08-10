@@ -14,6 +14,18 @@ def _signals(
     constraints: SelectionConstraints,
 ) -> dict[str, float]:
     purpose = brief.purpose.lower()
+    semantic_text = " ".join(
+        [
+            brief.purpose,
+            brief.visual_tone,
+            *brief.primary_information,
+            *brief.content_priorities,
+        ]
+    ).lower()
+
+    def has_any(*terms: str) -> float:
+        return float(any(term.lower() in semantic_text for term in terms))
+
     return {
         "metrics": min(1.0, data_shape.metric_count / 3.0),
         "duration": min(1.0, data_shape.duration_count / 2.0),
@@ -27,6 +39,17 @@ def _signals(
         "schedule-intent": float(
             any(word in purpose for word in ("schedule", "appointment", "event"))
         ),
+        "family-care-intent": has_any("family-care", "亲人关怀", "家庭关怀", "电话关怀"),
+        "race-countdown-intent": has_any(
+            "race-countdown", "赛事倒计时", "赛事陪伴", "马拉松", "距离比赛"
+        ),
+        "sleep-intent": has_any("sleep", "睡眠", "早睡", "深睡"),
+        "digital-wellbeing-intent": has_any(
+            "digital-wellbeing", "使用时长", "防沉迷", "管控时间", "屏幕时间"
+        ),
+        "low-power-intent": has_any("low-power", "低电量", "省电模式", "电量低"),
+        "focus-mode-intent": has_any("focus-mode", "专注模式", "会议倒计时"),
+        "current-meeting-intent": has_any("current-meeting", "当前会议", "加入会议", "会议号"),
     }
 
 

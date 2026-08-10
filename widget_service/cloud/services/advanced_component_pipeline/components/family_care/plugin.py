@@ -1,0 +1,135 @@
+"""亲人关怀：天气主指标、状态摘要和快捷关怀动作。"""
+
+from pydantic import BaseModel, Field
+
+from models.generation import TaskSpec
+
+from ...component_registry import ComponentPlugin, register_component
+from ...models import ActionRef, BindingRef, ComponentSpec, DataShape
+from ..a2ui_base import rows_to_a2ui
+from ..base import binding, event_handler, root_props
+from ..scene_helpers import asset_src, field_by_terms, first_action, first_asset_id, ref
+
+
+class Invocation(BaseModel):
+    location: BindingRef = Field(description="城市或关怀对象所在地点的数据绑定。")
+    temperature: BindingRef = Field(description="当前温度的大号主指标绑定。")
+    condition: BindingRef = Field(description="当前天气状态文本绑定。")
+    range_text: BindingRef = Field(description="今日最高/最低温度范围文本绑定。")
+    location_icon: str = Field(description="必须填写 assetCandidates 中的定位或天气资源 id。")
+    action: ActionRef = Field(description="关怀动作，event_id 必须来自 eventCandidates。")
+
+
+SPEC = ComponentSpec(
+    component_id="family-care",
+    description="蓝色天气主指标卡，展示地点、温度、天气状态并提供亲人关怀动作。",
+    supported_sizes=["2x2"],
+    required_signals={"family-care-intent": 20.0, "action": 1.0},
+    min_actions=1,
+)
+
+
+def build_rows(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec):
+    root = root_props(tokens)
+    root.update({"padding": 12, "itemMargin": 6, "justifyContent": "spaceBetween"})
+    return [
+        ["root", "Column", root, ["header", "temperature", "condition", "footer"]],
+        ["header", "Row", {"alignItems": "center"}, ["location", "location-icon"]],
+        [
+            "location",
+            "Text",
+            {
+                "content": binding(invocation.location),
+                "fontSize": 14,
+                "fontColor": tokens["primary"],
+                "layoutWeight": 1,
+            },
+        ],
+        [
+            "location-icon",
+            "Image",
+            {
+                "src": asset_src(invocation.location_icon, task_spec),
+                "width": 18,
+                "height": 18,
+                "objectFit": "contain",
+            },
+        ],
+        [
+            "temperature",
+            "Text",
+            {
+                "content": binding(invocation.temperature),
+                "fontSize": 38,
+                "fontWeight": 700,
+                "fontColor": tokens["primary"],
+            },
+        ],
+        [
+            "condition",
+            "Text",
+            {
+                "content": binding(invocation.condition),
+                "fontSize": 13,
+                "fontColor": tokens["primary"],
+            },
+        ],
+        ["footer", "Row", {"alignItems": "center"}, ["range", "action"]],
+        [
+            "range",
+            "Text",
+            {
+                "content": binding(invocation.range_text),
+                "fontSize": 12,
+                "fontColor": tokens["secondary"],
+                "layoutWeight": 1,
+            },
+        ],
+        [
+            "action",
+            "Button",
+            {
+                "label": invocation.action.label,
+                "onClick": event_handler(invocation.action, task_spec),
+                "width": 38,
+                "height": 38,
+                "borderRadius": 19,
+                "backgroundColor": "#FFFFFFFF",
+                "fontColor": tokens["accent"],
+            },
+        ],
+    ]
+
+
+def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec) -> str:
+    return rows_to_a2ui(build_rows(invocation, tokens, task_spec), task_spec)
+
+
+def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
+    return Invocation(
+        location=ref(field_by_terms(data_shape, "prefecture", "city", "城市", numeric=False)),
+        temperature=ref(field_by_terms(data_shape, "temperaturetext", "温度", numeric=None)),
+        condition=ref(field_by_terms(data_shape, "condition", "天气", numeric=False)),
+        range_text=ref(field_by_terms(data_shape, "range", "最高", numeric=False)),
+        location_icon=first_asset_id(task_spec, "location", "天气"),
+        action=first_action(task_spec, "关怀"),
+    )
+
+
+def validate(invocation: Invocation, task_spec: TaskSpec) -> None:
+    asset_src(invocation.location_icon, task_spec)
+
+
+PLUGIN = register_component(
+    ComponentPlugin(
+        component_id=SPEC.component_id,
+        spec=SPEC,
+        invocation_model=Invocation,
+        build_rows=build_rows,
+        build_a2ui=build_a2ui,
+        map_offline=map_offline,
+        validate=validate,
+    )
+)
+
+__all__ = ["Invocation", "PLUGIN", "build_a2ui", "build_rows"]

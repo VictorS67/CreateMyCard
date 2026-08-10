@@ -5,6 +5,40 @@ from __future__ import annotations
 from .models import UIBrief
 
 STYLE_TOKENS: dict[str, dict[str, object]] = {
+    "electric-blue": {
+        "gradient": {
+            "direction": "Bottom",
+            "colors": [["#FF087CFF", 0.0], ["#FF02B8DF", 1.0]],
+        },
+        "background": "#FF087CFF",
+        "surface": "#33FFFFFF",
+        "surfaceBorder": "#66FFFFFF",
+        "primary": "#FFFFFFFF",
+        "secondary": "#D9FFFFFF",
+        "accent": "#FF087CFF",
+        "accentSecondary": "#FF02B8DF",
+        "track": "#55FFFFFF",
+        "button": "#FFFFFFFF",
+        "buttonBorder": "#99FFFFFF",
+        "danger": "#FFFF4E64",
+    },
+    "race-orange": {
+        "gradient": {
+            "direction": "Bottom",
+            "colors": [["#FFFF4B00", 0.0], ["#FFFF9700", 1.0]],
+        },
+        "background": "#FFFF4B00",
+        "surface": "#33FFFFFF",
+        "surfaceBorder": "#66FFFFFF",
+        "primary": "#FFFFFFFF",
+        "secondary": "#E6FFFFFF",
+        "accent": "#FFFF5A00",
+        "accentSecondary": "#FFFF9700",
+        "track": "#55FFFFFF",
+        "button": "#FFFFFFFF",
+        "buttonBorder": "#FFFFFFFF",
+        "danger": "#FFFFE000",
+    },
     "night-violet": {
         "gradient": {
             "direction": "RightBottom",
@@ -75,7 +109,11 @@ for _tokens in STYLE_TOKENS.values():
 def select_style(brief: UIBrief) -> tuple[str, dict[str, object]]:
     """根据抽象意图选择受控主题，模板不接受模型直接下发的颜色。"""
     text = f"{brief.purpose} {brief.visual_tone}".lower()
-    if any(item in text for item in ("schedule", "warm", "focus", "日程")):
+    if any(item in text for item in ("family-care", "亲人关怀", "家庭关怀", "weather care")):
+        style_id = "electric-blue"
+    elif any(item in text for item in ("race-countdown", "赛事", "马拉松")):
+        style_id = "race-orange"
+    elif any(item in text for item in ("schedule", "warm", "focus", "日程")):
         style_id = "warm-copper"
     elif any(item in text for item in ("resource", "technical", "memory", "内存")):
         style_id = "system-teal"

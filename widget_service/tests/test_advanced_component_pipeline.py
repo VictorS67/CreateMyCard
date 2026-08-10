@@ -19,6 +19,7 @@ from api.schemas import GenerateWidgetCardRequest
 from config.config import get_settings
 from core.errors import GenerationStatus
 from custom.a2ui_model_client import A2UIModelClient
+from models.artifact import ArtifactMeta, WidgetArtifact
 from models.generation import EventAction, TaskSpec
 from models.service import ArtifactSaveResult
 from services.advanced_component_pipeline import AdvancedComponentPipeline
@@ -27,7 +28,8 @@ from services.advanced_component_pipeline.compiler import (
     build_standard_a2ui,
     build_terse_nested2,
 )
-from services.advanced_component_pipeline.component_registry import component_plugins
+from services.advanced_component_pipeline.component_registry import component_plugins, get_component
+from services.advanced_component_pipeline.component_selector import select_component
 from services.advanced_component_pipeline.components.compact_metrics_primary_action.plugin import (
     CompactMetricArg,
 )
@@ -40,10 +42,12 @@ from services.advanced_component_pipeline.components.ring_split_metric_action.pl
 from services.advanced_component_pipeline.components.schedule_detail_action.plugin import (
     Invocation as ScheduleDetailInvocation,
 )
+from services.advanced_component_pipeline.data_shape import extract_data_shape
 from services.advanced_component_pipeline.models import (
     ActionRef,
     AdvancedPipelineOutput,
     BindingRef,
+    SelectionConstraints,
     UIBrief,
 )
 from services.artifact_store import ArtifactStore
@@ -102,13 +106,160 @@ def test_component_plugins_are_discovered_from_component_directories():
 
     assert {plugin.component_id for plugin in plugins} == {
         "compact-metrics-primary-action",
+        "current-meeting",
+        "digital-wellbeing",
+        "family-care",
+        "focus-mode",
+        "low-power",
+        "race-countdown",
         "ring-split-metric-action",
         "schedule-detail-action",
+        "sleep-coach",
     }
     assert all(plugin.invocation_model for plugin in plugins)
     assert all(callable(plugin.build_rows) for plugin in plugins)
     assert all(callable(plugin.map_offline) for plugin in plugins)
     assert all(callable(plugin.validate) for plugin in plugins)
+
+
+def _seven_scene_task_spec() -> TaskSpec:
+    def field(data_type, sample, description):
+        return {"type": data_type, "description": description, "sampleValue": sample}
+
+    return TaskSpec(
+        userQuery="生成场景卡片",
+        size="2x2",
+        eventCandidates=[EventAction(id="event.scene.action", call="clickToApi", args={})],
+        dataModelSchema={
+            "data": {
+                "scene": {
+                    "prefectureName": field("string", "深圳", "城市名称"),
+                    "temperatureText": field("string", "38°", "当前温度"),
+                    "condition": field("string", "晴", "天气状态"),
+                    "temperatureRangeText": field("string", "26°/16°", "最高最低温度范围"),
+                    "eventTitle": field("string", "UI需求评审会", "赛事或会议标题"),
+                    "remainingDays": field("integer", 32, "赛事剩余天数"),
+                    "sleepHours": field("integer", 5, "睡眠小时数"),
+                    "sleepMinutes": field("integer", 45, "睡眠分钟数"),
+                    "appName": field("string", "抖音使用时长", "应用名称"),
+                    "durationText": field("string", "3小时45分钟", "应用使用时长"),
+                    "status": field("string", "电量低于20%，开启省电模式", "电池状态"),
+                    "batteryPercent": field("integer", 18, "电池电量百分比"),
+                    "startTime": field("string", "14:00", "会议开始时间"),
+                    "endTime": field("string", "15:30", "会议结束时间"),
+                    "date": field("string", "27日", "日期"),
+                    "weekday": field("string", "星期一", "星期"),
+                    "location": field("string", "深圳市龙岗区", "会议地点"),
+                }
+            }
+        },
+        assetCandidates=[
+            {
+                "id": "asset.location",
+                "src": "resources/base/media/location.svg",
+                "description": "定位天气图标",
+            },
+            {
+                "id": "asset.run",
+                "src": "resources/base/media/run.svg",
+                "description": "运动跑步图标",
+            },
+            {
+                "id": "asset.alarm",
+                "src": "resources/base/media/alarm.svg",
+                "description": "闹钟图标",
+            },
+            {
+                "id": "asset.tiktok",
+                "src": "resources/base/media/tiktok.png",
+                "description": "应用图标",
+            },
+            {
+                "id": "asset.timing",
+                "src": "resources/base/media/timing.svg",
+                "description": "计时图标",
+            },
+            {
+                "id": "asset.electricity",
+                "src": "resources/base/media/battery.svg",
+                "description": "电池图标",
+            },
+            {
+                "id": "asset.save_power",
+                "src": "resources/base/media/power.svg",
+                "description": "省电图标",
+            },
+            {
+                "id": "asset.meeting",
+                "src": "resources/base/media/meeting.svg",
+                "description": "会议图标",
+            },
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("purpose", "component_id"),
+    [
+        ("family-care", "family-care"),
+        ("race-countdown", "race-countdown"),
+        ("sleep-coach", "sleep-coach"),
+        ("digital-wellbeing", "digital-wellbeing"),
+        ("low-power", "low-power"),
+        ("focus-mode", "focus-mode"),
+        ("current-meeting", "current-meeting"),
+    ],
+)
+def test_seven_visual_scene_plugins_select_and_compile(purpose, component_id):
+    task_spec = _seven_scene_task_spec()
+    data_shape = extract_data_shape(task_spec)
+    brief = UIBrief(
+        purpose=purpose,
+        primaryInformation=[purpose],
+        informationHierarchy=["主信息", "操作"],
+        visualTone=purpose,
+        contentPriorities=[purpose],
+        reason="测试场景选择",
+    )
+    selection = select_component(
+        data_shape,
+        brief,
+        SelectionConstraints(size="2x2", action_count=1),
+    )
+    assert selection is not None
+    assert selection.component_id == component_id
+
+    plugin = get_component(component_id)
+    invocation = plugin.map_offline(task_spec, data_shape)
+    plugin.validate(invocation, task_spec)
+    terse = build_terse_nested2(component_id, invocation, task_spec, "night-violet")
+    a2ui = build_standard_a2ui(component_id, invocation, task_spec, "night-violet")
+    converted_a2ui = convert_terse_dsl_nested2_to_a2ui(
+        terse,
+        size="2x2",
+        protocol_profile={"version": "v0.9", "sizes": {"2x2": {"width": 160, "height": 160}}},
+    )
+
+    assert terse.startswith('Column("card"')
+    assert len(a2ui.splitlines()) == 3
+    assert len(converted_a2ui.splitlines()) == 3
+    assert '"root":"root"' in a2ui
+    artifact = WidgetArtifact(
+        genui=a2ui,
+        cardSpec={"title": purpose, "description": purpose, "suggestSize": "2x2"},
+        taskSpec=task_spec.model_dump(mode="json"),
+        effectiveCapabilities={"asset": task_spec.assetCandidates},
+        meta=ArtifactMeta(
+            protocolProfileId="a2ui-form-rom6.0-v1",
+            capabilityRegistryVersion="app-11.7.5.205_rom-6.0",
+            createdAt=1,
+        ),
+    )
+    errors = ArtifactValidator().validate(
+        artifact,
+        {"id": "a2ui-form-rom6.0-v1"},
+    )
+    assert [error for error in errors if not error.startswith("EFFECTIVE_")] == []
 
 
 class OfflineModelClient:

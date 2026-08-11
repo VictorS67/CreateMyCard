@@ -23,24 +23,14 @@ from models.artifact import ArtifactMeta, WidgetArtifact
 from models.generation import EventAction, TaskSpec
 from models.service import ArtifactSaveResult
 from services.advanced_component_pipeline import AdvancedComponentPipeline
-from services.advanced_component_pipeline.argument_mapper import validate_invocation
 from services.advanced_component_pipeline.compiler import (
     build_standard_a2ui,
     build_terse_nested2,
 )
 from services.advanced_component_pipeline.component_registry import component_plugins, get_component
 from services.advanced_component_pipeline.component_selector import select_component
-from services.advanced_component_pipeline.components.compact_metrics_primary_action.plugin import (
-    CompactMetricArg,
-)
-from services.advanced_component_pipeline.components.compact_metrics_primary_action.plugin import (
-    Invocation as CompactMetricsInvocation,
-)
-from services.advanced_component_pipeline.components.ring_split_metric_action.plugin import (
-    Invocation as RingSplitMetricInvocation,
-)
-from services.advanced_component_pipeline.components.schedule_detail_action.plugin import (
-    Invocation as ScheduleDetailInvocation,
+from services.advanced_component_pipeline.components.low_power.plugin import (
+    Invocation as LowPowerInvocation,
 )
 from services.advanced_component_pipeline.data_shape import extract_data_shape
 from services.advanced_component_pipeline.models import (
@@ -65,37 +55,37 @@ from services.widget_generation_service import WidgetGenerationService
 
 
 def _metric_task_spec(with_action: bool = True) -> TaskSpec:
-    events = [EventAction(id="event.clean.memory", call="clickToApi", args={})]
+    events = [EventAction(id="event.enable.power", call="clickToApi", args={})]
     return TaskSpec(
-        userQuery="清理内存",
+        userQuery="设备电量低于20%，开启省电模式",
         size="2x2",
         eventCandidates=events if with_action else [],
         dataModelSchema={
             "data": {
-                "memory": {
-                    "usedPercent": {
-                        "type": "number",
-                        "description": "内存占用百分比",
-                        "sampleValue": 78,
+                "battery": {
+                    "status": {
+                        "type": "string",
+                        "description": "低电量状态和省电建议",
+                        "sampleValue": "电量低于20%，开启省电模式",
                     },
-                    "available": {
-                        "type": "number",
-                        "description": "可用内存容量",
-                        "sampleValue": 4.5,
+                    "batteryPercent": {
+                        "type": "integer",
+                        "description": "电池电量百分比",
+                        "sampleValue": 18,
                     },
                 }
             }
         },
         assetCandidates=[
             {
-                "id": "bell",
-                "src": "resources/base/media/bell.svg",
-                "description": "状态图标",
+                "id": "asset.electricity",
+                "src": "resources/base/media/battery.svg",
+                "description": "电池图标",
             },
             {
-                "id": "moon",
-                "src": "resources/base/media/moon.svg",
-                "description": "睡眠图标",
+                "id": "asset.save_power",
+                "src": "resources/base/media/power.svg",
+                "description": "省电图标",
             },
         ],
     )
@@ -105,15 +95,12 @@ def test_component_plugins_are_discovered_from_component_directories():
     plugins = component_plugins()
 
     assert {plugin.component_id for plugin in plugins} == {
-        "compact-metrics-primary-action",
         "current-meeting",
         "digital-wellbeing",
         "family-care",
         "focus-mode",
         "low-power",
         "race-countdown",
-        "ring-split-metric-action",
-        "schedule-detail-action",
         "sleep-coach",
     }
     assert all(plugin.invocation_model for plugin in plugins)
@@ -377,7 +364,11 @@ class OfflineModelClient:
         raise RuntimeError(f"offline: {phase}")
 
     async def generate(self, *_args, **_kwargs):
-        return 'Template("card@1", {}, Column("section", Text("清理内存", "body")));'
+        return (
+            'Template("card@1", {}, Column("section", '
+            'Text("设备电量低于20", "body"), '
+            'Text("电量低于20%，开启省电模式", "body")));'
+        )
 
 
 class StructuredModelClient:
@@ -390,36 +381,28 @@ class StructuredModelClient:
         self.prompts[phase] = prompt
         if phase == "advanced-ui-brief":
             return {
-                "purpose": "resource-monitoring",
+                "purpose": "低电量状态和省电操作",
                 "domain": "device",
-                "scenario": "resource-monitoring",
-                "statusSemantics": ["warning"],
-                "contentSemantics": ["metric", "percentage", "status"],
-                "actionSemantics": ["primary-action"],
-                "primaryInformation": ["内存占用"],
+                "scenario": "low-power",
+                "statusSemantics": ["low-power", "warning"],
+                "contentSemantics": ["battery-level", "percentage", "status"],
+                "actionSemantics": ["enable-power-saving"],
+                "primaryInformation": ["设备电量"],
                 "informationHierarchy": ["指标", "操作"],
                 "density": "compact",
                 "temporality": "now",
                 "interaction": "one-primary-action",
                 "attention": "warning-capable",
                 "visualTone": "technical-efficient",
-                "contentPriorities": ["占用优先"],
-                "reason": "突出当前资源状态。",
+                "contentPriorities": ["低电量状态优先"],
+                "reason": "突出电量状态和省电入口。",
             }
         return {
-            "compact_metrics": [
-                {
-                    "label": "已用",
-                    "value": {"path": "/data/memory/usedPercent"},
-                },
-                {
-                    "label": "可用",
-                    "value": {"path": "/data/memory/available"},
-                },
-            ],
-            "primary_label": "内存已用",
-            "primary_value": {"path": "/data/memory/usedPercent"},
-            "action": {"event_id": "event.clean.memory", "label": "一键清理"},
+            "status_text": {"path": "/data/battery/status"},
+            "percentage": {"path": "/data/battery/batteryPercent"},
+            "battery_icon": "asset.electricity",
+            "action_icon": "asset.save_power",
+            "action": {"event_id": "event.enable.power", "label": "开启省电"},
         }
 
 
@@ -427,17 +410,10 @@ class StructuredModelClient:
 async def test_pipeline_uses_two_structured_model_calls_and_builds_template():
     model_client = StructuredModelClient()
     task_spec = _metric_task_spec()
-    task_spec.assetCandidates = [
-        {
-            "id": "asset.memory",
-            "src": "resources/base/media/memory.svg",
-            "description": "内存状态图标",
-        }
-    ]
     output = await AdvancedComponentPipeline().generate(task_spec, model_client)
 
     assert output is not None
-    assert output.component_id == "compact-metrics-primary-action"
+    assert output.component_id == "low-power"
     assert output.planner_mode == "llm"
     assert output.mapper_mode == "llm"
     assert model_client.phases == ["advanced-ui-brief", "advanced-argument-map"]
@@ -507,81 +483,6 @@ async def test_pipeline_uses_hybrid_route_without_reliable_whole_card_candidate(
     assert "Template" not in output.compiled_a2ui
 
 
-def test_invocation_rejects_string_binding_for_progress():
-    task_spec = _metric_task_spec()
-    invocation = RingSplitMetricInvocation(
-        caption=BindingRef(path="/data/memory/available"),
-        caption_icon="bell",
-        progress=BindingRef(path="/data/memory/missingText"),
-        center_icon="moon",
-        major_value=BindingRef(path="/data/memory/usedPercent"),
-        major_unit="%",
-        minor_value=BindingRef(path="/data/memory/available"),
-        minor_unit="GB",
-        action=ActionRef(event_id="event.clean.memory", label="清理"),
-    )
-    task_spec.dataModelSchema["data"]["memory"]["missingText"] = {
-        "type": "string",
-        "description": "展示文本",
-        "sampleValue": "78%",
-    }
-
-    with pytest.raises(ValueError, match="must be numeric"):
-        validate_invocation("ring-split-metric-action", invocation, task_spec)
-
-
-def test_ring_split_invocation_allows_string_display_values():
-    task_spec = _metric_task_spec()
-    task_spec.dataModelSchema["data"]["memory"]["durationText"] = {
-        "type": "string",
-        "description": "格式化时长文本",
-        "sampleValue": "7小时30分钟",
-    }
-    invocation = RingSplitMetricInvocation(
-        caption=BindingRef(path="/data/memory/durationText"),
-        caption_icon="bell",
-        progress=BindingRef(path="/data/memory/usedPercent"),
-        center_icon="moon",
-        major_value=BindingRef(path="/data/memory/usedPercent"),
-        major_unit="分",
-        minor_value=BindingRef(path="/data/memory/durationText"),
-        minor_unit="时长",
-        action=ActionRef(event_id="event.clean.memory", label="查看详情"),
-    )
-
-    validate_invocation("ring-split-metric-action", invocation, task_spec)
-
-
-def test_ring_split_invocation_schema_describes_binding_semantics():
-    schema = RingSplitMetricInvocation.model_json_schema()
-    properties = schema["properties"]
-
-    assert "number 或 integer" in properties["progress"]["description"]
-    assert "格式化的字符串" in properties["minor_value"]["description"]
-    assert "已包含单位" in properties["minor_unit"]["description"]
-    assert "assetCandidates" in properties["caption_icon"]["description"]
-    assert "assetCandidates" in properties["center_icon"]["description"]
-    assert properties["progress_total"]["exclusiveMinimum"] == 0
-
-
-def test_ring_split_invocation_rejects_unknown_icon_asset():
-    task_spec = _metric_task_spec()
-    invocation = RingSplitMetricInvocation(
-        caption=BindingRef(path="/data/memory/available"),
-        caption_icon="asset.unknown",
-        progress=BindingRef(path="/data/memory/usedPercent"),
-        center_icon="moon",
-        major_value=BindingRef(path="/data/memory/usedPercent"),
-        major_unit="%",
-        minor_value=BindingRef(path="/data/memory/available"),
-        minor_unit="GB",
-        action=ActionRef(event_id="event.clean.memory", label="查看详情"),
-    )
-
-    with pytest.raises(ValueError, match="asset is not in TaskSpec"):
-        validate_invocation("ring-split-metric-action", invocation, task_spec)
-
-
 @pytest.mark.asyncio
 async def test_advanced_template_converts_to_standard_a2ui():
     output = await AdvancedComponentPipeline().generate(
@@ -608,31 +509,15 @@ async def test_advanced_template_converts_to_standard_a2ui():
     ("component_id", "invocation", "style_id"),
     [
         (
-            "ring-split-metric-action",
-            RingSplitMetricInvocation(
-                caption=BindingRef(path="/data/metric/caption"),
-                caption_icon="bell",
-                progress=BindingRef(path="/data/metric/progress"),
-                center_icon="moon",
-                major_value=BindingRef(path="/data/metric/major"),
-                major_unit="小时",
-                minor_value=BindingRef(path="/data/metric/minor"),
-                minor_unit="分钟",
-                action=ActionRef(event_id="event.go", label="立即开始"),
+            "low-power",
+            LowPowerInvocation(
+                status_text=BindingRef(path="/data/metric/caption"),
+                percentage=BindingRef(path="/data/metric/progress"),
+                battery_icon="bell",
+                action_icon="moon",
+                action=ActionRef(event_id="event.go", label="开启省电"),
             ),
-            "night-violet",
-        ),
-        (
-            "schedule-detail-action",
-            ScheduleDetailInvocation(
-                caption="下一个日程",
-                entity_title=BindingRef(path="/data/metric/title"),
-                start_time=BindingRef(path="/data/metric/start"),
-                end_time=BindingRef(path="/data/metric/end"),
-                reminder_value=BindingRef(path="/data/metric/reminder"),
-                action=ActionRef(event_id="event.go", label="专注模式"),
-            ),
-            "warm-copper",
+            "system-teal",
         ),
     ],
 )
@@ -693,55 +578,23 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
 
     assert len(genui.splitlines()) == 3
     assert '"linearGradient"' in genui
-    if component_id == "ring-split-metric-action":
-        assert 'Image("resources/base/media/bell.svg"' in source_dsl
-        assert 'Image("resources/base/media/moon.svg"' in source_dsl
+    assert 'Image("resources/base/media/bell.svg"' in source_dsl
+    assert 'Image("resources/base/media/moon.svg"' in source_dsl
 
 
 @pytest.mark.parametrize(
     ("component_id", "invocation", "style_id"),
     [
         (
-            "compact-metrics-primary-action",
-            CompactMetricsInvocation(
-                compact_metrics=[
-                    CompactMetricArg(
-                        label="主指标", value=BindingRef(path="/data/metric/progress")
-                    ),
-                    CompactMetricArg(label="次指标", value=BindingRef(path="/data/metric/major")),
-                ],
-                primary_label="核心指标",
-                primary_value=BindingRef(path="/data/metric/progress"),
-                action=ActionRef(event_id="event.go", label="立即处理"),
+            "low-power",
+            LowPowerInvocation(
+                status_text=BindingRef(path="/data/metric/caption"),
+                percentage=BindingRef(path="/data/metric/progress"),
+                battery_icon="bell",
+                action_icon="moon",
+                action=ActionRef(event_id="event.go", label="开启省电"),
             ),
             "system-teal",
-        ),
-        (
-            "ring-split-metric-action",
-            RingSplitMetricInvocation(
-                caption=BindingRef(path="/data/metric/caption"),
-                caption_icon="bell",
-                progress=BindingRef(path="/data/metric/progress"),
-                center_icon="moon",
-                major_value=BindingRef(path="/data/metric/major"),
-                major_unit="小时",
-                minor_value=BindingRef(path="/data/metric/minor"),
-                minor_unit="分钟",
-                action=ActionRef(event_id="event.go", label="立即开始"),
-            ),
-            "night-violet",
-        ),
-        (
-            "schedule-detail-action",
-            ScheduleDetailInvocation(
-                caption="下一个日程",
-                entity_title=BindingRef(path="/data/metric/title"),
-                start_time=BindingRef(path="/data/metric/start"),
-                end_time=BindingRef(path="/data/metric/end"),
-                reminder_value=BindingRef(path="/data/metric/reminder"),
-                action=ActionRef(event_id="event.go", label="专注模式"),
-            ),
-            "warm-copper",
         ),
     ],
 )
@@ -761,20 +614,15 @@ def test_direct_a2ui_templates_use_original_aesthetic_component_tree(
     update = messages[1]["updateComponents"]
     ids = {component["id"] for component in update["components"]}
     expected_original_ids = {
-        "compact-metrics-primary-action": {"compact-rings-row", "hero-card"},
-        "ring-split-metric-action": {"hero-ring", "hero-icon", "split-values"},
-        "schedule-detail-action": {"time-range", "flex-spacer"},
+        "low-power": {"battery-stack", "battery-progress", "action-wrap"},
     }
     assert update["root"] == "root"
     assert expected_original_ids[component_id] <= ids
-    if component_id == "ring-split-metric-action":
-        components = {component["id"]: component for component in update["components"]}
-        assert components["caption-icon"]["component"] == "Image"
-        assert components["caption-icon"]["src"] == "resources/base/media/bell.svg"
-        assert components["hero-icon"]["component"] == "Image"
-        assert components["hero-icon"]["src"] == "resources/base/media/moon.svg"
-        assert components["hero-ring"]["styles"]["alignContent"] == "center"
-        assert components["hero-ring"]["children"] == ["hero-progress", "hero-icon"]
+    components = {component["id"]: component for component in update["components"]}
+    assert components["battery-icon"]["component"] == "Image"
+    assert components["battery-icon"]["src"] == "resources/base/media/bell.svg"
+    assert components["action-icon"]["component"] == "Image"
+    assert components["action-icon"]["src"] == "resources/base/media/moon.svg"
 
 
 def _template_task_spec():
@@ -848,31 +696,34 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
         uid="advanced-e2e",
         prdVer="11.7.5.205",
         device={"romVersion": "CLS-AL30 6.0.0.328"},
-        userQuery="生成天气状态卡片",
-        title="天气",
-        description="天气状态",
+        userQuery="设备电量低于20%，开启省电模式",
+        title="设备电量",
+        description="低电量状态和省电操作",
         candidateDataBindings=[
             {
-                "capabilityId": "ViewWeather",
-                "arguments": {"districtName": "上海"},
-                "writeResultTo": "/data/weather",
+                "capabilityId": "GetPhoneBatteryInfo",
+                "arguments": {},
+                "writeResultTo": "/data/phoneBattery",
             }
         ],
         candidateEventCandidates=[
             {
-                "capabilityId": "event.open.weather",
+                "capabilityId": "event.setPowerSavingMode",
                 "action": {
-                    "id": "event.open.weather",
-                    "call": "clickToDeeplink",
+                    "id": "event.setPowerSavingMode",
+                    "call": "clickToIntent",
                     "args": {
-                        "intentName": "Weather_CityCode",
-                        "bundleName": "",
-                        "abilityName": "",
-                        "uri": "hww://www.huawei.com/totemweather?enterType=share&cityCode=",
+                        "intentName": "SetSettingSwitch",
+                        "params": {
+                            "appBundleName": "com.huawei.hmos.settings",
+                            "itemName": "battery_saving_mode",
+                            "switchFlag": 0,
+                        },
                     },
                 },
             }
         ],
+        candidateAssetIds=["asset.icon_electricity", "asset.icon_save_power"],
     )
 
     response = await WidgetGenerationService().generate_widget_card_terse_dsl_nested2(request)
@@ -894,7 +745,7 @@ async def test_invalid_advanced_template_falls_back_to_original_terse(monkeypatc
 
     async def invalid_advanced(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
         return AdvancedPipelineOutput(
-            component_id="ring-split-metric-action",
+            component_id="low-power",
             style_id="night-violet",
             source_dsl='["broken","Text",{}]',
             source_format="terse",

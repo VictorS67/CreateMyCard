@@ -23,6 +23,7 @@ class Invocation(BaseModel):
 SPEC = ComponentSpec(
     component_id="dual-ring-primary-action",
     description="两个环形百分比指标和一个横向主要操作。",
+    slots=["两个独立百分比数值", "两个环形进度及中心图片", "一个横向主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["device"],

@@ -24,6 +24,7 @@ class Invocation(BaseModel):
 SPEC = ComponentSpec(
     component_id="timeline-event-action",
     description="日期、事项详情、时间地点和主要操作。",
+    slots=["日期", "事项标题", "开始和结束时间", "地点详情", "一个主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["schedule"],

@@ -12,10 +12,10 @@ from ..scene_helpers import asset_src, field_by_terms, first_action, first_asset
 
 
 class Invocation(BaseModel):
-    location: BindingRef = Field(description="当前城市或通勤起点绑定。")
+    location: BindingRef | None = Field(default=None, description="可选的顶部地点文本绑定。")
     temperature: BindingRef = Field(description="当前温度主指标绑定。")
     condition: BindingRef = Field(description="降雨等天气状态文本绑定。")
-    range_text: BindingRef = Field(description="最高/最低温度范围文本绑定。")
+    range_text: BindingRef | None = Field(default=None, description="可选的底部补充摘要绑定。")
     weather_icon: str = Field(description="必须填写 assetCandidates 中的天气资源 id。")
     taxi_icon: str = Field(description="必须填写 assetCandidates 中的打车资源 id。")
     action: ActionRef = Field(description="打车动作，event_id 必须来自 eventCandidates。")
@@ -24,6 +24,7 @@ class Invocation(BaseModel):
 SPEC = ComponentSpec(
     component_id="hero-metric-icon-action",
     description="单个大号主指标、双语义图片和圆形图片操作。",
+    slots=["可选顶部短文本和图片", "一个大号主指标", "至少一条状态摘要", "图片式圆形操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["weather"],
@@ -34,7 +35,7 @@ SPEC = ComponentSpec(
     layout_archetypes=["hero-metric-icon-action"],
     temporalities=["now"],
     min_semantic_score=8.0,
-    min_fields=4,
+    min_fields=2,
     min_assets=2,
     min_actions=1,
 )
@@ -53,25 +54,19 @@ def build_rows(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
             "justifyContent": "spaceBetween",
         }
     )
-    return [
+    header_children = ["weather"]
+    if invocation.location is not None:
+        header_children = ["pin", "location", "weather"]
+    footer_children = ["taxi-wrap"]
+    if invocation.range_text is not None:
+        footer_children = ["range", "taxi-wrap"]
+    rows = [
         ["root", "Column", root, ["header", "temperature", "condition", "footer"]],
         [
             "header",
             "Row",
             {"alignItems": "center", "itemMargin": 5},
-            ["pin", "location", "weather"],
-        ],
-        ["pin", "Text", {"content": "●", "fontSize": 10, "fontColor": "#FFFFFFFF"}],
-        [
-            "location",
-            "Text",
-            {
-                "content": binding(invocation.location),
-                "fontSize": 14,
-                "fontWeight": 600,
-                "fontColor": "#FFFFFFFF",
-                "layoutWeight": 1,
-            },
+            header_children,
         ],
         [
             "weather",
@@ -98,17 +93,7 @@ def build_rows(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
             "Text",
             {"content": binding(invocation.condition), "fontSize": 13, "fontColor": "#FFE8F6FA"},
         ],
-        ["footer", "Row", {"alignItems": "center"}, ["range", "taxi-wrap"]],
-        [
-            "range",
-            "Text",
-            {
-                "content": binding(invocation.range_text),
-                "fontSize": 12,
-                "fontColor": "#FFD7EDF4",
-                "layoutWeight": 1,
-            },
-        ],
+        ["footer", "Row", {"alignItems": "center"}, footer_children],
         [
             "taxi-wrap",
             "Stack",
@@ -140,6 +125,37 @@ def build_rows(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
             },
         ],
     ]
+    if invocation.location is not None:
+        rows.extend(
+            [
+                ["pin", "Text", {"content": "●", "fontSize": 10, "fontColor": "#FFFFFFFF"}],
+                [
+                    "location",
+                    "Text",
+                    {
+                        "content": binding(invocation.location),
+                        "fontSize": 14,
+                        "fontWeight": 600,
+                        "fontColor": "#FFFFFFFF",
+                        "layoutWeight": 1,
+                    },
+                ],
+            ]
+        )
+    if invocation.range_text is not None:
+        rows.append(
+            [
+                "range",
+                "Text",
+                {
+                    "content": binding(invocation.range_text),
+                    "fontSize": 12,
+                    "fontColor": "#FFD7EDF4",
+                    "layoutWeight": 1,
+                },
+            ]
+        )
+    return rows
 
 
 def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec) -> str:
@@ -147,11 +163,17 @@ def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
 
 
 def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
+    def optional_ref(*terms: str) -> BindingRef | None:
+        try:
+            return ref(field_by_terms(data_shape, *terms, numeric=False))
+        except ValueError:
+            return None
+
     return Invocation(
-        location=ref(field_by_terms(data_shape, "prefecture", "city", "城市", numeric=False)),
+        location=optional_ref("prefecture", "city", "城市"),
         temperature=ref(field_by_terms(data_shape, "temperaturetext", "温度", numeric=None)),
         condition=ref(field_by_terms(data_shape, "condition", "天气", "雨", numeric=False)),
-        range_text=ref(field_by_terms(data_shape, "range", "最高", numeric=False)),
+        range_text=optional_ref("range", "最高"),
         weather_icon=first_asset_id(task_spec, "rain", "weather", "天气"),
         taxi_icon=first_asset_id(task_spec, "taxi", "car", "打车"),
         action=first_action(task_spec, "打车"),

@@ -26,6 +26,7 @@ class Invocation(BaseModel):
 SPEC = ComponentSpec(
     component_id="hero-metric-action",
     description="单个大号主指标、状态摘要和可选语义操作。",
+    slots=["顶部短文本", "一个大号主指标", "两条状态摘要", "一个快捷操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["weather"],

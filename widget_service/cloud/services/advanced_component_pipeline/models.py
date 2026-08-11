@@ -147,15 +147,66 @@ class UIBrief(BaseModel):
             raise ValueError("must not be empty")
         return value.strip()
 
+    @field_validator("status_semantics", mode="before")
+    @classmethod
+    def known_status_semantics(cls, values: Any) -> Any:
+        allowed = {"do-not-disturb", "low-power", "warning", "active", "sleep-quality"}
+        return (
+            [value for value in values if value in allowed] if isinstance(values, list) else values
+        )
+
+    @field_validator("content_semantics", mode="before")
+    @classmethod
+    def known_content_semantics(cls, values: Any) -> Any:
+        allowed = {
+            "location",
+            "temperature",
+            "countdown",
+            "duration",
+            "app-usage",
+            "battery-level",
+            "event-title",
+            "time-range",
+            "event-count",
+            "location-detail",
+            "metric",
+            "memory-usage",
+            "storage-usage",
+            "percentage",
+            "status",
+        }
+        return (
+            [value for value in values if value in allowed] if isinstance(values, list) else values
+        )
+
+    @field_validator("action_semantics", mode="before")
+    @classmethod
+    def known_action_semantics(cls, values: Any) -> Any:
+        allowed = {
+            "call-contact",
+            "open-event",
+            "remind-sleep",
+            "manage-usage",
+            "enable-power-saving",
+            "open-dnd-settings",
+            "enable-focus",
+            "join-meeting",
+            "open-details",
+            "primary-action",
+            "clean-memory",
+            "hail-taxi",
+        }
+        return (
+            [value for value in values if value in allowed] if isinstance(values, list) else values
+        )
+
     @field_validator("local_template_ids")
     @classmethod
     def versioned_template_ids(cls, values: list[str]) -> list[str]:
         pattern = re.compile(r"^[a-z][a-z0-9-]{0,63}@[1-9][0-9]*$")
-        if len(values) != len(set(values)):
-            raise ValueError("localTemplateIds must be unique")
         if any(pattern.fullmatch(value) is None for value in values):
             raise ValueError("localTemplateIds must contain versioned IDs")
-        return values
+        return list(dict.fromkeys(values))
 
 
 class SelectionConstraints(BaseModel):
@@ -167,6 +218,7 @@ class SelectionConstraints(BaseModel):
 class ComponentSpec(BaseModel):
     component_id: str
     description: str
+    slots: list[str] = Field(default_factory=list)
     supported_sizes: list[str]
     required_signals: dict[str, float] = Field(default_factory=dict)
     preferred_signals: dict[str, float] = Field(default_factory=dict)

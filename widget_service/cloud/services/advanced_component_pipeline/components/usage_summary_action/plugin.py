@@ -22,6 +22,7 @@ class Invocation(BaseModel):
 SPEC = ComponentSpec(
     component_id="usage-summary-action",
     description="名称、使用量摘要和一个横向主要操作。",
+    slots=["对象名称", "使用时长或用量", "状态摘要", "一个横向主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["digital-wellbeing"],

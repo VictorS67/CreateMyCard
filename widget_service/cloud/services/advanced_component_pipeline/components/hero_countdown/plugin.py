@@ -28,6 +28,7 @@ class Invocation(BaseModel):
 SPEC = ComponentSpec(
     component_id="hero-countdown",
     description="高饱和通用倒计时，可选显示主要操作。",
+    slots=["静态短标题", "一个大号倒计时数值", "可选的一个主要操作"],
     supported_sizes=["2x2"],
     required_signals={},
     domains=["sports", "schedule", "productivity", "general"],

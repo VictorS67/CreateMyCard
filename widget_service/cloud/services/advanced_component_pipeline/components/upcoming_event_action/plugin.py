@@ -22,6 +22,7 @@ class Invocation(BaseModel):
 SPEC = ComponentSpec(
     component_id="upcoming-event-action",
     description="下一个事项、时间范围和主要操作。",
+    slots=["下一个事项标题", "开始和结束时间", "提醒摘要", "一个主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["schedule", "productivity"],

@@ -8,6 +8,52 @@ from .component_registry import component_specs
 from .models import CandidateScore, ComponentSelection, DataShape, SelectionConstraints, UIBrief
 
 
+def structural_rejection_reasons(
+    data_shape: DataShape,
+    constraints: SelectionConstraints,
+    spec,
+) -> list[str]:
+    """返回仅由 TaskSpec 决定的硬性不兼容原因，不掺入业务关键词。"""
+    reasons: list[str] = []
+    if constraints.size not in spec.supported_sizes:
+        reasons.append("unsupported-size")
+    return reasons
+
+
+def structural_compatibility(
+    data_shape: DataShape, constraints: SelectionConstraints, spec
+) -> dict:
+    """计算模板槽位覆盖率；不足只降分，不把模板从候选集中删除。"""
+    role_coverage = {}
+    for role, expected in spec.required_field_roles.items():
+        actual = sum(role in field.roles for field in data_shape.fields)
+        role_coverage[role] = min(1.0, actual / expected) if expected else 1.0
+    dimensions = {
+        "fields": min(1.0, len(data_shape.fields) / spec.min_fields) if spec.min_fields else 1.0,
+        "assets": min(1.0, constraints.asset_count / spec.min_assets) if spec.min_assets else 1.0,
+        "actions": min(1.0, constraints.action_count / spec.min_actions)
+        if spec.min_actions
+        else 1.0,
+        "fieldRoles": sum(role_coverage.values()) / len(role_coverage) if role_coverage else 1.0,
+    }
+    return {
+        "score": round(sum(dimensions.values()) / len(dimensions), 4),
+        "dimensions": dimensions,
+    }
+
+
+def eligible_component_specs(
+    data_shape: DataShape,
+    constraints: SelectionConstraints,
+):
+    """在调用模型前过滤 TaskSpec 无法满足的模板。"""
+    return tuple(
+        spec
+        for spec in component_specs()
+        if not structural_rejection_reasons(data_shape, constraints, spec)
+    )
+
+
 def _signals(
     data_shape: DataShape,
     brief: UIBrief,
@@ -43,7 +89,7 @@ def _semantic_score(brief: UIBrief, spec) -> float:
     if brief.temporality in spec.temporalities:
         score += 2.0
     if brief.layout_archetype in spec.layout_archetypes:
-        score += 15.0
+        score += 6.0
     return score
 
 
@@ -59,34 +105,26 @@ def select_component(
         score = 0.0
         matched: list[str] = []
         penalties: list[str] = []
-        if constraints.size not in spec.supported_sizes:
-            score -= 100.0
-            penalties.append("unsupported-size")
-        if constraints.action_count < spec.min_actions:
-            score -= 100.0
-            penalties.append("missing-required-action")
-        if constraints.asset_count < spec.min_assets:
-            score -= 100.0
-            penalties.append("missing-required-asset")
-        if len(data_shape.fields) < spec.min_fields:
-            score -= 100.0
-            penalties.append("missing-required-fields")
-        for role, required_count in spec.required_field_roles.items():
-            actual_count = sum(role in field.roles for field in data_shape.fields)
-            if actual_count < required_count:
-                score -= 100.0
-                penalties.append(f"missing-field-role:{role}")
+        structural_rejections = structural_rejection_reasons(data_shape, constraints, spec)
+        score -= 100.0 * len(structural_rejections)
+        penalties.extend(structural_rejections)
         if spec.layout_archetypes and brief.layout_archetype not in spec.layout_archetypes:
-            score -= 100.0
+            score -= 2.0
             penalties.append("layout-archetype-mismatch")
         semantic_score = _semantic_score(brief, spec)
         if semantic_score < spec.min_semantic_score:
-            score -= 100.0
+            score -= spec.min_semantic_score - semantic_score
             penalties.append("semantic-profile-mismatch")
+        score += semantic_score
+        if semantic_score:
+            matched.append(f"semantic={semantic_score:.2f}")
+        compatibility = structural_compatibility(data_shape, constraints, spec)
+        compatibility_score = compatibility["score"]
+        score += compatibility_score * 8.0
+        if compatibility_score < 1.0:
+            penalties.append(f"partial-slot-coverage:{compatibility_score:.2f}")
         else:
-            score += semantic_score
-            if semantic_score:
-                matched.append(f"semantic={semantic_score:.2f}")
+            matched.append("slot-coverage=1.00")
         for signal, weight in spec.required_signals.items():
             value = signals.get(signal, 0.0)
             if value == 0.0:

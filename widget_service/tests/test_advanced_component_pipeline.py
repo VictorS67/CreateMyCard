@@ -40,6 +40,7 @@ from services.advanced_component_pipeline.models import (
     SelectionConstraints,
     UIBrief,
 )
+from services.advanced_component_pipeline.ui_planner import build_ui_planner_prompt
 from services.artifact_store import ArtifactStore
 from services.generation_pipeline import (
     DslProcessorKind,
@@ -473,6 +474,12 @@ def test_structural_weather_hero_selection_does_not_require_business_name_or_ass
 
     assert selection is not None
     assert selection.component_id == "hero-metric-action"
+    planner_payload = json.loads(
+        build_ui_planner_prompt(task_spec, extract_data_shape(task_spec))[1]["content"]
+    )
+    candidates = {item["layoutArchetype"]: item for item in planner_payload["wholeCardCandidates"]}
+    assert candidates["hero-metric-action"]["taskSpecCompatibility"]["score"] == 1.0
+    assert candidates["hero-metric-icon-action"]["taskSpecCompatibility"]["score"] < 1.0
     plugin = get_component(selection.component_id)
     invocation = plugin.map_offline(task_spec, extract_data_shape(task_spec))
     assert invocation.location_icon is None
@@ -480,6 +487,39 @@ def test_structural_weather_hero_selection_does_not_require_business_name_or_ass
     assert "Image(" not in build_terse_nested2(
         selection.component_id, invocation, task_spec, "system-teal"
     )
+
+
+def test_sleep_semantics_override_an_incorrect_llm_layout_archetype():
+    task_spec = _seven_scene_task_spec()
+    brief = UIBrief(
+        purpose="展示睡眠状态和两个睡眠时长",
+        domain="health",
+        scenario="sleep-summary",
+        layoutArchetype="status-ring-action",
+        statusSemantics=["sleep-quality"],
+        contentSemantics=["duration", "status", "metric"],
+        actionSemantics=["remind-sleep", "open-details"],
+        primaryInformation=["睡眠状态", "夜间时长", "深睡时长"],
+        informationHierarchy=["睡眠状态", "两个时长", "操作"],
+        temporality="historical",
+        visualTone="平静",
+        contentPriorities=["两个睡眠时长"],
+        reason="两个时长需要并列展示。",
+    )
+
+    selection = select_component(
+        extract_data_shape(task_spec),
+        brief,
+        SelectionConstraints(
+            size="2x2",
+            action_count=1,
+            asset_count=len(task_spec.assetCandidates),
+        ),
+    )
+
+    assert selection is not None
+    assert selection.component_id == "dual-duration-action"
+    assert selection.confidence >= 0.9
 
 
 def test_countdown_template_supports_one_field_without_action():
@@ -650,15 +690,28 @@ async def test_pipeline_output_format_switch_can_emit_standard_a2ui(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_pipeline_uses_hybrid_route_without_reliable_whole_card_candidate():
+async def test_pipeline_uses_selected_template_even_when_confidence_is_low(monkeypatch):
+    original_select_component = advanced_pipeline_module.select_component
+
+    def select_with_low_confidence(*args, **kwargs):
+        selection = original_select_component(*args, **kwargs)
+        assert selection is not None
+        return selection.model_copy(update={"confidence": 0.5})
+
+    monkeypatch.setattr(
+        advanced_pipeline_module,
+        "select_component",
+        select_with_low_confidence,
+    )
     output = await AdvancedComponentPipeline().generate(
-        _metric_task_spec(with_action=False),
+        _metric_task_spec(),
         OfflineModelClient(),
     )
 
     assert output is not None
-    assert output.route == "hybrid-template"
-    assert output.whole_card_confidence == 0.0
+    assert output.route == "whole-card-template"
+    assert output.component_id == "status-ring-action"
+    assert output.whole_card_confidence == 0.5
     assert output.fallback_used is False
     assert "Template" not in output.compiled_a2ui
 

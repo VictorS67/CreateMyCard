@@ -22,6 +22,7 @@ class Invocation(BaseModel):
 SPEC = ComponentSpec(
     component_id="dual-duration-action",
     description="两个时长数字和一个主要操作。",
+    slots=["状态摘要", "两个并列的时长或数值指标", "一个主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["health"],

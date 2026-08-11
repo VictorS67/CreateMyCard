@@ -604,7 +604,7 @@ def test_production_structured_logs_remove_business_payloads(monkeypatch) -> Non
     assert "private model result" not in logged
 
 
-def test_ui_brief_rejects_unversioned_or_duplicate_local_templates() -> None:
+def test_ui_brief_rejects_unversioned_and_deduplicates_local_templates() -> None:
     base = {
         "purpose": "status",
         "primaryInformation": ["状态"],
@@ -615,5 +615,7 @@ def test_ui_brief_rejects_unversioned_or_duplicate_local_templates() -> None:
     }
     with pytest.raises(ValueError, match="versioned"):
         UIBrief(**base, localTemplateIds=["weather-summary"])
-    with pytest.raises(ValueError, match="unique"):
-        UIBrief(**base, localTemplateIds=["weather-summary@1", "weather-summary@1"])
+    brief = UIBrief(**base, localTemplateIds=["weather-summary@1", "weather-summary@1"])
+    assert brief.local_template_ids == ["weather-summary@1"]
+    brief = UIBrief(**base, contentSemantics=["metric", "model-invented-value"])
+    assert brief.content_semantics == ["metric"]

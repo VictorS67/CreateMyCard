@@ -16,7 +16,31 @@ from models.generation import TaskSpec
 from services.cardplan_template.prompt import selection_candidates
 from services.cardplan_template.registry import CardPlanRegistry
 
-from .models import DataShape, UIBrief
+from .component_selector import eligible_component_specs, structural_compatibility
+from .models import DataShape, SelectionConstraints, UIBrief
+
+
+def _whole_card_candidates(task_spec: TaskSpec, data_shape: DataShape) -> list[dict[str, Any]]:
+    constraints = SelectionConstraints(
+        size=task_spec.size,
+        action_count=len(task_spec.eventCandidates),
+        asset_count=len(task_spec.assetCandidates),
+    )
+    return [
+        {
+            "layoutArchetype": spec.component_id,
+            "visualStructure": spec.description,
+            "requiredSlots": spec.slots,
+            "requirements": {
+                "minFields": spec.min_fields,
+                "minAssets": spec.min_assets,
+                "minActions": spec.min_actions,
+                "requiredFieldRoles": spec.required_field_roles,
+            },
+            "taskSpecCompatibility": structural_compatibility(data_shape, constraints, spec),
+        }
+        for spec in eligible_component_specs(data_shape, constraints)
+    ]
 
 
 def build_ui_planner_prompt(
@@ -35,6 +59,7 @@ def build_ui_planner_prompt(
         "eventCandidates": [
             event.model_dump(exclude_none=True) for event in task_spec.eventCandidates
         ],
+        "wholeCardCandidates": _whole_card_candidates(task_spec, data_shape),
         "cardPlanCandidates": selection_candidates(task_spec, registry),
     }
     return [
@@ -47,7 +72,18 @@ def build_ui_planner_prompt(
                 "根据用户目标、字段含义和事件能力，从 JSON Schema 的枚举中选择；"
                 "这些字段描述业务语义，不能填写组件名或布局名。"
                 "layoutArchetype 必须只根据需要呈现的数据槽位和视觉层级选择，"
-                "不得根据具体 App、品牌、人群或业务名称选择。"
+                "不得根据具体 App、品牌、人群或业务名称选择。只能从 wholeCardCandidates"
+                "中的 layoutArchetype 选择；如果列表为空则填写 auto。逐项对照 fields 与"
+                "requiredSlots，优先覆盖用户明确要求的视觉结构（例如环形进度、双指标、"
+                "倒计时、时间线），不要仅因为某个模板字段更少就选择它。"
+                "选择规则：只有用户明确要求环形进度，或百分比是唯一核心指标时才选择"
+                "status-ring-action；两个独立百分比且都需要环形展示时选择"
+                "dual-ring-primary-action；两个独立时长需要并列展示时选择"
+                "dual-duration-action；使用量、使用时长及状态摘要选择"
+                "usage-summary-action；倒计时选择 hero-countdown；具有明确开始/结束时间的"
+                "未来事项选择 upcoming-event-action，包含日期、地点和时间线详情时选择"
+                "timeline-event-action；hero-metric-icon-action 只用于用户明确要求两个语义"
+                "图片且候选中确实存在该模板；其他单一突出指标使用 hero-metric-action。"
                 "不能输出颜色、圆角、组件树、布局源码、参数值或 DesignToken。"
                 "局部 Template 是可选能力，不适合时输出空列表。选择 Theme 时优先保证它与"
                 "所选局部 Template 的 compatibleThemeIds 一致。actionPlacement 只表达 Action "
@@ -75,6 +111,11 @@ async def plan_ui_with_llm(
     except ValidationError as exc:
         raise ValueError(f"invalid UIBrief: {exc}") from exc
     registry = CardPlanRegistry()
+    eligible_layouts = {
+        item["layoutArchetype"] for item in _whole_card_candidates(task_spec, data_shape)
+    }
+    if brief.layout_archetype != "auto" and brief.layout_archetype not in eligible_layouts:
+        raise ValueError("UIBrief selected a whole-card template outside eligible candidates")
     candidates = selection_candidates(task_spec, registry)
     theme_ids = {item["id"] for item in candidates["themes"]}
     template_ids = {item["id"] for item in candidates["localTemplates"]}

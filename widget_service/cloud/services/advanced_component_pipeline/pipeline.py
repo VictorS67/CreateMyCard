@@ -17,7 +17,8 @@ from services.protocol_registry import TERSE_DSL_NESTED2_PROFILE_ID, A2UIProtoco
 
 from .argument_mapper import map_arguments_offline, map_arguments_with_llm
 from .compiler import build_component_output
-from .component_selector import select_component
+from .component_registry import get_component
+from .component_selector import select_component, structural_compatibility
 from .data_shape import extract_data_shape
 from .models import AdvancedPipelineOutput, SelectionConstraints
 from .styles import select_style
@@ -91,16 +92,26 @@ class AdvancedComponentPipeline:
         )
         selection_candidates = selection.candidates if selection is not None else []
         confidence = selection.confidence if selection is not None else 0.0
-        threshold = getattr(
-            get_settings(),
-            "advanced_whole_card_confidence_threshold",
-            0.75,
-        )
-        use_hybrid = force_hybrid or selection is None or confidence < threshold
+        selected_compatibility = 0.0
+        if selection is not None:
+            selected_compatibility = structural_compatibility(
+                data_shape,
+                SelectionConstraints(
+                    size=task_spec.size,
+                    action_count=len(task_spec.eventCandidates),
+                    asset_count=len(task_spec.assetCandidates),
+                ),
+                get_component(selection.component_id).spec,
+            )["score"]
+        # A selected whole-card component is authoritative. Confidence and
+        # structural compatibility remain observable selection diagnostics,
+        # but no longer demote a valid selection to the hybrid route.
+        use_hybrid = force_hybrid or selection is None
         selected_component = selection.component_id if selection is not None else "none"
         logger.info(
             f"{_MODULE} component_selection_completed selected_component_id={selected_component} "
-            f"confidence={confidence} threshold={threshold} force_hybrid={force_hybrid} "
+            f"confidence={confidence} force_hybrid={force_hybrid} "
+            f"task_spec_compatibility={selected_compatibility} "
             f"route={'hybrid-template' if use_hybrid else 'whole-card-template'} "
             f"candidate_count={len(selection_candidates)}"
         )
@@ -156,7 +167,7 @@ class AdvancedComponentPipeline:
                 planner_mode=planner_mode,
                 mapper_mode="llm",
                 route="hybrid-template",
-                whole_card_confidence=confidence,
+                whole_card_confidence=round(confidence * selected_compatibility, 4),
                 whole_card_candidates=selection_candidates,
                 confidence_bypassed=force_hybrid,
                 raw_output=compilation.raw_output,

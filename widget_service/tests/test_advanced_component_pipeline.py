@@ -262,6 +262,32 @@ def test_seven_visual_scene_plugins_select_and_compile(purpose, component_id):
     assert [error for error in errors if not error.startswith("EFFECTIVE_")] == []
 
 
+def test_schedule_dnd_ui_brief_selects_focus_mode():
+    task_spec = _seven_scene_task_spec()
+    brief = UIBrief(
+        purpose="以紧凑卡片形式展示未来日程概览，提示用户当前处于免打扰状态，并允许一键进入设置。",
+        primaryInformation=["今日及近期日程数量", "近期日程的时间与标题", "免打扰开启状态"],
+        informationHierarchy=["免打扰状态", "近期日程", "设置入口"],
+        density="compact",
+        temporality="upcoming",
+        interaction="one-primary-action",
+        attention="normal",
+        visualTone="简洁、高效，强调日程时间性与免打扰的静默感",
+        contentPriorities=["免打扰状态", "日程时间准确性", "日程标题", "进入设置"],
+        reason="2x2 卡片突出未来日程和免打扰设置。",
+    )
+
+    selection = select_component(
+        extract_data_shape(task_spec),
+        brief,
+        SelectionConstraints(size="2x2", action_count=1),
+    )
+
+    assert selection is not None
+    assert selection.component_id == "focus-mode"
+    assert selection.confidence >= 0.75
+
+
 class OfflineModelClient:
     async def generate_json(self, _prompt, *, phase):
         raise RuntimeError(f"offline: {phase}")

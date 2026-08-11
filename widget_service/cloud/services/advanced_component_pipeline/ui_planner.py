@@ -92,7 +92,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
         (("睡眠", "早睡", "深睡"), "sleep-coach", "睡眠时长"),
         (("防沉迷", "使用时长", "管控时间", "屏幕时间"), "digital-wellbeing", "应用使用时长"),
         (("低电量", "省电模式", "电量低"), "low-power", "低电量状态"),
-        (("专注模式", "会议倒计时"), "focus-mode", "下一个会议"),
+        (("专注模式", "会议倒计时", "免打扰"), "focus-mode", "下一个会议"),
         (("当前会议", "加入会议", "会议号"), "current-meeting", "当前会议"),
     ]
     for keywords, purpose, primary in scene_rules:

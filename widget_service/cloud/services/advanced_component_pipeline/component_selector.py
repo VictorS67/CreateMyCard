@@ -48,7 +48,15 @@ def _signals(
             "digital-wellbeing", "使用时长", "防沉迷", "管控时间", "屏幕时间"
         ),
         "low-power-intent": has_any("low-power", "低电量", "省电模式", "电量低"),
-        "focus-mode-intent": has_any("focus-mode", "专注模式", "会议倒计时"),
+        "focus-mode-intent": has_any(
+            "focus-mode",
+            "专注模式",
+            "会议倒计时",
+            "免打扰",
+            "下一个日程",
+            "未来日程",
+            "近期日程",
+        ),
         "current-meeting-intent": has_any("current-meeting", "当前会议", "加入会议", "会议号"),
     }
 

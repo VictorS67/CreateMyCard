@@ -13,7 +13,6 @@ def _signals(
     brief: UIBrief,
     constraints: SelectionConstraints,
 ) -> dict[str, float]:
-    purpose = brief.purpose.lower()
     return {
         "metrics": min(1.0, data_shape.metric_count / 3.0),
         "duration": min(1.0, data_shape.duration_count / 2.0),
@@ -21,13 +20,29 @@ def _signals(
         "percentage": min(1.0, float(data_shape.percentage_count)),
         "repeated-metrics": float(data_shape.repeated_metric_group_count > 0),
         "action": float(constraints.action_count > 0),
-        "monitoring-intent": float(
-            any(word in purpose for word in ("monitor", "resource", "status"))
-        ),
-        "schedule-intent": float(
-            any(word in purpose for word in ("schedule", "appointment", "event"))
-        ),
+        "monitoring-intent": float(brief.scenario == "resource-monitoring"),
+        "schedule-intent": float(brief.domain == "schedule"),
     }
+
+
+def _overlap_score(actual: list[str], expected: list[str], weight: float) -> float:
+    if not expected:
+        return 0.0
+    return weight * len(set(actual) & set(expected)) / len(set(expected))
+
+
+def _semantic_score(brief: UIBrief, spec) -> float:
+    score = 0.0
+    if brief.domain in spec.domains:
+        score += 6.0
+    if brief.scenario in spec.scenarios:
+        score += 7.0
+    score += _overlap_score(brief.status_semantics, spec.status_semantics, 4.0)
+    score += _overlap_score(brief.content_semantics, spec.content_semantics, 5.0)
+    score += _overlap_score(brief.action_semantics, spec.action_semantics, 5.0)
+    if brief.temporality in spec.temporalities:
+        score += 2.0
+    return score
 
 
 def select_component(
@@ -46,8 +61,27 @@ def select_component(
             score -= 100.0
             penalties.append("unsupported-size")
         if constraints.action_count < spec.min_actions:
-            score -= 8.0
+            score -= 100.0
             penalties.append("missing-required-action")
+        if constraints.asset_count < spec.min_assets:
+            score -= 100.0
+            penalties.append("missing-required-asset")
+        if len(data_shape.fields) < spec.min_fields:
+            score -= 100.0
+            penalties.append("missing-required-fields")
+        for role, required_count in spec.required_field_roles.items():
+            actual_count = sum(role in field.roles for field in data_shape.fields)
+            if actual_count < required_count:
+                score -= 100.0
+                penalties.append(f"missing-field-role:{role}")
+        semantic_score = _semantic_score(brief, spec)
+        if semantic_score < spec.min_semantic_score:
+            score -= 100.0
+            penalties.append("semantic-profile-mismatch")
+        else:
+            score += semantic_score
+            if semantic_score:
+                matched.append(f"semantic={semantic_score:.2f}")
         for signal, weight in spec.required_signals.items():
             value = signals.get(signal, 0.0)
             if value == 0.0:

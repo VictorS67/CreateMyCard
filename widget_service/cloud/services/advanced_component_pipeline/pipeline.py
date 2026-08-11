@@ -410,6 +410,7 @@ class AdvancedComponentPipeline:
             SelectionConstraints(
                 size=task_spec.size,
                 action_count=len(task_spec.eventCandidates),
+                asset_count=len(task_spec.assetCandidates),
             ),
         )
         selection_candidates = selection.candidates if selection is not None else []

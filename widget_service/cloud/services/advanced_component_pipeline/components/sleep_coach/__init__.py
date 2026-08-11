@@ -1,4 +1,4 @@
-"""环形双指标高级组件插件。"""
+"""睡眠监测模板。"""
 
 from .plugin import PLUGIN
 

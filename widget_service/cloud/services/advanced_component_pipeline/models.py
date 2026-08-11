@@ -348,6 +348,63 @@ class UIBrief(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     purpose: str
+    domain: Literal[
+        "weather",
+        "sports",
+        "health",
+        "digital-wellbeing",
+        "device",
+        "schedule",
+        "productivity",
+        "general",
+    ] = "general"
+    scenario: Literal[
+        "family-care",
+        "race-countdown",
+        "sleep-summary",
+        "usage-control",
+        "low-power",
+        "upcoming-event",
+        "ongoing-event",
+        "resource-monitoring",
+        "status-summary",
+        "schedule-detail",
+        "general",
+    ] = "general"
+    status_semantics: list[
+        Literal["do-not-disturb", "low-power", "warning", "active", "sleep-quality"]
+    ] = Field(default_factory=list, alias="statusSemantics")
+    content_semantics: list[
+        Literal[
+            "location",
+            "temperature",
+            "countdown",
+            "duration",
+            "app-usage",
+            "battery-level",
+            "event-title",
+            "time-range",
+            "event-count",
+            "location-detail",
+            "metric",
+            "percentage",
+            "status",
+        ]
+    ] = Field(default_factory=list, alias="contentSemantics")
+    action_semantics: list[
+        Literal[
+            "call-contact",
+            "open-event",
+            "remind-sleep",
+            "manage-usage",
+            "enable-power-saving",
+            "open-dnd-settings",
+            "enable-focus",
+            "join-meeting",
+            "open-details",
+            "primary-action",
+        ]
+    ] = Field(default_factory=list, alias="actionSemantics")
     primary_information: list[str] = Field(alias="primaryInformation", min_length=1)
     information_hierarchy: list[str] = Field(alias="informationHierarchy", min_length=1)
     density: Literal["sparse", "normal", "compact"] = "normal"
@@ -391,6 +448,7 @@ class UIBrief(BaseModel):
 class SelectionConstraints(BaseModel):
     size: Literal["2x2", "2x4"]
     action_count: int
+    asset_count: int = 0
 
 
 class ComponentSpec(BaseModel):
@@ -401,6 +459,16 @@ class ComponentSpec(BaseModel):
     preferred_signals: dict[str, float] = Field(default_factory=dict)
     min_actions: int = 0
     max_actions: int = 1
+    min_assets: int = 0
+    min_fields: int = 0
+    required_field_roles: dict[str, int] = Field(default_factory=dict)
+    domains: list[str] = Field(default_factory=list)
+    scenarios: list[str] = Field(default_factory=list)
+    status_semantics: list[str] = Field(default_factory=list)
+    content_semantics: list[str] = Field(default_factory=list)
+    action_semantics: list[str] = Field(default_factory=list)
+    temporalities: list[str] = Field(default_factory=list)
+    min_semantic_score: float = 0.0
 
 
 class CandidateScore(BaseModel):

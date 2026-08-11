@@ -1,4 +1,4 @@
-"""资源监控高级组件插件。"""
+"""日程管家模板。"""
 
 from .plugin import PLUGIN
 

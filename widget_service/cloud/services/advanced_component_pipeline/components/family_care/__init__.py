@@ -1,4 +1,4 @@
-"""日程详情高级组件插件。"""
+"""家庭关怀天气模板。"""
 
 from .plugin import PLUGIN
 

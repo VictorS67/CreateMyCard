@@ -1,0 +1,526 @@
+{
+  "registryVersion": "advanced-component-ux-registry/1",
+  "sourceContract": "harmonyos-a2ui-advanced-components-design/advanced-component-contracts.ts",
+  "uxTokens": {
+    "radius": 20,
+    "safeInset": 12,
+    "sectionGap": 8,
+    "moduleGap": 8,
+    "denseInnerGap": 4,
+    "pillActionHeight": 36,
+    "pillActionIconSize": 20,
+    "iconActionSize": 30,
+    "iconActionIconSize": 16,
+    "titleSourceIconSize": 20,
+    "ringDefaultSize": 52,
+    "ringMinimumSize": 44,
+    "ringContentIconSize": 20,
+    "ringHeroIconSize": 24,
+    "weatherIconCompactSize": 48,
+    "weatherIconHeroSize": 56
+  },
+  "paletteSceneThemeIds": {
+    "generic": ["meeting-paper-neutral", "digital-wellbeing-neutral-dark"],
+    "office.focus": ["focus-warm-amber"],
+    "office.schedule": ["meeting-paper-neutral", "focus-warm-amber"],
+    "weather.sunnyCare": ["family-weather-care-blue"],
+    "weather.rainyCommute": ["rainy-commute-gray-blue"],
+    "sport.action": ["race-sunrise-action"],
+    "sleep.violet": ["sleep-night-violet"],
+    "device.earbuds": ["audio-product-neutral-violet"],
+    "device.lowPower": ["system-low-power-blue"],
+    "device.cleanup": ["device-clean-blue-teal"],
+    "digitalWellbeing": ["digital-wellbeing-neutral-dark"]
+  },
+  "layoutComponents": [
+    {
+      "name": "SingleFocusLayout",
+      "description": "单一主内容布局；可在最后一个 child 承载一个布局 Action。2x2 的 IconAction 叠放右下，PillAction 固定底部，业务区不得侵入动作预留区。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 1,
+      "maxChildrenBySize": {"2x2": 1, "2x4": 1},
+      "actionPolicy": "optional",
+      "minActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "maxActionChildrenBySize": {"2x2": 1, "2x4": 1},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "contentAlign": {"type": "string", "enum": ["topStart", "centerStart", "bottomStart"]}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "column", "2x4": "column"}
+    },
+    {
+      "name": "HeroActionLayout",
+      "description": "主业务区加一个必需的布局 Action；Action 必须是最后一个 child。2x2 主业务区使用剩余高度，PillAction 固定底部，短数值与单位横排。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 1,
+      "maxChildrenBySize": {"2x2": 1, "2x4": 1},
+      "actionPolicy": "required",
+      "minActionChildrenBySize": {"2x2": 1, "2x4": 1},
+      "maxActionChildrenBySize": {"2x2": 1, "2x4": 1},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "actionPlacement": {"type": "string", "enum": ["bottom", "end"]}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "column", "2x4": "column"}
+    },
+    {
+      "name": "HeroSupportLayout",
+      "description": "主业务区和辅助业务区布局；2x2 纵向，2x4 横向。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 2,
+      "maxChildrenBySize": {"2x2": 2, "2x4": 2},
+      "actionPolicy": "none",
+      "minActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "maxActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "ratio": {"type": "string", "enum": ["balanced", "heroWide", "supportWide"]},
+          "direction": {"type": "string", "enum": ["auto", "horizontal", "vertical"]}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "column", "2x4": "row"}
+    },
+    {
+      "name": "HeroSupportActionLayout",
+      "description": "主业务区、辅助业务区和一个必需的布局 Action。2x2 的 Support 仅限1到2行紧凑文本，空间不足时不得压缩或遮挡底部 Action。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 2,
+      "maxChildrenBySize": {"2x2": 2, "2x4": 2},
+      "actionPolicy": "required",
+      "minActionChildrenBySize": {"2x2": 1, "2x4": 1},
+      "maxActionChildrenBySize": {"2x2": 1, "2x4": 1},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "heroRatio": {"type": "string", "enum": ["wide", "balanced"]}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "column", "2x4": "row"}
+    },
+    {
+      "name": "PeerPairLayout",
+      "description": "两个同权业务区布局。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 2,
+      "maxChildrenBySize": {"2x2": 2, "2x4": 2},
+      "actionPolicy": "optional",
+      "minActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "maxActionChildrenBySize": {"2x2": 1, "2x4": 1},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "orientation": {"type": "string", "enum": ["auto", "rows", "columns"]}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "row", "2x4": "row"}
+    },
+    {
+      "name": "SequentialSummaryLayout",
+      "description": "主摘要与后续详情按阅读顺序排列。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 2,
+      "maxChildrenBySize": {"2x2": 3, "2x4": 4},
+      "actionPolicy": "none",
+      "minActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "maxActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "detailColumns": {"type": "integer", "minimum": 1, "maximum": 4}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "column", "2x4": "column"}
+    },
+    {
+      "name": "EqualItemsLayout",
+      "description": "两个或多个同权业务摘要均分空间。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 2,
+      "minChildrenBySize": {"2x2": 2, "2x4": 3},
+      "maxChildrenBySize": {"2x2": 2, "2x4": 4},
+      "actionPolicy": "none",
+      "minActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "maxActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "arrangement": {"type": "string", "enum": ["auto", "row", "grid"]}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "row", "2x4": "row"}
+    },
+    {
+      "name": "ListActionLayout",
+      "description": "列表业务区加可选布局 Action。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 1,
+      "maxChildrenBySize": {"2x2": 1, "2x4": 1},
+      "actionPolicy": "optional",
+      "minActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "maxActionChildrenBySize": {"2x2": 1, "2x4": 1},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "actionPlacement": {"type": "string", "enum": ["bottom", "end"]}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "column", "2x4": "column"}
+    },
+    {
+      "name": "ActionMatrixLayout",
+      "description": "可选业务摘要与2到4个同级控制项；2x2最多2项，2x4按2项、主1+次2或2x2矩阵排布。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 0,
+      "maxChildrenBySize": {"2x2": 1, "2x4": 1},
+      "actionPolicy": "required",
+      "minActionChildrenBySize": {"2x2": 2, "2x4": 2},
+      "maxActionChildrenBySize": {"2x2": 2, "2x4": 4},
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "primaryActionIndex": {"type": "integer", "minimum": 0, "maximum": 3}
+        },
+        "additionalProperties": false
+      },
+      "loweringBySize": {"2x2": "row", "2x4": "row"}
+    },
+    {
+      "name": "WeatherNowForecastLayout",
+      "description": "当前天气、预报和可选辅助语义布局；2x2 只显示城市、主温度、天气/空气和高低温，不展示未来预报列表，不重复事实；有动作图标时使用右下 IconAction。",
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minChildren": 1,
+      "maxChildrenBySize": {"2x2": 1, "2x4": 4},
+      "actionPolicy": "optional",
+      "minActionChildrenBySize": {"2x2": 0, "2x4": 0},
+      "maxActionChildrenBySize": {"2x2": 1, "2x4": 1},
+      "parametersSchema": {"type": "object", "properties": {}, "additionalProperties": false},
+      "loweringBySize": {"2x2": "column", "2x4": "row"}
+    }
+  ],
+  "businessComponents": [
+    {
+      "name": "WeatherOverview",
+      "domainId": "weather",
+      "description": "天气当前状态、预警、通勤和逐项预报摘要。2x2 current 将城市、主温度、天气/空气、高低温组织为单一 Hero；有动作时使用右下 IconAction，禁止用两个 Template 重复同一组天气事实。",
+      "variants": ["conditionOnly", "current", "alert", "commute", "forecastItem"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "peer"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 3},
+      "supportedLayouts": ["SingleFocusLayout", "HeroSupportLayout", "HeroSupportActionLayout", "EqualItemsLayout", "WeatherNowForecastLayout"],
+      "supportsAction": false,
+      "paletteScenes": ["generic", "weather.sunnyCare", "weather.rainyCommute"],
+      "detectionTerms": ["weather", "temperature", "forecast", "rain", "天气", "温度", "预报", "降雨", "通勤"],
+      "dataCapabilityIds": ["ViewWeather"],
+      "enabledVariantsByCapability": {"ViewWeather": ["current", "commute"]},
+      "localTemplateIds": ["ux-weather-overview@2", "ux-weather-hero@1", "ux-condition-index@1", "weather-summary@1"]
+    },
+    {
+      "name": "DateOverview",
+      "domainId": "date",
+      "description": "紧凑日期、日期主视觉和日历上下文。",
+      "variants": ["compactDate", "dateHero", "calendarContext"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 1},
+      "supportedLayouts": ["SingleFocusLayout", "HeroSupportLayout", "HeroSupportActionLayout"],
+      "supportsAction": false,
+      "paletteScenes": ["generic", "office.schedule"],
+      "detectionTerms": ["date", "calendar", "day", "日期", "日历", "星期", "农历"],
+      "dataCapabilityIds": ["GetCalendarEvents"],
+      "enabledVariantsByCapability": {"GetCalendarEvents": ["compactDate", "dateHero"]},
+      "localTemplateIds": ["ux-date-overview@2", "ux-calendar-content@1", "ux-context-summary@1", "calendar-event@1"]
+    },
+    {
+      "name": "ScheduleOverview",
+      "domainId": "schedule",
+      "description": "下一事项、会议详情、议程列表、倒计时和专注上下文。2x2 会议/专注只保留一个紧凑标题、时间及至多一行支持信息，PillAction 固定底部。",
+      "variants": ["nextEvent", "meetingCompact", "meetingExpanded", "agendaList", "countdown", "focusContext"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "list"],
+      "maxItemsBySize": {"2x2": 2, "2x4": 3},
+      "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "HeroSupportLayout", "HeroSupportActionLayout", "ListActionLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "office.focus", "office.schedule"],
+      "detectionTerms": ["schedule", "meeting", "agenda", "event", "日程", "会议", "议程", "事项", "倒计时"],
+      "dataCapabilityIds": ["GetCalendarEvents"],
+      "enabledVariantsByCapability": {"GetCalendarEvents": ["nextEvent", "meetingCompact", "meetingExpanded", "focusContext"]},
+      "localTemplateIds": ["ux-schedule-overview@2", "ux-calendar-content@1", "ux-meeting-metadata@1", "ux-context-summary@1", "calendar-event@1", "ux-countdown@1"]
+    },
+    {
+      "name": "TaskOverview",
+      "domainId": "task",
+      "description": "任务概览、下一任务、任务列表、完成和进度。",
+      "variants": ["summary", "nextTask", "list", "completed", "progress"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "list"],
+      "maxItemsBySize": {"2x2": 2, "2x4": 3},
+      "supportedLayouts": ["SingleFocusLayout", "HeroSupportLayout", "SequentialSummaryLayout", "ListActionLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "office.focus"],
+      "detectionTerms": ["task", "todo", "checklist", "任务", "待办", "清单", "完成", "进度"],
+      "dataCapabilityIds": [],
+      "enabledVariantsByCapability": {},
+      "localTemplateIds": ["ux-task-overview@2", "text-stack@1", "status-action@1", "metric-summary@1"]
+    },
+    {
+      "name": "MemoPreview",
+      "domainId": "memo",
+      "description": "便签正文、提醒和更新时间摘要。",
+      "variants": ["plain", "reminder", "updated"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "list"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 2},
+      "supportedLayouts": ["SingleFocusLayout", "HeroSupportLayout", "ListActionLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic"],
+      "detectionTerms": ["memo", "note", "reminder", "备忘", "便签", "笔记", "提醒"],
+      "dataCapabilityIds": [],
+      "enabledVariantsByCapability": {},
+      "localTemplateIds": ["ux-memo-preview@2", "text-stack@1", "ux-context-summary@1"]
+    },
+    {
+      "name": "CallOverview",
+      "domainId": "call",
+      "description": "未接、最近通话、通话记录和联系人操作。",
+      "variants": ["missed", "latest", "log", "contactAction"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "list"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 3},
+      "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "ListActionLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic"],
+      "sensitiveFields": ["phoneMasked"],
+      "detectionTerms": ["call", "phone", "contact", "电话", "通话", "来电", "联系人", "未接"],
+      "dataCapabilityIds": [],
+      "enabledVariantsByCapability": {},
+      "localTemplateIds": ["ux-call-overview@2", "ux-icon-action@1", "ux-action-summary@1", "text-stack@1"]
+    },
+    {
+      "name": "BatteryOverview",
+      "domainId": "battery",
+      "description": "电量、充电、低电、续航和多电池状态。2x2 low 使用一个 Ring 与紧凑提示，PillAction 固定底部；内存和存储由 ResourceUsageOverview 承担。",
+      "variants": ["normal", "charging", "low", "runtime", "multiBattery"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "peer"],
+      "maxItemsBySize": {"2x2": 2, "2x4": 3},
+      "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "HeroSupportLayout", "HeroSupportActionLayout", "PeerPairLayout", "EqualItemsLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "device.lowPower"],
+      "detectionTerms": ["battery", "charge", "power", "电量", "电池", "充电", "续航", "低电"],
+      "dataCapabilityIds": ["GetPhoneBatteryInfo"],
+      "enabledVariantsByCapability": {"GetPhoneBatteryInfo": ["normal", "charging", "low"]},
+      "localTemplateIds": ["ux-battery-overview@2", "ux-battery-status@1", "ux-device-metric@1", "status-action@1"]
+    },
+    {
+      "name": "ResourceUsageOverview",
+      "domainId": "resource-usage",
+      "description": "内存或存储资源占用摘要。2x2 只允许一个真实主 Ring；内存和电量组合时由 PeerPairLayout 承载，清理动作由布局持有。",
+      "variants": ["memory", "storage"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "peer"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 2},
+      "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "HeroSupportLayout", "HeroSupportActionLayout", "PeerPairLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "device.cleanup"],
+      "detectionTerms": ["memory", "storage", "resource usage", "内存", "存储", "资源占用", "清理"],
+      "dataCapabilityIds": ["GetSystemMemInfo"],
+      "enabledVariantsByCapability": {"GetSystemMemInfo": ["memory"]},
+      "localTemplateIds": ["ux-resource-usage-overview@2", "ux-device-metric@1", "status-action@1"]
+    },
+    {
+      "name": "AppUsageOverview",
+      "domainId": "app-usage",
+      "description": "单应用使用、每日限额、超限和应用排行。2x2 overLimit 使用业务标题、单条分段进度、同一 Row 内的数值+单位、超限提示以及底部 PillAction；禁止把小时和分钟拆成纵向行。",
+      "variants": ["singleApp", "dailyLimit", "overLimit", "topApps"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "list"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 3},
+      "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "HeroSupportActionLayout", "ListActionLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "digitalWellbeing"],
+      "detectionTerms": ["app usage", "screen time", "limit", "应用使用", "屏幕时间", "使用时长", "限额", "超限"],
+      "dataCapabilityIds": ["GetAppUsageDuration"],
+      "enabledVariantsByCapability": {"GetAppUsageDuration": ["singleApp"]},
+      "localTemplateIds": ["ux-app-usage-overview@2", "ux-segmented-limit@1", "ux-dual-metric@1"]
+    },
+    {
+      "name": "ActivityOverview",
+      "domainId": "activity",
+      "description": "步数、热量、锻炼和每日活动摘要。",
+      "variants": ["steps", "calories", "exercise", "dailySummary"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 1},
+      "supportedLayouts": ["SingleFocusLayout", "HeroSupportLayout", "SequentialSummaryLayout"],
+      "supportsAction": false,
+      "paletteScenes": ["generic"],
+      "detectionTerms": ["activity", "steps", "calories", "exercise", "活动", "步数", "热量", "锻炼"],
+      "dataCapabilityIds": ["GetHealthAndSportSummary"],
+      "enabledVariantsByCapability": {"GetHealthAndSportSummary": ["steps", "dailySummary"]},
+      "localTemplateIds": ["ux-activity-overview@2", "metric-cluster@1", "ux-dual-metric@1", "ux-action-summary@1"]
+    },
+    {
+      "name": "WorkoutOverview",
+      "domainId": "workout",
+      "description": "计划、进行中、最近训练和训练倒计时。2x2 countdown 保持一个大倒计时 Hero、至多两行训练上下文和底部 PillAction。",
+      "variants": ["planned", "ongoing", "latest", "countdown"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 2},
+      "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "HeroSupportLayout", "HeroSupportActionLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "sport.action"],
+      "detectionTerms": ["workout", "training", "run", "运动", "训练", "跑步", "健身", "倒计时"],
+      "dataCapabilityIds": ["GetHealthAndSportSummary", "GetCountdownDays"],
+      "enabledVariantsByCapability": {"GetHealthAndSportSummary": ["latest"], "GetCountdownDays": ["countdown"]},
+      "localTemplateIds": ["ux-workout-overview@2", "ux-action-summary@1", "ux-countdown@1"]
+    },
+    {
+      "name": "HeartRateOverview",
+      "domainId": "heart-rate",
+      "description": "当前、平均和需关注的心率摘要。",
+      "variants": ["current", "average", "attention"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 1},
+      "supportedLayouts": ["SingleFocusLayout", "HeroSupportLayout", "SequentialSummaryLayout"],
+      "supportsAction": false,
+      "paletteScenes": ["generic"],
+      "detectionTerms": ["heart rate", "bpm", "pulse", "心率", "脉搏", "平均心率"],
+      "dataCapabilityIds": ["GetHealthAndSportSummary"],
+      "enabledVariantsByCapability": {"GetHealthAndSportSummary": ["average"]},
+      "localTemplateIds": ["ux-heart-rate-overview@2", "metric-ring@1", "metric-summary@1", "status-action@1"]
+    },
+    {
+      "name": "SleepOverview",
+      "domainId": "sleep",
+      "description": "睡眠时长、不足、作息计划和睡眠阶段。2x2 duration/insufficient 使用一行大时长指标、至多一行状态和底部 PillAction。",
+      "variants": ["duration", "insufficient", "schedule", "stages"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 1},
+      "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "HeroSupportLayout", "HeroSupportActionLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "sleep.violet"],
+      "detectionTerms": ["sleep", "bedtime", "wake", "睡眠", "入睡", "起床", "作息", "睡眠不足"],
+      "dataCapabilityIds": ["GetHealthAndSportSummary"],
+      "enabledVariantsByCapability": {"GetHealthAndSportSummary": ["duration", "insufficient", "schedule"]},
+      "localTemplateIds": ["ux-sleep-overview@2", "ux-sleep-metric@1", "ux-action-summary@1"]
+    },
+    {
+      "name": "LocationOverview",
+      "domainId": "location",
+      "description": "当前位置、家庭位置、位置对和通勤上下文。",
+      "variants": ["current", "home", "pair", "commuteContext"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["support", "peer"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 2},
+      "supportedLayouts": ["HeroSupportLayout", "HeroSupportActionLayout", "PeerPairLayout"],
+      "supportsAction": false,
+      "paletteScenes": ["generic", "weather.sunnyCare", "weather.rainyCommute"],
+      "sensitiveFields": ["latitude", "longitude"],
+      "detectionTerms": ["location", "home", "commute", "位置", "定位", "家庭", "通勤", "经纬度"],
+      "dataCapabilityIds": ["ViewWeather"],
+      "enabledVariantsByCapability": {"ViewWeather": ["commuteContext"]},
+      "localTemplateIds": ["ux-location-overview@2", "ux-context-summary@1", "text-stack@1", "status-action@1"]
+    },
+    {
+      "name": "SystemModeOverview",
+      "domainId": "system-mode",
+      "description": "专注、免打扰、声音和组合系统模式。",
+      "variants": ["focus", "dnd", "audio", "combined"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support"],
+      "maxItemsBySize": {"2x2": 2, "2x4": 4},
+      "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "HeroSupportActionLayout", "ActionMatrixLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "office.focus"],
+      "detectionTerms": ["focus", "dnd", "silent", "system mode", "专注", "免打扰", "静音", "系统模式"],
+      "dataCapabilityIds": [],
+      "enabledVariantsByCapability": {},
+      "localTemplateIds": ["ux-system-mode-overview@2", "status-action@1", "ux-icon-action@1", "text-stack@1"]
+    },
+    {
+      "name": "BluetoothDeviceOverview",
+      "domainId": "bluetooth",
+      "description": "单设备、耳机、多设备和媒体控制状态。",
+      "variants": ["singleDevice", "earbuds", "multiDevice", "mediaControl"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "peer"],
+      "maxItemsBySize": {"2x2": 2, "2x4": 3},
+      "supportedLayouts": ["SingleFocusLayout", "HeroSupportLayout", "HeroSupportActionLayout", "PeerPairLayout", "EqualItemsLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "device.earbuds"],
+      "detectionTerms": ["bluetooth", "earbuds", "headphones", "device", "蓝牙", "耳机", "设备", "左右耳"],
+      "dataCapabilityIds": ["GetEarphoneInfo"],
+      "enabledVariantsByCapability": {"GetEarphoneInfo": ["earbuds"]},
+      "localTemplateIds": ["ux-bluetooth-overview@2", "ux-audio-device-status@1", "ux-action-metric@1", "ux-device-metric@1"]
+    },
+    {
+      "name": "SettingsOverview",
+      "domainId": "settings",
+      "description": "单开关、单值、设置组和快捷操作。",
+      "variants": ["singleToggle", "singleValue", "group", "quickActions"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero", "support", "peer"],
+      "maxItemsBySize": {"2x2": 2, "2x4": 4},
+      "supportedLayouts": ["SingleFocusLayout", "PeerPairLayout", "EqualItemsLayout", "ActionMatrixLayout"],
+      "supportsAction": true,
+      "paletteScenes": ["generic", "office.focus"],
+      "detectionTerms": ["settings", "toggle", "option", "设置", "开关", "选项", "快捷操作"],
+      "dataCapabilityIds": [],
+      "enabledVariantsByCapability": {},
+      "localTemplateIds": ["ux-settings-overview@2", "status-action@1", "ux-icon-action@1", "text-stack@1"]
+    }
+  ],
+  "sizeBudgets": [
+    {
+      "size": "2x2",
+      "recommendedBusinessComponents": 2,
+      "maxBusinessComponents": 3,
+      "maxPrimaryActions": 1,
+      "maxPrimaryCharts": 1,
+      "maxListItems": 2,
+      "maxInformationLevels": 2
+    },
+    {
+      "size": "2x4",
+      "recommendedBusinessComponents": 3,
+      "maxBusinessComponents": 4,
+      "maxPrimaryActions": 1,
+      "maxPrimaryCharts": 1,
+      "maxListItems": 3,
+      "maxInformationLevels": 3
+    }
+  ]
+}

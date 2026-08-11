@@ -39,9 +39,14 @@ class Settings(BaseSettings):
     design_compact_model_backend: Literal["mep", "openai"] = "openai"
     advanced_component_output_format: Literal["terse", "a2ui"] = "terse"
     advanced_whole_card_confidence_threshold: float = Field(default=0.75, ge=0.5, le=0.99)
+    enable_advanced_whole_card_template: bool = True
     enable_hybrid_test_bypass: bool = False
     hybrid_test_bypass_token: str = ""
     websocket_bearer_token: str = ""
+    enable_widget_batch_recording: bool = False
+    widget_batch_results_path: str = "workspace/widget_batch_runs"
+    widget_batch_max_input_bytes: int = Field(default=512 * 1024, ge=1)
+    widget_batch_max_output_bytes: int = Field(default=2 * 1024 * 1024, ge=1)
     openai_master_client: Literal["deepseek_platform", "llmclient"] = "deepseek_platform"
     openai_fallback_client: Literal["deepseek_platform", "llmclient"] = "llmclient"
     enable_openai_fallback: bool = True
@@ -73,6 +78,7 @@ class Settings(BaseSettings):
     deepseek_recv_timeout: int = Field(default=120, ge=1)
     deepseek_call_budget_limit: int = Field(default=400, ge=0)
     deepseek_call_budget_path: str = "workspace/runtime/deepseek_call_budget.sqlite3"
+    ux_mixed_validation_max_retry_attempts: int = Field(default=2, ge=0, le=3)
 
     system_prompt_file: str = "docs/system_prompt.txt"
     edit_system_prompt_file: str = "docs/edit_system_prompt.txt"
@@ -208,6 +214,14 @@ class Settings(BaseSettings):
         path = Path(self.deepseek_call_budget_path)
         if path.is_absolute():
             return path
+        return (self.package_root / path).resolve()
+
+    @property
+    def resolved_widget_batch_results_path(self) -> Path:
+        """Resolve the runtime-only widget batch result directory."""
+        path = Path(self.widget_batch_results_path)
+        if path.is_absolute():
+            return path.resolve()
         return (self.package_root / path).resolve()
 
 

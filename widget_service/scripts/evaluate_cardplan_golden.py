@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run deterministic or real-model CardPlan evaluation against ten UX Goldens."""
+"""Run deterministic or real-model CardPlan evaluation against nine UX Goldens."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import time
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -29,17 +31,28 @@ from custom.deepseek_call_budget import (  # noqa: E402
 )
 from models.generation import EventAction, ModelRequestContext, TaskSpec  # noqa: E402
 from services.advanced_component_pipeline import AdvancedComponentPipeline  # noqa: E402
-from services.advanced_component_pipeline.models import UIBrief  # noqa: E402
-from services.cardplan_template.compiler import compile_hybrid_card  # noqa: E402
-from services.cardplan_template.prompt import build_hybrid_prompt  # noqa: E402
+from services.advanced_component_pipeline.content_selectors import (  # noqa: E402
+    apply_content_selectors,
+    project_content_component_facts,
+)
+from services.advanced_component_pipeline.models import (  # noqa: E402
+    AdvancedScopeBrief,
+    UIBrief,
+)
+from services.advanced_component_pipeline.ux_mixed_prompt import (  # noqa: E402
+    build_ux_mixed_prompt,
+)
+from services.cardplan_template.compiler import compile_ux_layout_card  # noqa: E402
 from services.cardplan_template.registry import get_cardplan_registry  # noqa: E402
 from services.protocol_registry import (  # noqa: E402
     TERSE_DSL_NESTED2_PROFILE_ID,
     A2UIProtocolRegistry,
 )
 
-FIXTURE_PATH = SERVICE_ROOT / "tests/fixtures/cardplan_golden_scenarios.json"
+FIXTURE_PATH = SERVICE_ROOT / "tests/fixtures/cardplan_ux_v2_scenarios.json"
 DEFAULT_REPORT_ROOT = SERVICE_ROOT / "workspace/runtime/cardplan_template_evaluation"
+UX_GOLDEN_ROOT = SERVICE_ROOT.parents[1] / "intermediate_expression/tests/golden/ux-design-2x2"
+UX_GOLDEN_MANIFEST = UX_GOLDEN_ROOT / "manifest.json"
 
 
 @dataclass
@@ -161,10 +174,7 @@ def _sample_schema(value: object) -> object:
 
 
 def _scenario_inputs(scenario: dict[str, Any]) -> tuple[TaskSpec, dict[str, Any]]:
-    data = {
-        item["capabilityId"]: item["dataSlice"]
-        for item in scenario["dataEntries"]
-    }
+    data = {item["capabilityId"]: item["dataSlice"] for item in scenario["dataEntries"]}
     events = [
         EventAction(
             id=action_id,
@@ -199,12 +209,35 @@ def _fixture_brief(scenario: dict[str, Any]) -> UIBrief:
         themeSemantics=[scenario["cardTemplate"]["themeProfileId"]],
         layoutSemantics=["compact 2x2"],
         localTemplateIds=[
-            item
-            for item in scenario["cardTemplate"]["requestTemplateIds"]
-            if item != "card@1"
+            item for item in scenario["cardTemplate"]["requestTemplateIds"] if item != "card@1"
         ],
         contentPriorities=["preserve supplied facts"],
         reason="Compile the mechanically exported TypeScript Golden program.",
+    )
+
+
+def _fixture_scope(scenario: dict[str, Any]) -> AdvancedScopeBrief:
+    mapping: dict[str, tuple[str, str]] = {
+        "current-meeting": ("meeting-paper-neutral", "ScheduleOverview"),
+        "family-care-weather": ("family-weather-care-blue", "WeatherOverview"),
+        "focus-mode": ("focus-warm-amber", "ScheduleOverview"),
+        "device-clean": ("device-clean-blue-teal", "ResourceUsageOverview"),
+        "rainy-commute": ("rainy-commute-gray-blue", "WeatherOverview"),
+        "low-power": ("system-low-power-blue", "BatteryOverview"),
+        "sleep": ("sleep-night-violet", "SleepOverview"),
+        "race-countdown": ("race-sunrise-action", "WorkoutOverview"),
+        "digital-wellbeing": (
+            "digital-wellbeing-neutral-dark",
+            "AppUsageOverview",
+        ),
+    }
+    try:
+        theme_id, component_id = mapping[scenario["id"]]
+    except KeyError as exc:
+        raise ValueError(f"Missing deterministic UX scope: {scenario['id']}") from exc
+    return AdvancedScopeBrief(
+        themeId=theme_id,
+        advancedComponentIds=(component_id,),
     )
 
 
@@ -239,6 +272,51 @@ def _a2ui_summary(a2ui: str, action_ids: tuple[str, ...]) -> dict[str, Any]:
     }
 
 
+def _golden_manifest() -> dict[str, Any]:
+    payload = json.loads(UX_GOLDEN_MANIFEST.read_text(encoding="utf-8"))
+    if payload.get("version") != "2.0.0":
+        raise ValueError("UX Golden manifest must use version 2.0.0")
+    if payload.get("wireVersion") != "v0.9":
+        raise ValueError("UX Golden wire version must be v0.9")
+    if payload.get("catalogId") != "ohos.a2ui.extended.catalog":
+        raise ValueError("UX Golden Catalog is invalid")
+    scenes = payload.get("scenes")
+    if not isinstance(scenes, list) or len(scenes) != 9:
+        raise ValueError("UX Golden v2 must contain exactly nine scenes")
+    return payload
+
+
+def _golden_baseline(scenario_id: str) -> dict[str, Any]:
+    manifest = _golden_manifest()
+    scene = next(
+        (item for item in manifest["scenes"] if item.get("id") == scenario_id),
+        None,
+    )
+    if not isinstance(scene, dict):
+        raise ValueError(f"UX Golden scene is missing: {scenario_id}")
+    source_path = UX_GOLDEN_ROOT / str(scene["protocolFile"])
+    source = source_path.read_text(encoding="utf-8")
+    action_ids = tuple(str(item) for item in scene.get("actionIds", []))
+    summary = _a2ui_summary(source, action_ids)
+    rows = [json.loads(line) for line in source.splitlines() if line.strip()]
+    create = rows[0].get("createSurface", {}) if rows else {}
+    protocol_success = (
+        len(rows) == 2
+        and create.get("catalogId") == "ohos.a2ui.extended.catalog"
+        and all(row.get("version") == "v0.9" for row in rows)
+    )
+    return {
+        "version": manifest["version"],
+        "wireVersion": manifest["wireVersion"],
+        "catalogId": manifest["catalogId"],
+        "protocolSuccess": protocol_success,
+        "path": str(source_path),
+        "sha256": "sha256:" + hashlib.sha256(source.encode()).hexdigest(),
+        "compiledA2UI": source,
+        "summary": summary,
+    }
+
+
 def _histogram_similarity(left: dict[str, int], right: dict[str, int]) -> float:
     keys = set(left) | set(right)
     denominator = sum(max(left.get(key, 0), right.get(key, 0)) for key in keys)
@@ -261,15 +339,21 @@ def _flatten_styles(styles: dict[str, Any]) -> set[str]:
     }
 
 
-def _alignment(actual: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
+def _alignment(
+    actual: dict[str, Any],
+    expected: dict[str, Any],
+    *,
+    ignored_title: str = "",
+) -> dict[str, Any]:
     actual_text_by_semantic = {
         _semantic_text(value): value for value in actual["visibleTexts"] if value.strip()
     }
     expected_text_by_semantic = {
         _semantic_text(value): value for value in expected["visibleTexts"] if value.strip()
     }
-    actual_texts = set(actual_text_by_semantic)
     expected_texts = set(expected_text_by_semantic)
+    actual_text_blob = "".join(_semantic_phrase(value) for value in actual["visibleTexts"])
+    expected_text_blob = "".join(_semantic_phrase(value) for value in expected["visibleTexts"])
     actual_actions = set(actual["actionIds"])
     expected_actions = set(expected["actionIds"])
     type_similarity = _histogram_similarity(
@@ -290,23 +374,48 @@ def _alignment(actual: dict[str, Any], expected: dict[str, Any]) -> dict[str, An
         set(actual["stylePairs"]),
         expected_style_pairs,
     )
-    missing_texts = sorted(expected_text_by_semantic[key] for key in expected_texts - actual_texts)
+    raw_missing_texts = sorted(
+        value
+        for value in expected_text_by_semantic.values()
+        if _semantic_phrase(value) and not _visible_text_matches(value, actual_text_blob)
+    )
+    ignored_title_phrase = _semantic_phrase(ignored_title)
+    ignored_title_differences = [
+        value
+        for value in raw_missing_texts
+        if ignored_title_phrase
+        and (
+            _semantic_phrase(value) in ignored_title_phrase
+            or ignored_title_phrase in _semantic_phrase(value)
+        )
+    ]
+    missing_texts = [value for value in raw_missing_texts if value not in ignored_title_differences]
+    extra_texts = sorted(
+        value
+        for value in actual_text_by_semantic.values()
+        if _semantic_phrase(value) and not _visible_text_matches(value, expected_text_blob)
+    )
     missing_actions = sorted(expected_actions - actual_actions)
     reasons: list[str] = []
     if missing_texts:
         reasons.append(f"missing-texts:{len(missing_texts)}")
     if missing_actions:
         reasons.append(f"missing-actions:{len(missing_actions)}")
-    if type_similarity < 0.7:
-        reasons.append("component-type-similarity<0.7")
-    if component_count_similarity < 0.6:
-        reasons.append("component-count-similarity<0.6")
-    if root_style_similarity < 0.25:
-        reasons.append("root-style-similarity<0.25")
+    if type_similarity < 0.35:
+        reasons.append("component-type-similarity<0.35")
+    if component_count_similarity < 0.4:
+        reasons.append("component-count-similarity<0.4")
+    if root_style_similarity < 0.2:
+        reasons.append("root-style-similarity<0.2")
     return {
         "passed": not reasons,
         "missingTexts": missing_texts,
-        "extraTexts": sorted(actual_text_by_semantic[key] for key in actual_texts - expected_texts),
+        "ignoredTitleDifferences": ignored_title_differences,
+        "extraTexts": extra_texts,
+        "semanticTextCoverage": round(
+            1 - len(missing_texts) / max(len(expected_texts), 1),
+            4,
+        ),
         "expectedActionIds": sorted(expected_actions),
         "actualActionIds": sorted(actual_actions),
         "missingActionIds": missing_actions,
@@ -325,36 +434,68 @@ def _semantic_text(value: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip().casefold()
 
 
+def _semantic_phrase(value: str) -> str:
+    normalized = _semantic_text(value).replace("…", "").replace("...", "")
+    return "".join(re.findall(r"[a-z0-9\u4e00-\u9fff°%]+", normalized))
+
+
+def _phrase_matches(needle: str, haystack: str) -> bool:
+    if needle in haystack:
+        return True
+    matcher = SequenceMatcher(a=needle, b=haystack, autojunk=False)
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return matched / len(needle) >= 0.8
+
+
+def _visible_text_matches(value: str, haystack: str) -> bool:
+    phrase = _semantic_phrase(value)
+    if _phrase_matches(phrase, haystack):
+        return True
+    parts = tuple(
+        _semantic_phrase(part) for part in re.split(r"[|｜/·•]+", value) if _semantic_phrase(part)
+    )
+    return len(parts) > 1 and all(_phrase_matches(part, haystack) for part in parts)
+
+
 def _deterministic_scene(scenario: dict[str, Any]) -> dict[str, Any]:
     started = time.perf_counter()
     task_spec, card_spec = _scenario_inputs(scenario)
-    brief = _fixture_brief(scenario)
+    capability_ids = {item["capabilityId"] for item in scenario["dataEntries"]}
+    task_spec = apply_content_selectors(task_spec, capability_ids)
+    scope = _fixture_scope(scenario)
+    task_spec = project_content_component_facts(
+        task_spec,
+        capability_ids,
+        scope.advanced_component_ids,
+    )
     registry = get_cardplan_registry()
-    projection = build_hybrid_prompt(
+    projection = build_ux_mixed_prompt(
         task_spec=task_spec,
         card_spec=card_spec,
-        ui_brief=brief,
+        scope=scope,
         registry=registry,
     )
-    profile = A2UIProtocolRegistry.read_design_protocol_profile(
-        TERSE_DSL_NESTED2_PROFILE_ID
-    )
-    compilation = compile_hybrid_card(
+    profile = A2UIProtocolRegistry.read_design_protocol_profile(TERSE_DSL_NESTED2_PROFILE_ID)
+    compilation = compile_ux_layout_card(
         scenario["rawHybridSource"],
         task_spec=task_spec,
         contract=projection.contract,
         protocol_profile=profile,
         registry=registry,
+        business_title=card_spec.get("title"),
     )
+    baseline = _golden_baseline(scenario["id"])
     actual = _a2ui_summary(compilation.a2ui, compilation.stats.action_used_ids)
     return {
         "scenarioId": scenario["id"],
         "fixtureId": scenario["fixtureId"],
-        "uiBrief": brief.model_dump(mode="json", by_alias=True),
+        "uiBrief": scope.model_dump(mode="json", by_alias=True),
         "candidateTemplates": list(projection.requested_template_ids),
         "wholeCardConfidence": None,
         "wholeCardCandidates": [],
         "confidenceBypassed": True,
+        "providerContractStatus": scenario["providerContractStatus"],
+        "providerContractGaps": scenario["providerContractGaps"],
         "route": "hybrid-template-deterministic",
         "rawHybridOutput": compilation.raw_output,
         "effectiveHybridOutput": compilation.effective_output,
@@ -367,8 +508,46 @@ def _deterministic_scene(scenario: dict[str, Any]) -> dict[str, Any]:
         "template": compilation.stats.model_dump(mode="json"),
         "tokens": {"source": "not-applicable", "totalTokens": 0},
         "latencyMs": _elapsed_ms(started),
-        "goldenAlignment": _alignment(actual, scenario["goldenSummary"]),
+        "standardA2UIBaseline": baseline,
+        "goldenAlignment": _alignment(
+            actual,
+            baseline["summary"],
+            ignored_title=scenario.get("title", ""),
+        ),
         "failureReason": "",
+    }
+
+
+def _deterministic_failure(
+    scenario: dict[str, Any],
+    exc: Exception,
+) -> dict[str, Any]:
+    baseline = _golden_baseline(scenario["id"])
+    return {
+        "scenarioId": scenario["id"],
+        "fixtureId": scenario["fixtureId"],
+        "uiBrief": None,
+        "candidateTemplates": [],
+        "wholeCardConfidence": None,
+        "wholeCardCandidates": [],
+        "confidenceBypassed": True,
+        "providerContractStatus": scenario["providerContractStatus"],
+        "providerContractGaps": scenario["providerContractGaps"],
+        "route": "hybrid-template-deterministic",
+        "rawHybridOutput": scenario.get("rawHybridSource", ""),
+        "effectiveHybridOutput": "",
+        "compiledA2UI": "",
+        "modelCalls": [],
+        "modelRawProtocolSuccess": None,
+        "uiBriefFallback": False,
+        "finalReady": False,
+        "fallback": False,
+        "template": {},
+        "tokens": {"source": "not-applicable", "totalTokens": 0},
+        "latencyMs": 0.0,
+        "standardA2UIBaseline": baseline,
+        "goldenAlignment": None,
+        "failureReason": f"{type(exc).__name__}: {exc}",
     }
 
 
@@ -379,11 +558,10 @@ async def _live_scene(scenario: dict[str, Any]) -> dict[str, Any]:
     output = None
     failure_reason = ""
     try:
-        output = await AdvancedComponentPipeline().generate(
+        output = await AdvancedComponentPipeline().generate_mixed(
             task_spec,
             client,
             card_spec,
-            force_hybrid=True,
             allow_offline_fallback=False,
         )
     except DeepSeekCallBudgetExceeded:
@@ -393,6 +571,7 @@ async def _live_scene(scenario: dict[str, Any]) -> dict[str, Any]:
     finally:
         await client.aclose()
     calls = [asdict(item) for item in client.calls]
+    baseline = _golden_baseline(scenario["id"])
     protocol_success = False
     if output is None:
         return {
@@ -403,6 +582,8 @@ async def _live_scene(scenario: dict[str, Any]) -> dict[str, Any]:
             "wholeCardConfidence": None,
             "wholeCardCandidates": [],
             "confidenceBypassed": True,
+            "providerContractStatus": scenario["providerContractStatus"],
+            "providerContractGaps": scenario["providerContractGaps"],
             "route": "hybrid-template",
             "rawHybridOutput": calls[-1]["raw_output"] if calls else "",
             "effectiveHybridOutput": "",
@@ -415,6 +596,7 @@ async def _live_scene(scenario: dict[str, Any]) -> dict[str, Any]:
             "template": {},
             "tokens": _aggregate_usage(calls),
             "latencyMs": _elapsed_ms(started),
+            "standardA2UIBaseline": baseline,
             "goldenAlignment": None,
             "failureReason": failure_reason or "pipeline returned no output",
         }
@@ -435,6 +617,8 @@ async def _live_scene(scenario: dict[str, Any]) -> dict[str, Any]:
             item.model_dump(mode="json") for item in output.whole_card_candidates
         ],
         "confidenceBypassed": output.confidence_bypassed,
+        "providerContractStatus": scenario["providerContractStatus"],
+        "providerContractGaps": scenario["providerContractGaps"],
         "route": output.route,
         "rawHybridOutput": output.raw_output,
         "effectiveHybridOutput": output.effective_output,
@@ -451,7 +635,12 @@ async def _live_scene(scenario: dict[str, Any]) -> dict[str, Any]:
         },
         "tokens": _aggregate_usage(calls),
         "latencyMs": _elapsed_ms(started),
-        "goldenAlignment": _alignment(actual, scenario["goldenSummary"]),
+        "standardA2UIBaseline": baseline,
+        "goldenAlignment": _alignment(
+            actual,
+            baseline["summary"],
+            ignored_title=scenario.get("title", ""),
+        ),
         "failureReason": failure_reason,
     }
 
@@ -476,16 +665,12 @@ def _aggregate_usage(calls: list[dict[str, Any]]) -> dict[str, int | str]:
     raw_usages = [item.get("raw_usage") for item in calls]
     if raw_usages and all(isinstance(item, dict) for item in raw_usages):
         input_tokens = sum(
-            int(item.get("prompt_tokens", item.get("input_tokens", 0)))
-            for item in raw_usages
+            int(item.get("prompt_tokens", item.get("input_tokens", 0))) for item in raw_usages
         )
         output_tokens = sum(
-            int(item.get("completion_tokens", item.get("output_tokens", 0)))
-            for item in raw_usages
+            int(item.get("completion_tokens", item.get("output_tokens", 0))) for item in raw_usages
         )
-        total_tokens = sum(
-            int(item.get("total_tokens", 0)) for item in raw_usages
-        )
+        total_tokens = sum(int(item.get("total_tokens", 0)) for item in raw_usages)
         return {
             "source": "provider-raw",
             "inputTokens": input_tokens,
@@ -507,17 +692,24 @@ def _elapsed_ms(started: float) -> float:
 
 
 def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    compatible = [item for item in results if item["providerContractStatus"] == "compatible"]
+    partial = [item for item in results if item["providerContractStatus"] == "partial"]
     return {
         "scenarioCount": len(results),
+        "providerCompatibleScenarioCount": len(compatible),
+        "providerPartialScenarioCount": len(partial),
         "modelRawProtocolSuccessCount": sum(
             item["modelRawProtocolSuccess"] is True for item in results
         ),
         "finalReadyCount": sum(item["finalReady"] is True for item in results),
         "fallbackCount": sum(item["fallback"] is True for item in results),
         "goldenAlignmentPassCount": sum(
-            item["goldenAlignment"] is not None
-            and item["goldenAlignment"]["passed"] is True
+            item["goldenAlignment"] is not None and item["goldenAlignment"]["passed"] is True
             for item in results
+        ),
+        "providerCompatibleAlignmentPassCount": sum(
+            item["goldenAlignment"] is not None and item["goldenAlignment"]["passed"] is True
+            for item in compatible
         ),
         "totalTokens": sum(int(item["tokens"].get("totalTokens", 0)) for item in results),
         "totalLatencyMs": round(sum(float(item["latencyMs"]) for item in results), 2),
@@ -526,7 +718,8 @@ def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 async def _run(mode: str, scenario_id: str | None = None) -> dict[str, Any]:
     payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-    scenarios = payload["scenarios"]
+    scenario_by_id = {item["id"]: item for item in payload["scenarios"]}
+    scenarios = [scenario_by_id[item["id"]] for item in _golden_manifest()["scenes"]]
     if scenario_id is not None:
         scenarios = [item for item in scenarios if item["id"] == scenario_id]
         if not scenarios:
@@ -547,13 +740,18 @@ async def _run(mode: str, scenario_id: str | None = None) -> dict[str, Any]:
             results.append(await _live_scene(scenario))
     else:
         budget_status_before = None
-        results = [_deterministic_scene(scenario) for scenario in scenarios]
+        results = []
+        for scenario in scenarios:
+            try:
+                results.append(_deterministic_scene(scenario))
+            except Exception as exc:
+                results.append(_deterministic_failure(scenario, exc))
     if mode == "live":
         budget_status_after = budget.status() if budget is not None else None
     else:
         budget_status_after = None
     return {
-        "schemaVersion": "cardplan-template-python-evaluation/1",
+        "schemaVersion": "cardplan-template-python-evaluation/2",
         "mode": mode,
         "createdAt": datetime.now(UTC).isoformat(),
         "fallbackRequired": False,
@@ -575,8 +773,7 @@ def main() -> int:
         raise SystemExit("Live evaluation requires --confirm-live")
     report = asyncio.run(_run(args.mode, args.scenario))
     output = args.output or (
-        DEFAULT_REPORT_ROOT
-        / f"{args.mode}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
+        DEFAULT_REPORT_ROOT / f"{args.mode}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

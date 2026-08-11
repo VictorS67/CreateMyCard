@@ -145,6 +145,7 @@
       "localTemplateIds": [
         "ux-calendar-content@1",
         "ux-meeting-metadata@1",
+        "ux-context-summary@1",
         "calendar-event@1",
         "ux-countdown@1"
       ]
@@ -361,7 +362,7 @@
     {
       "name": "BatteryOverview",
       "domainId": "battery",
-      "description": "电量、充电状态和可信预计时长。",
+      "description": "电量、充电状态、可信预计时长和设备存储/内存资源用量。",
       "supportedRoles": [
         "hero",
         "support",
@@ -376,7 +377,8 @@
         "normal",
         "charging",
         "low",
-        "runtime"
+        "runtime",
+        "resourceUsage"
       ],
       "defaultVariant": "normal",
       "fieldPriorities": {
@@ -398,9 +400,14 @@
         "charge",
         "power",
         "soc",
+        "memory",
+        "storage",
         "电量",
         "充电",
-        "省电"
+        "省电",
+        "内存",
+        "存储",
+        "清理"
       ],
       "variantTerms": {
         "charging": [
@@ -417,6 +424,13 @@
           "remaining",
           "runtime",
           "剩余时间"
+        ],
+        "resourceUsage": [
+          "memory",
+          "storage",
+          "内存",
+          "存储",
+          "清理"
         ]
       },
       "localTemplateIds": [
@@ -735,7 +749,6 @@
       },
       "localTemplateIds": [
         "ux-sleep-metric@1",
-        "sleep-summary@1",
         "ux-action-summary@1"
       ]
     },

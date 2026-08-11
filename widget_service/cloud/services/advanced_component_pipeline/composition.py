@@ -44,6 +44,18 @@ def build_advanced_composition_plan(
         query_matches = _matched_terms(query_text, capability.detection_terms)
         schema_matches = _matched_terms(schema_text, capability.detection_terms)
         score = query_matches * 4.0 + schema_matches
+        first_query_position = min(
+            (
+                query_text.find(_normalize(term))
+                for term in capability.detection_terms
+                if _normalize(term) in query_text
+            ),
+            default=-1,
+        )
+        if first_query_position >= 0 and query_text:
+            # 同分时让用户更早陈述的主语义胜出，避免末尾 Action（例如“提醒”）
+            # 把主要内容领域误判成通用辅助领域。
+            score += 1.0 - first_query_position / max(1, len(query_text))
         if query_matches > 0 or schema_matches >= 2:
             ranked.append((score, capability))
     ranked.sort(key=lambda item: (-item[0], item[1].name))
@@ -129,7 +141,11 @@ def build_advanced_composition_plan(
             len(assignments) + int(bool(action_count)), budget.max_information_levels
         ),
         data_signals=tuple(sorted(signals)),
-        local_template_ids=_unique_templates(assignments),
+        local_template_ids=_unique_templates(
+            assignments,
+            size=task_spec.size,
+            registry=registry,
+        ),
         dropped_domain_ids=tuple(dict.fromkeys(dropped)),
     )
     validate_advanced_composition_plan(plan, registry)
@@ -308,7 +324,7 @@ def _select_adaptive_template(
         and not action_count
     ):
         return "weather-forecast"
-    if assignments[0].component_id in _LIST_COMPONENTS and action_count:
+    if assignments[0].component_id in _LIST_COMPONENTS and action_count and "list" in signals:
         return "list-action"
     if len(assignments) >= 3 and "metrics" in signals and not action_count:
         return "metric-grid"
@@ -324,11 +340,43 @@ def _select_adaptive_template(
     return None
 
 
-def _unique_templates(assignments: list[AdvancedComponentAssignment]) -> tuple[str, ...]:
+def _unique_templates(
+    assignments: list[AdvancedComponentAssignment],
+    *,
+    size: str,
+    registry: CardPlanRegistry,
+) -> tuple[str, ...]:
+    # 2x2 跨领域组合中，每个语义区只下发一个职责清晰的候选，防止主领域的
+    # 两个相似模板挤掉 support 区。support 优先使用 Registry 标注为 context/summary
+    # 的模板；选择仅依赖受信的角色与语义标签，不读取 fixture 或业务名称。
+    if size == "2x2" and len(assignments) > 1:
+        selected: list[str] = []
+        for assignment in assignments:
+            candidates = assignment.local_template_ids
+            if not candidates:
+                continue
+            selected_id = candidates[0]
+            if assignment.role == "support":
+                selected_id = next(
+                    (
+                        template_id
+                        for template_id in candidates
+                        if {"context", "summary"}
+                        & {
+                            tag.casefold()
+                            for tag in registry.require_template(template_id).domain_tags
+                        }
+                    ),
+                    selected_id,
+                )
+            selected.append(selected_id)
+        return tuple(dict.fromkeys(selected))[:8]
+
+    # 单领域时保留前两个专用候选，给模型适量 variant 选择空间。
     return tuple(
         dict.fromkeys(
             template_id
             for assignment in assignments
-            for template_id in assignment.local_template_ids[:3]
+            for template_id in assignment.local_template_ids[:2]
         )
     )[:8]

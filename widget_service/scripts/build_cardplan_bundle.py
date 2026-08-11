@@ -22,6 +22,11 @@ PROMPT_GROUPS = {
         "tersedsl-nested-2-hybrid/0.2",
         "hybrid-body-generator",
     ),
+    "ux_mixed": (
+        "ux-mixed-prompt/0.4",
+        "tersedsl-nested-2-ux-mixed/0.2",
+        "ux-mixed-generator",
+    ),
 }
 
 
@@ -62,9 +67,11 @@ def _build() -> tuple[str, str]:
         "bundleVersion": "cardplan-template-python-bundle/1",
         "selectionProtocolVersion": PROMPT_GROUPS["selection"][1],
         "bodyProtocolVersion": PROMPT_GROUPS["body"][1],
-        "contractVersion": "hybrid-body-contract/0.4",
+        "uxMixedProtocolVersion": PROMPT_GROUPS["ux_mixed"][1],
+        "contractVersion": "hybrid-body-contract/0.5",
         "templateRegistryVersion": "terse-template-registry/0.7",
         "advancedComponentRegistryVersion": "advanced-component-registry/1",
+        "uxAdvancedComponentRegistryVersion": "advanced-component-ux-registry/1",
         "a2uiWireVersion": "v0.9",
         "a2uiTargetSpecVersion": "v0.9.1",
         "catalogId": "ohos.a2ui.extended.catalog",
@@ -81,9 +88,13 @@ def _build() -> tuple[str, str]:
         f"SELECTION_SYSTEM_PROMPT = {prompt_values['selection']!r}\n\n"
         f"BODY_PROMPT_VERSION = {PROMPT_GROUPS['body'][0]!r}\n"
         f"BODY_PROTOCOL_VERSION = {PROMPT_GROUPS['body'][1]!r}\n"
-        'BODY_CONTRACT_VERSION = "hybrid-body-contract/0.4"\n'
+        'BODY_CONTRACT_VERSION = "hybrid-body-contract/0.5"\n'
         f"BODY_PROMPT_SHA256 = {prompt_hashes['body']!r}\n"
         f"BODY_SYSTEM_PROMPT_KERNEL = {prompt_values['body']!r}\n"
+        f"\nUX_MIXED_PROMPT_VERSION = {PROMPT_GROUPS['ux_mixed'][0]!r}\n"
+        f"UX_MIXED_PROTOCOL_VERSION = {PROMPT_GROUPS['ux_mixed'][1]!r}\n"
+        f"UX_MIXED_PROMPT_SHA256 = {prompt_hashes['ux_mixed']!r}\n"
+        f"UX_MIXED_SYSTEM_PROMPT_KERNEL = {prompt_values['ux_mixed']!r}\n"
     )
     return manifest_text, prompts_text
 

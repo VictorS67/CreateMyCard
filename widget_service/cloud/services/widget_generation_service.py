@@ -34,6 +34,7 @@ from custom.model_runtime import ModelExecutionRuntime
 from models.artifact import ArtifactMeta, GenerationPlan, WidgetArtifact
 from models.generation import DEFAULT_WIDGET_SIZE, EventAction, ModelRequestContext
 from services.advanced_component_pipeline import AdvancedComponentPipeline
+from services.advanced_component_pipeline.pipeline import safe_generation_error_metadata
 from services.artifact_store import ArtifactStore
 from services.capability_registry import CapabilityRegistry
 from services.card_spec_builder import CardSpecBuilder
@@ -575,26 +576,44 @@ class WidgetGenerationService:
         )
         advanced_output = None
         advanced_generation_fallback_used = False
-        if (
-            policy.processor_kind == DslProcessorKind.TERSE_NESTED2
-            and generation_mode == "create"
-        ):
-            force_hybrid = self._authorize_hybrid_bypass(request)
+        strict_hybrid_mode = False
+        if policy.processor_kind == DslProcessorKind.TERSE_NESTED2 and generation_mode == "create":
+            if request.options.forceHybridTemplate:
+                self._authorize_hybrid_bypass(request)
+            strict_hybrid_mode = True
             try:
-                advanced_output = await AdvancedComponentPipeline().generate(
+                advanced_output = await AdvancedComponentPipeline().generate_mixed(
                     task_spec,
                     model_client,
                     card_spec.model_dump(mode="json", exclude_none=True),
-                    force_hybrid=force_hybrid,
+                    allow_offline_fallback=False,
                 )
-                advanced_generation_fallback_used = advanced_output is None
             except DeepSeekCallBudgetExceeded:
                 raise
             except (RuntimeError, ValueError) as exc:
-                advanced_generation_fallback_used = True
-                logger.warning(
-                    f"{_MODULE} advanced_component_generation_failed "
-                    f"exception_type={type(exc).__name__} fallback=terse"
+                error_code, error_origin = safe_generation_error_metadata(exc)
+                logger.error(
+                    f"{_MODULE} strict_ux_mixed_generation_failed "
+                    f"exception_type={type(exc).__name__} "
+                    f"validation_error_code={error_code} "
+                    f"error_origin={error_origin} fallback=disabled "
+                    "business_payload_logged=false"
+                )
+                return GenerateWidgetCardResponse(
+                    status=GenerationStatus.FAILED,
+                    suggestSize=card_spec.suggestSize,
+                    message="混合模板生成失败，请稍后再试。",
+                    removedCapabilities=removed,
+                    errorCode=ErrorCode.A2UI_GENERATION_FAILED.value,
+                    effectiveCapabilities={
+                        "data": [item.id for item in effective_data_capabilities],
+                        "event": [
+                            item.model_dump(mode="json", exclude_none=True)
+                            for item in effective_events
+                        ],
+                        "asset": [item.id for item in asset_candidates],
+                    },
+                    generationFallbackUsed=False,
                 )
         advanced_source_dsl = advanced_output.source_dsl if advanced_output is not None else ""
         if advanced_output is not None:
@@ -670,7 +689,11 @@ class WidgetGenerationService:
         ) -> str:
             nonlocal advanced_source_dsl, model_call_phase, quality_repair_attempt_count
             quality_repair_attempt_count += 1
-            if advanced_source_dsl and invalid_source_dsl == advanced_source_dsl:
+            if (
+                advanced_source_dsl
+                and invalid_source_dsl == advanced_source_dsl
+                and not strict_hybrid_mode
+            ):
                 logger.warning(
                     f"{_MODULE} advanced_component_quality_fallback operation={policy.operation}"
                 )
@@ -815,8 +838,8 @@ class WidgetGenerationService:
         async def evaluate_source_dsl(source_dsl: str) -> list[str]:
             return await to_thread.run_sync(evaluate_source_dsl_sync, source_dsl)
 
-        retry_on_validation_failure = settings.enable_validation_failure_retry or bool(
-            advanced_source_dsl
+        retry_on_validation_failure = settings.enable_validation_failure_retry or (
+            bool(advanced_source_dsl) and not strict_hybrid_mode
         )
         try:
             retry_result = await retry_controller.run(
@@ -1393,6 +1416,7 @@ class WidgetGenerationService:
             candidates.append(
                 EventAction(
                     id=candidate.capabilityId,
+                    displayLabel=candidate.action.displayLabel,
                     call=candidate.action.call,
                     args=candidate.action.args,
                 )

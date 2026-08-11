@@ -8,6 +8,7 @@ import tokenize
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from services.advanced_component_pipeline.models import UX_LAYOUT_COMPONENT_IDS
 from services.terse_dsl_nested2_converter import (
     MAX_COMPONENTS,
     MAX_INPUT_LENGTH,
@@ -21,8 +22,12 @@ from services.terse_dsl_nested2_converter import (
 from .models import SourceSpan
 
 _FORBIDDEN_KEYS = frozenset({"__proto__", "prototype", "constructor"})
-_CONTAINERS = frozenset({"Row", "Column", "List", "Stack"})
-_LEAVES = frozenset({"Text", "Image", "Divider", "Progress", "Button", "Checkbox"})
+_CONTAINERS = frozenset({"Row", "Column", "List", "Stack"}) | UX_LAYOUT_COMPONENT_IDS
+_UX_ACTION_COMPONENTS = frozenset({"PillAction", "IconAction", "ActionTile"})
+_LEAVES = (
+    frozenset({"Text", "Image", "Divider", "Progress", "Button", "Checkbox"})
+    | _UX_ACTION_COMPONENTS
+)
 _COMPONENTS = _CONTAINERS | _LEAVES
 
 
@@ -46,6 +51,44 @@ def normalize_hybrid_source(source: str) -> str:
 
 
 def parse_hybrid_card(source: str) -> ParsedCall:
+    source, root, state = _parse_program(source)
+    if root.kind != "template" or root.name != "card@1":
+        raise TerseDslNested2ConversionError('CardPlan root must be Template("card@1", ...).')
+    if len(root.values) != 1 or len(root.children) != 1:
+        raise TerseDslNested2ConversionError("card@1 requires params and one content child.")
+    if not isinstance(root.values[0], dict):
+        raise TerseDslNested2ConversionError("card@1 params must be one object.")
+    content = root.children[0]
+    if content.kind == "template":
+        state["components"] += 1
+        if state["components"] > MAX_COMPONENTS:
+            raise TerseDslNested2ConversionError("CardPlan component count exceeds 256.")
+        content = ParsedCall(
+            "component",
+            "Column",
+            (),
+            (content,),
+            content.span,
+        )
+        root = ParsedCall(root.kind, root.name, root.values, (content,), root.span)
+    if content.kind != "component" or content.name not in _CONTAINERS:
+        raise TerseDslNested2ConversionError("card@1 content must be one Catalog container.")
+    return root
+
+
+def parse_ux_layout_card(source: str) -> ParsedCall:
+    """Parse the fifth-interface layout-root program without a ``card@1`` wrapper."""
+    _source, root, _state = _parse_program(source)
+    if root.kind != "component" or root.name not in UX_LAYOUT_COMPONENT_IDS:
+        raise TerseDslNested2ConversionError("UX Mixed root must be one Layout Component.")
+    if len(root.values) > 1 or (root.values and not isinstance(root.values[0], dict)):
+        raise TerseDslNested2ConversionError(
+            "UX Layout configuration must be one optional object argument."
+        )
+    return root
+
+
+def _parse_program(source: str) -> tuple[str, ParsedCall, dict[str, int]]:
     source = normalize_hybrid_source(source)
     if not source:
         raise TerseDslNested2ConversionError("CardPlan output is empty.")
@@ -62,15 +105,7 @@ def parse_hybrid_card(source: str) -> ParsedCall:
         raise TerseDslNested2ConversionError("CardPlan must contain exactly one call.")
     state = {"components": 0}
     root = _parse_call(module.body[0].value, source, 1, state)
-    if root.kind != "template" or root.name != "card@1":
-        raise TerseDslNested2ConversionError('CardPlan root must be Template("card@1", ...).')
-    if len(root.values) != 1 or len(root.children) != 1:
-        raise TerseDslNested2ConversionError("card@1 requires params and one content child.")
-    if not isinstance(root.values[0], dict):
-        raise TerseDslNested2ConversionError("card@1 params must be one object.")
-    if root.children[0].kind != "component" or root.children[0].name not in _CONTAINERS:
-        raise TerseDslNested2ConversionError("card@1 content must be one Catalog container.")
-    return root
+    return source, root, state
 
 
 def parsed_component_to_nested(node: ParsedCall) -> Nested2Node:
@@ -115,10 +150,7 @@ def _parse_call(
                     "Component child arrays may contain calls only."
                 )
             child_started = True
-            children.extend(
-                _parse_call(child, source, depth + 1, state)
-                for child in argument.elts
-            )
+            children.extend(_parse_call(child, source, depth + 1, state) for child in argument.elts)
         else:
             if child_started:
                 raise TerseDslNested2ConversionError(

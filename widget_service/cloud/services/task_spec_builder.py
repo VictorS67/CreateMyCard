@@ -113,7 +113,12 @@ class TaskSpecBuilder:
             eventCandidates=event_candidates,
             dataModelSchema=data_model_schema,
             assetCandidates=[
-                {"id": item.id, "src": item.src, "description": item.description}
+                {
+                    "id": item.id,
+                    "src": item.src,
+                    "description": item.description,
+                    "sceneTags": item.sceneTags,
+                }
                 for item in asset_candidates
             ],
         )

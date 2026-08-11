@@ -4,7 +4,7 @@ fragmentId: template-composition
 order: 10
 promptVersion: hybrid-body-prompt/0.25
 protocolVersion: tersedsl-nested-2-hybrid/0.2
-contractVersion: hybrid-body-contract/0.4
+contractVersion: hybrid-body-contract/0.5
 ---
 
 <!-- prompt:start -->

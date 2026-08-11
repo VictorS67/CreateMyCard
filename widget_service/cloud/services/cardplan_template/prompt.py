@@ -9,11 +9,19 @@ from typing import Any
 
 from models.generation import TaskSpec
 
-from .generated.prompts import BODY_SYSTEM_PROMPT_KERNEL
+from .generated.prompts import BODY_SYSTEM_PROMPT_KERNEL, UX_MIXED_SYSTEM_PROMPT_KERNEL
 from .models import ActionBinding, Fact, HybridBodyContract, HybridLimits
 from .registry import CardPlanRegistry
 
-_PLAIN_DESIGNS = ("title", "body", "subtitle", "success", "warning", "primary")
+_PLAIN_DESIGNS = (
+    "title",
+    "body",
+    "subtitle",
+    "success",
+    "warning",
+    "primary",
+    "icon",
+)
 _PLAIN_LAYOUTS = ("card", "section", "compact", "between", "actions", "list", "dense", "overlay")
 _ACTION_LABELS = {
     "event.call.phone": "联系家人",
@@ -35,6 +43,18 @@ _ACTION_LABELS = {
     "event.startNavigate": "开始导航",
     "event.setPowerSavingMode": "省电模式",
 }
+_ASSET_SEMANTIC_TERMS = {
+    "calendar": ("calendar", "schedule", "日程", "日历"),
+    "schedule": ("schedule", "日程"),
+    "sport": ("sport", "training", "run", "运动", "训练", "跑步"),
+    "run": ("run", "running", "跑步"),
+    "call": ("call", "phone", "电话", "拨打"),
+    "weather": ("weather", "天气"),
+    "alert": ("alert", "warning", "预警", "警告"),
+    "product": ("product", "earphone", "headphone", "耳机"),
+    "battery": ("battery", "charge", "charging", "电池", "电量", "充电"),
+    "power": ("power", "charge", "charging", "省电", "电量", "充电"),
+}
 
 
 @dataclass(frozen=True)
@@ -52,6 +72,7 @@ def build_hybrid_prompt(
     card_spec: dict[str, Any],
     ui_brief: Any,
     registry: CardPlanRegistry,
+    ux_layout_root_ids: tuple[str, ...] = (),
 ) -> HybridPromptProjection:
     facts = tuple(_collect_facts(task_spec.dataModelSchema))
     theme_id = _resolve_theme(task_spec, ui_brief, registry)
@@ -61,11 +82,20 @@ def build_hybrid_prompt(
         for item in task_spec.assetCandidates
         if isinstance(item, dict) and isinstance(item.get("src"), str)
     )
+    asset_semantic_tags_by_source = {
+        str(item["src"]): _asset_semantic_tags(item)
+        for item in task_spec.assetCandidates
+        if isinstance(item, dict) and isinstance(item.get("src"), str)
+    }
+    card_literals = (
+        [str(card_spec.get("title", ""))]
+        if ux_layout_root_ids
+        else [str(card_spec.get("title", "")), str(card_spec.get("description", ""))]
+    )
     trusted_literals = _unique(
         [
             task_spec.userQuery,
-            str(card_spec.get("title", "")),
-            str(card_spec.get("description", "")),
+            *card_literals,
             *(str(fact.value) for fact in facts if isinstance(fact.value, str)),
             *(_action_label(event) for event in task_spec.eventCandidates),
         ]
@@ -76,6 +106,11 @@ def build_hybrid_prompt(
             for fact in facts
             if isinstance(fact.value, (int, float)) and not isinstance(fact.value, bool)
         )
+    )
+    required_numbers = tuple(
+        fact.value
+        for fact in facts
+        if isinstance(fact.value, (int, float)) and not isinstance(fact.value, bool)
     )
     actions = tuple(
         ActionBinding(
@@ -90,11 +125,17 @@ def build_hybrid_prompt(
     if getattr(ui_brief, "action_placement", "auto") == "none":
         actions = ()
     selected_definitions = [registry.require_template(wire_id) for wire_id in requested]
-    content_action_ids = _resolve_content_action_ids(
-        ui_brief=ui_brief,
-        actions=actions,
-        definitions=selected_definitions,
-    )
+    if ux_layout_root_ids:
+        # Layout contracts select the exact cardinality. Most layouts consume
+        # zero or one primary Action; ActionMatrixLayout may consume up to four
+        # independently approved controls.
+        content_action_ids = tuple(action.action_id for action in actions[:4])
+    else:
+        content_action_ids = _resolve_content_action_ids(
+            ui_brief=ui_brief,
+            actions=actions,
+            definitions=selected_definitions,
+        )
     design_tokens = _unique(
         [
             *_PLAIN_DESIGNS,
@@ -121,75 +162,58 @@ def build_hybrid_prompt(
     limits = HybridLimits(
         max_raw_components=18 if task_spec.size == "2x2" else 28,
         max_expanded_components=36 if task_spec.size == "2x2" else 52,
-        max_nesting_depth=7,
+        max_nesting_depth=9 if ux_layout_root_ids else 7,
         vertical_budget_vp=126,
     )
+    ux_action_components = ("PillAction", "IconAction", "ActionTile") if ux_layout_root_ids else ()
     contract = HybridBodyContract(
         theme_profile_id=theme_id,
-        allowed_components=(
-            "Text",
-            "Image",
-            "Divider",
-            "Progress",
-            "Button",
-            "Checkbox",
-            "Row",
-            "Column",
-            "List",
-            "Stack",
+        allowed_components=tuple(
+            dict.fromkeys(
+                (
+                    "Text",
+                    "Image",
+                    "Divider",
+                    "Progress",
+                    "Button",
+                    "Checkbox",
+                    "Row",
+                    "Column",
+                    "List",
+                    "Stack",
+                    *ux_layout_root_ids,
+                    *ux_action_components,
+                )
+            )
         ),
         allowed_design_tokens=design_tokens,
         allowed_layout_tokens=layout_tokens,
         allowed_template_ids=requested,
         allowed_asset_sources=asset_sources,
+        asset_semantic_tags_by_source=asset_semantic_tags_by_source,
         trusted_literals=trusted_literals,
         trusted_numbers=trusted_numbers,
+        required_numbers=required_numbers,
         required_literals=tuple(dict.fromkeys(string_facts)),
         protected_literals=tuple(dict.fromkeys(string_facts)),
         action_bindings=actions,
         content_action_ids=content_action_ids,
+        allowed_layout_component_ids=ux_layout_root_ids,
         limits=limits,
     )
-    system = _system_prompt(contract, requested, registry)
-    card_composition = {
-        "titleCandidates": [
-            {"role": "title", "text": card_spec.get("title")},
-            {"role": "subtitle", "text": card_spec.get("description")},
-        ],
-        "titleIconCandidates": [
-            {"src": item.get("src"), "description": item.get("description", "")}
-            for item in task_spec.assetCandidates
-            if item.get("src")
-        ],
-        "cardActionCandidates": [
-            {
-                "id": action.action_id,
-                "label": action.display_label,
-                "importance": action.importance,
-                "materialHint": action.material_hint,
-            }
-            for action in actions
-            if action.action_id not in content_action_ids
-        ],
-        "contentActionCandidates": [
-            {
-                "id": action.action_id,
-                "label": action.display_label,
-                "importance": action.importance,
-                "materialHint": action.material_hint,
-            }
-            for action in actions
-            if action.action_id in content_action_ids
-        ],
-        "required": (
-            {"actionId": actions[0].action_id}
-            if len(actions) == 1 and not content_action_ids
-            else {}
-        ),
-        "cardParamsPolicy": (
-            "independent-chrome-without-action" if content_action_ids else "candidate-chrome"
-        ),
-    }
+    system = _system_prompt(
+        contract,
+        requested,
+        registry,
+        ux_layout_root=bool(ux_layout_root_ids),
+    )
+    card_composition = _card_composition_payload(
+        task_spec=task_spec,
+        card_spec=card_spec,
+        actions=actions,
+        content_action_ids=content_action_ids,
+        ux_layout_root=bool(ux_layout_root_ids),
+    )
     user = "\n".join(
         (
             f"request={json.dumps(task_spec.userQuery, ensure_ascii=False)}",
@@ -198,6 +222,7 @@ def build_hybrid_prompt(
             f"cardComposition={json.dumps(card_composition, ensure_ascii=False)}",
             f"dataFacts={json.dumps([fact.model_dump() for fact in facts], ensure_ascii=False)}",
             f"mustKeep={json.dumps(contract.required_literals, ensure_ascii=False)}",
+            f"mustKeepNumbers={json.dumps(contract.required_numbers, ensure_ascii=False)}",
             "advancedComposition="
             + json.dumps(
                 {
@@ -207,7 +232,11 @@ def build_hybrid_prompt(
                 },
                 ensure_ascii=False,
             ),
-            '只输出一个以分号结束、以 Template("card@1", ...) 为根的完整 Card。',
+            (
+                "只输出一个以分号结束、以批准布局高级组件为根的完整 Card。"
+                if ux_layout_root_ids
+                else '只输出一个以分号结束、以 Template("card@1", ...) 为根的完整 Card。'
+            ),
         )
     )
     if len(system) + len(user) > 80_000:
@@ -219,6 +248,62 @@ def build_hybrid_prompt(
         requested_template_ids=requested,
         theme_id=theme_id,
     )
+
+
+def _card_composition_payload(
+    *,
+    task_spec: TaskSpec,
+    card_spec: dict[str, Any],
+    actions: tuple[ActionBinding, ...],
+    content_action_ids: tuple[str, ...],
+    ux_layout_root: bool,
+) -> dict[str, Any]:
+    action_candidates = [
+        {
+            "id": action.action_id,
+            "label": action.display_label,
+            "importance": action.importance,
+            "materialHint": action.material_hint,
+        }
+        for action in actions
+    ]
+    if ux_layout_root:
+        return {
+            "headerPolicy": "no-independent-card-header",
+            "businessTitleCandidate": card_spec.get("title"),
+            "layoutActionCandidates": action_candidates[:4],
+            "required": {},
+            "actionIconCandidates": [
+                {"src": item.get("src"), "description": item.get("description", "")}
+                for item in task_spec.assetCandidates
+                if item.get("src")
+            ],
+        }
+    return {
+        "titleCandidates": [
+            {"role": "title", "text": card_spec.get("title")},
+            {"role": "subtitle", "text": card_spec.get("description")},
+        ],
+        "titleIconCandidates": [
+            {"src": item.get("src"), "description": item.get("description", "")}
+            for item in task_spec.assetCandidates
+            if item.get("src")
+        ],
+        "cardActionCandidates": [
+            item for item in action_candidates if item["id"] not in content_action_ids
+        ],
+        "contentActionCandidates": [
+            item for item in action_candidates if item["id"] in content_action_ids
+        ],
+        "required": (
+            {"actionId": actions[0].action_id}
+            if len(actions) == 1 and not content_action_ids
+            else {}
+        ),
+        "cardParamsPolicy": (
+            "independent-chrome-without-action" if content_action_ids else "candidate-chrome"
+        ),
+    }
 
 
 def selection_candidates(task_spec: TaskSpec, registry: CardPlanRegistry) -> dict[str, Any]:
@@ -277,25 +362,47 @@ def _system_prompt(
     contract: HybridBodyContract,
     requested: tuple[str, ...],
     registry: CardPlanRegistry,
+    *,
+    ux_layout_root: bool = False,
 ) -> str:
     signatures: list[str] = []
     for wire_id in requested:
         definition = registry.require_template(wire_id)
         for variant in definition.variants:
-            if not contract.content_action_ids and _variant_requires_action(variant):
+            if ux_layout_root and _variant_requires_action(variant):
+                continue
+            if not _variant_has_available_required_assets(variant, definition, contract):
+                continue
+            if (
+                not ux_layout_root
+                and not contract.content_action_ids
+                and _variant_requires_action(variant)
+            ):
                 continue
             properties = variant.parameters_schema.get("properties", {})
-            params = {
-                name: {
+            params: dict[str, dict[str, Any]] = {}
+            for name, value in properties.items():
+                value_kind = _parameter_value_kind(name, value)
+                parameter: dict[str, Any] = {
                     "type": value.get("type", "value"),
                     "description": value.get("description", ""),
-                    "valueKind": _parameter_value_kind(name, value),
+                    "valueKind": value_kind,
                 }
-                for name, value in properties.items()
-            }
+                if value_kind == "asset-source":
+                    parameter["allowedSources"] = _parameter_allowed_asset_sources(
+                        name,
+                        definition,
+                        contract,
+                    )
+                params[name] = parameter
             signatures.append(
                 f"- Template({wire_id!r}, {variant.size!r}, params): "
-                f"{definition.description}; params={json.dumps(params, ensure_ascii=False)}"
+                f"{definition.description}; params={json.dumps(params, ensure_ascii=False)}; "
+                "parameterRelations="
+                + json.dumps(
+                    [item.model_dump(by_alias=True) for item in variant.parameter_relations],
+                    ensure_ascii=False,
+                )
             )
     content_actions = [
         item for item in contract.action_bindings if item.action_id in contract.content_action_ids
@@ -305,7 +412,9 @@ def _system_prompt(
         for wire_id in requested
         if registry.require_template(wire_id).action_policy != "none"
     ]
-    if content_actions:
+    if ux_layout_root:
+        action_rule = _ux_layout_action_rule(contract)
+    elif content_actions:
         content_action_json = json.dumps(
             [item.model_dump() for item in content_actions],
             ensure_ascii=False,
@@ -325,9 +434,11 @@ def _system_prompt(
         )
     else:
         action_rule = "本次没有批准 Action；card params 省略 action，content 禁止 Button 和事件。"
+    composition_rules = _composition_rules(ux_layout_root)
+    kernel = UX_MIXED_SYSTEM_PROMPT_KERNEL if ux_layout_root else BODY_SYSTEM_PROMPT_KERNEL
     return "\n".join(
         (
-            BODY_SYSTEM_PROMPT_KERNEL,
+            kernel,
             "",
             "标准组件投影：Text/Image/Button 使用批准 DesignToken；"
             "Column/Row/List/Stack 使用批准 LayoutToken；Progress 使用字面量对象。",
@@ -338,16 +449,21 @@ def _system_prompt(
             '容器严格写成 Column("layoutToken", child1, child2)；不要把 layoutToken '
             "包装成对象，不要用数组包装 children。",
             "Template 参数必须逐项遵守签名中的 JSON type；看起来像数字的 string 仍需加引号。",
-            'Card 外壳必须是 Template("card@1", cardParams, content)。',
-            "cardParams 只允许 title、subtitle、titleIcon、action；禁止 icon 等别名。"
-            "title/subtitle 必须逐字来自候选或 dataFacts，否则省略。",
-            '整卡 Action 直接写成 action: { label: "批准文案", id: "批准ID" }；'
-            "禁止写成 action: { action: {...} } 或增加任何包装层。",
+            *composition_rules,
             "素材 src 只能填入参数名或描述明确表示 icon/image/asset/source/src 的字段；"
             "symbol、文字、标签和数值字段禁止使用素材。",
+            "局部 Template 与标准组件可以混排，但禁止重复展示同一事实；"
+            "多个局部 Template 的 title/time/value/status 等主要参数不得复用相同字面量。"
+            "只选覆盖独立信息所需的最小组合。",
             f"允许 DesignToken={json.dumps(contract.allowed_design_tokens)}",
             f"允许 LayoutToken={json.dumps(contract.allowed_layout_tokens)}",
             f"允许素材 src={json.dumps(contract.allowed_asset_sources, ensure_ascii=False)}",
+            "素材语义标签="
+            + json.dumps(contract.asset_semantic_tags_by_source, ensure_ascii=False),
+            "若某个素材带有 product 语义标签，且已批准局部 Template 的某个 variant 提供"
+            "product/image/asset/source/src 图片参数，优先选择能把该素材作为主视觉完整展示的"
+            "variant；同一 product 素材不要再放入 card titleIcon。只有没有匹配图片参数时，"
+            "才允许把它作为普通 Image 或标题图标使用。",
             action_rule,
             "局部 Template：",
             *signatures,
@@ -356,6 +472,50 @@ def _system_prompt(
             f"depth<={contract.limits.max_nesting_depth}, "
             f"body<={contract.limits.vertical_budget_vp}vp。",
         )
+    )
+
+
+def _composition_rules(ux_layout_root: bool) -> tuple[str, ...]:
+    if ux_layout_root:
+        return (
+            '根必须直接是一个批准的布局高级组件；禁止 Template("card@1", ...)。',
+            "布局调用可省略配置；需要覆盖默认重排时，只能把 Contract 声明的一个闭合配置对象"
+            "放在第一个 child 前。布局的 businessChildren 数量不含 Action；"
+            "所有 Action 必须是布局根的"
+            "连续末尾直接 children，禁止放进 Column/Row/Stack/List/Template。除 ActionMatrixLayout"
+            "可按 Contract 使用2到4个控制项外，其它布局最多一个 Action。",
+            "禁止独立整卡 Header。若 cardComposition.businessTitleCandidate 能准确命名"
+            "当前业务，"
+            "可在业务内容区使用；若局部 Template 或事实已表达则省略，禁止从 request 截取标题。",
+            'Action 只允许 PillAction({"actionId":"批准ID","icon":"可选批准素材"})、'
+            'IconAction({"actionId":"批准ID","icon":"必填批准素材"}) 或 '
+            'ActionTile({"actionId":"批准ID","icon":"可选批准素材"})。',
+            "2x2 的主 Action 优先 PillAction；天气、拨号等仅图标入口可用 IconAction；"
+            "ActionTile 默认只用于 2x4，2x2 仅 ActionMatrixLayout 可用。"
+            "禁止标准 Button、事件对象和 Action 局部 Template。",
+        )
+    return (
+        'Card 外壳必须是 Template("card@1", cardParams, content)。',
+        "cardParams 只允许 title、subtitle、titleIcon、action；禁止 icon 等别名。"
+        "title/subtitle 必须逐字来自候选或 dataFacts，否则省略。",
+        '整卡 Action 直接写成 action: { label: "批准文案", id: "批准ID" }；'
+        "禁止写成 action: { action: {...} } 或增加任何包装层。",
+    )
+
+
+def _ux_layout_action_rule(contract: HybridBodyContract) -> str:
+    actions = [
+        item.model_dump()
+        for item in contract.action_bindings
+        if item.action_id in contract.content_action_ids
+    ]
+    if not actions:
+        return "本次没有批准 Action；必须选择 actionPolicy=none/optional 的布局并省略 Action。"
+    return (
+        "layoutActionCandidates="
+        + json.dumps(actions, ensure_ascii=False)
+        + "；按所选布局的 Action 数量范围选择且不得重复 actionId；"
+        "标签和事件由服务端可信 Lowering 注入。"
     )
 
 
@@ -407,7 +567,7 @@ def _resolve_templates(
         themes = definition.compatible_theme_profile_ids
         if not themes or theme_id in themes:
             allowed.append(wire_id)
-    if not allowed:
+    if not allowed and not getattr(ui_brief, "disable_template_fallback", False):
         text = _semantic_text(task_spec, ui_brief)
         for definition in _ranked_templates(text, registry):
             themes = definition.compatible_theme_profile_ids
@@ -472,6 +632,7 @@ def _prune_redundant_action_templates(
         for tag in definition.domain_tags
     }
     retained: list[str] = []
+    has_content_template = any(definition.action_policy == "none" for definition in definitions)
     for definition in definitions:
         if definition.action_policy == "none" or definition.compatible_theme_profile_ids:
             retained.append(definition.wire_id)
@@ -485,6 +646,8 @@ def _prune_redundant_action_templates(
         semantic_tags = {
             tag.casefold() for tag in definition.domain_tags if tag.casefold() != "action"
         }
+        if has_content_template and not definition.compatible_theme_profile_ids:
+            continue
         content_is_covered = (
             semantic_parameters and semantic_parameters <= covered_content_parameters
         ) or (semantic_tags and semantic_tags <= covered_domain_tags)
@@ -530,6 +693,36 @@ def _variant_requires_action(variant: Any) -> bool:
         _parameter_value_kind(name, variant.parameters_schema.get("properties", {}).get(name, {}))
         == "action-id"
         for name in required
+    )
+
+
+def _variant_has_available_required_assets(
+    variant: Any,
+    definition: Any,
+    contract: HybridBodyContract,
+) -> bool:
+    properties = variant.parameters_schema.get("properties", {})
+    for name in variant.parameters_schema.get("required", []):
+        schema = properties.get(name, {})
+        if _parameter_value_kind(name, schema) != "asset-source":
+            continue
+        if not _parameter_allowed_asset_sources(name, definition, contract):
+            return False
+    return True
+
+
+def _parameter_allowed_asset_sources(
+    name: str,
+    definition: Any,
+    contract: HybridBodyContract,
+) -> tuple[str, ...]:
+    required_tags = set(definition.asset_parameter_semantic_tags.get(name, ()))
+    if not required_tags:
+        return contract.allowed_asset_sources
+    return tuple(
+        source
+        for source in contract.allowed_asset_sources
+        if required_tags.issubset(set(contract.asset_semantic_tags_by_source.get(source, ())))
     )
 
 
@@ -608,3 +801,20 @@ def _action_label(event: Any) -> str:
     if isinstance(display_label, str) and display_label.strip():
         return display_label.strip()
     return _ACTION_LABELS.get(getattr(event, "id", "") or "", "打开详情")
+
+
+def _asset_semantic_tags(asset: dict[str, Any]) -> tuple[str, ...]:
+    explicit = [
+        str(tag).casefold()
+        for tag in asset.get("sceneTags", [])
+        if isinstance(tag, str) and tag.strip()
+    ]
+    searchable = " ".join(
+        str(asset.get(key, "")) for key in ("id", "src", "description")
+    ).casefold()
+    inferred = [
+        tag
+        for tag, terms in _ASSET_SEMANTIC_TERMS.items()
+        if any(term in searchable for term in terms)
+    ]
+    return tuple(dict.fromkeys([*explicit, *inferred]))

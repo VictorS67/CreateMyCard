@@ -47,10 +47,15 @@ def build_ui_planner_prompt(
                 "局部 Template 是可选能力，不适合时输出空列表。选择 Theme 时优先保证它与"
                 "所选局部 Template 的 compatibleThemeIds 一致。actionPlacement 只表达 Action "
                 "属于整卡主操作(card)、某个内容摘要/图标控制(content)、无操作(none)，不确定"
-                "时用 auto；选择 content 时 localTemplateIds 必须包含 actionPolicy 非 none 的"
-                "Template，否则选择 card；选择局部 Template 时优先选择 requiredParameters 能逐项"
+                "时用 auto；只有 Action 是局部语义不可分割的一部分时才选择 content，且"
+                "localTemplateIds 必须包含 actionPolicy=required 的 Template。actionPolicy=optional"
+                "表示可把主操作提升到 card，不足以选择 content。选择局部 Template 时优先选择"
+                "requiredParameters 能逐项"
                 "覆盖独立 fields、素材和 Action 的 variant，不要把多个独立字段拼成一个字符串来"
-                "迁就参数较少的 Template；不得借此输出具体组件。advancedComponentIds、"
+                "迁就参数较少的 Template；同一组事实只能由一个最匹配的局部 Template 承担，"
+                "不得同时选择 title/time/value 等主要参数明显重叠的 Template。"
+                "不得借此输出具体组件。"
+                "advancedComponentIds、"
                 "adaptiveTemplateId 和 primaryDomain 是服务端确定性字段，必须省略，服务端会在"
                 "解析后注入。\n" + json.dumps(output_schema, ensure_ascii=False)
             ),
@@ -85,13 +90,25 @@ async def plan_ui_with_llm(
         raise ValueError("UIBrief selected a theme outside the trusted candidates")
     if any(item not in template_ids for item in brief.local_template_ids):
         raise ValueError("UIBrief selected a Template outside the trusted candidates")
-    if brief.action_placement == "content":
-        definitions = [registry.require_template(item) for item in brief.local_template_ids]
-        if not any(item.action_policy != "none" for item in definitions):
-            brief = brief.model_copy(
-                update={"action_placement": "card" if data_shape.action_count else "none"}
-            )
-    return apply_advanced_composition(brief, composition_plan)
+    brief = apply_advanced_composition(brief, composition_plan)
+    return normalize_action_placement(brief, data_shape, registry)
+
+
+def normalize_action_placement(
+    brief: UIBrief,
+    data_shape: DataShape,
+    registry: CardPlanRegistry | None = None,
+) -> UIBrief:
+    """Keep one primary bottom Action in card@1; reserve content for local controls."""
+    if data_shape.action_count == 0 and brief.action_placement == "content":
+        return brief.model_copy(update={"action_placement": "none"})
+    if data_shape.action_count != 1 or brief.action_placement in {"card", "none"}:
+        return brief
+    registry = registry or CardPlanRegistry()
+    definitions = [registry.require_template(item) for item in brief.local_template_ids]
+    if any(item.action_policy == "required" for item in definitions):
+        return brief
+    return brief.model_copy(update={"action_placement": "card"})
 
 
 def plan_ui_offline(
@@ -145,9 +162,15 @@ def apply_advanced_composition(
     """把确定性组件计划注入 Brief，不允许模型覆盖计算字段。"""
     if composition_plan is None:
         return brief
-    templates = list(
-        dict.fromkeys([*composition_plan.local_template_ids, *brief.local_template_ids])
-    )[:12]
+    # 2x2 的确定性组合计划已经按领域、主次和空间预算选好局部模板。模型候选仍
+    # 保留在原始 UIBrief 中供审计，但不再把额外的通用兜底模板并入有效候选，
+    # 避免同一事实被两个 Template 重复消费。2x4 空间更充足，继续允许去重并集。
+    if composition_plan.size == "2x2" and composition_plan.local_template_ids:
+        templates = list(composition_plan.local_template_ids)
+    else:
+        templates = list(
+            dict.fromkeys([*composition_plan.local_template_ids, *brief.local_template_ids])
+        )[:12]
     return brief.model_copy(
         update={
             "advanced_component_ids": [

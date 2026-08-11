@@ -29,26 +29,28 @@ class ActionBinding(StrictModel):
     call: str
     args: dict[str, Any]
     importance: Literal["primary", "secondary"] = "primary"
-    material_hint: Literal[
-        "frosted", "brand-solid", "semantic-solid", "icon-control"
-    ] = "frosted"
+    material_hint: Literal["frosted", "brand-solid", "semantic-solid", "icon-control"] = "frosted"
 
 
 class HybridBodyContract(StrictModel):
-    contract_version: Literal["hybrid-body-contract/0.4"] = "hybrid-body-contract/0.4"
+    contract_version: Literal["hybrid-body-contract/0.5"] = "hybrid-body-contract/0.5"
     theme_profile_id: str
     allowed_components: tuple[str, ...]
     allowed_design_tokens: tuple[str, ...]
     allowed_layout_tokens: tuple[str, ...]
     allowed_template_ids: tuple[str, ...]
+    required_template_groups: tuple[tuple[str, ...], ...] = ()
     allowed_asset_sources: tuple[str, ...]
+    asset_semantic_tags_by_source: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     required_asset_sources: tuple[str, ...] = ()
     trusted_literals: tuple[str, ...]
     trusted_numbers: tuple[int | float, ...]
+    required_numbers: tuple[int | float, ...] = ()
     required_literals: tuple[str, ...]
     protected_literals: tuple[str, ...]
     action_bindings: tuple[ActionBinding, ...] = ()
     content_action_ids: tuple[str, ...] = ()
+    allowed_layout_component_ids: tuple[str, ...] = ()
     limits: HybridLimits
 
 
@@ -66,9 +68,22 @@ class TemplateNode(StrictModel):
     children: tuple[TemplateNode, ...] = ()
 
 
+class TemplateParameterRelation(StrictModel):
+    """Cross-parameter invariant enforced by the trusted Template expander."""
+
+    kind: Literal["number-matches-text"]
+    number_parameter: str = Field(alias="numberParameter", min_length=1)
+    text_parameter: str = Field(alias="textParameter", min_length=1)
+    allowed_suffixes: tuple[str, ...] = Field(default=("",), alias="allowedSuffixes")
+
+
 class TemplateVariant(StrictModel):
     size: Literal["small", "medium", "hero", "hero-large"]
     parameters_schema: dict[str, Any] = Field(alias="parametersSchema")
+    parameter_relations: tuple[TemplateParameterRelation, ...] = Field(
+        default=(),
+        alias="parameterRelations",
+    )
     root: TemplateNode
     expanded_node_budget: int = Field(alias="expandedNodeBudget", gt=0)
     expanded_depth_budget: int = Field(alias="expandedDepthBudget", gt=0)
@@ -86,9 +101,7 @@ class TemplateDefinition(StrictModel):
     version: int = Field(gt=0)
     description: str
     domain_tags: tuple[str, ...] = Field(alias="domainTags")
-    compatible_theme_profile_ids: tuple[str, ...] = Field(
-        alias="compatibleThemeProfileIds"
-    )
+    compatible_theme_profile_ids: tuple[str, ...] = Field(alias="compatibleThemeProfileIds")
     recommended_container_layout_token: str | None = Field(
         default=None,
         alias="recommendedContainerLayoutToken",
@@ -117,6 +130,15 @@ class TemplateDefinition(StrictModel):
         return f"{self.template_id}@{self.version}"
 
 
+class CardActionStyle(StrictModel):
+    background_color: str = Field(alias="backgroundColor", min_length=1)
+    font_color: str = Field(alias="fontColor", min_length=1)
+    height: int = Field(ge=24, le=44)
+    border_radius: int = Field(alias="borderRadius", ge=0, le=22)
+    font_size: int = Field(alias="fontSize", ge=10, le=18)
+    font_weight: Literal[400, 500, 600, 700] = Field(alias="fontWeight")
+
+
 class ThemeDefinition(StrictModel):
     theme_profile_id: str = Field(alias="themeProfileId")
     description: str
@@ -129,6 +151,7 @@ class ThemeDefinition(StrictModel):
     density: Literal["sparse", "normal"]
     root_component: Literal["Column", "Stack"] = Field(alias="rootComponent")
     root_styles: dict[str, Any] = Field(alias="rootStyles")
+    action_style: CardActionStyle | None = Field(default=None, alias="actionStyle")
 
 
 class TemplateCall(StrictModel):
@@ -147,6 +170,9 @@ class CardComposition(StrictModel):
 class ExpansionStats(StrictModel):
     template_call_count: int = 0
     template_used_ids: tuple[str, ...] = ()
+    template_variant_normalization_count: int = 0
+    template_provider_param_normalization_count: int = 0
+    template_relation_number_normalization_count: int = 0
     expanded_component_count: int = 0
     raw_component_count: int = 0
     max_depth: int = 0

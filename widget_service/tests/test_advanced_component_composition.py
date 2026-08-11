@@ -2,6 +2,7 @@
 # ruff: noqa: E402
 """高级组件注册、确定性组合、数据派生和安全预算测试。"""
 
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,7 +38,12 @@ from services.advanced_component_pipeline.domain_rules import (
 from services.advanced_component_pipeline.models import (
     AdvancedComponentAssignment,
     AdvancedCompositionPlan,
+    AdvancedScopeBrief,
     DataEnvelope,
+)
+from services.advanced_component_pipeline.scope_planner import (
+    build_advanced_scope_prompt,
+    plan_advanced_scope_with_llm,
 )
 from services.advanced_component_pipeline.ui_planner import plan_ui_with_llm
 from services.cardplan_template.registry import get_cardplan_registry
@@ -79,6 +85,101 @@ def test_registry_contains_fifteen_components_and_eight_adaptive_templates():
     assert all(item.field_priorities["mustShow"] for item in registry.advanced_components.values())
 
 
+def test_ux_registry_is_versioned_separately_and_preserves_legacy_registry():
+    registry = get_cardplan_registry()
+
+    assert registry.advanced_registry_version == "advanced-component-registry/1"
+    assert len(registry.advanced_components) == 15
+    assert len(registry.adaptive_templates) == 8
+    assert registry.ux_advanced_registry_version == "advanced-component-ux-registry/1"
+    assert len(registry.ux_business_components) == 17
+    assert len(registry.ux_layout_components) == 10
+    assert "DateOverview" in registry.ux_business_components
+    assert "ResourceUsageOverview" in registry.ux_business_components
+    assert "WeatherNowForecastLayout" in registry.ux_layout_components
+    assert registry.ux_tokens["radius"] == 20
+    assert registry.ux_tokens["safeInset"] == 12
+
+
+def test_provider_variant_gate_does_not_advertise_unimplemented_content_variants():
+    registry = get_cardplan_registry()
+    expected = {
+        "WeatherOverview": {"current", "commute"},
+        "DateOverview": {"compactDate", "dateHero"},
+        "ScheduleOverview": {
+            "nextEvent",
+            "meetingCompact",
+            "meetingExpanded",
+            "focusContext",
+        },
+        "ActivityOverview": {"steps", "dailySummary"},
+        "WorkoutOverview": {"latest", "countdown"},
+        "BluetoothDeviceOverview": {"earbuds"},
+    }
+
+    for component_id, variants in expected.items():
+        capability = registry.ux_business_components[component_id]
+        assert set(capability.enabled_variants(set(capability.data_capability_ids))) == variants
+
+
+def test_each_ux_business_family_is_exposed_by_semantic_scope_candidates():
+    registry = get_cardplan_registry()
+    for capability in registry.ux_business_components.values():
+        task_spec = _task(
+            capability.detection_terms[0],
+            {capability_id: {} for capability_id in capability.data_capability_ids},
+        )
+        if not capability.data_capability_ids:
+            with pytest.raises(ValueError, match="no provider-backed"):
+                build_advanced_scope_prompt(
+                    task_spec,
+                    extract_data_shape(task_spec),
+                    registry,
+                    available_capability_ids=(),
+                )
+            continue
+        payload = build_advanced_scope_prompt(
+            task_spec,
+            extract_data_shape(task_spec),
+            registry,
+            available_capability_ids=capability.data_capability_ids,
+        )
+        candidates = json.loads(payload[1]["content"])["advancedComponents"]
+        assert capability.name in {item["id"] for item in candidates}
+
+
+def test_advanced_scope_model_rejects_legacy_ui_brief_fields():
+    with pytest.raises(ValidationError):
+        AdvancedScopeBrief.model_validate(
+            {
+                "scopeVersion": "advanced-scope-brief/1",
+                "themeId": "family-weather-care-blue",
+                "advancedComponentIds": ["WeatherOverview"],
+                "localTemplateIds": ["weather-summary@1"],
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_scope_planner_rejects_theme_outside_selected_component_palette():
+    task_spec = _task("天气", {"ViewWeather": {}})
+
+    async def generate_json(_prompt, _phase):
+        return {
+            "scopeVersion": "advanced-scope-brief/1",
+            "themeId": "audio-product-neutral-violet",
+            "advancedComponentIds": ["WeatherOverview"],
+        }
+
+    with pytest.raises(ValueError, match="Theme outside component palettes"):
+        await plan_advanced_scope_with_llm(
+            task_spec,
+            extract_data_shape(task_spec),
+            generate_json,
+            get_cardplan_registry(),
+        )
+
+
 def test_field_cropping_never_hides_must_show_values():
     capability = get_cardplan_registry().require_advanced_component("ScheduleOverview")
 
@@ -90,6 +191,67 @@ def test_field_cropping_never_hides_must_show_values():
     assert set(compact) < set(standard) < set(expanded)
     assert "events.content" not in standard
     assert "events.content" in expanded
+
+
+def test_scalar_schedule_preview_does_not_select_list_only_adaptive_template():
+    task_spec = _task(
+        "生成一张展示当前会议详情并支持加入会议的2×2卡片",
+        {
+            "data": {
+                "calendar": {
+                    "title": _field("string", "Trusted request preview", "项目会议"),
+                    "time": _field("string", "Trusted request preview", "10:30-11:30"),
+                    "location": _field("string", "Trusted request preview", "97396526"),
+                    "date": _field("string", "Trusted request preview", "28"),
+                }
+            }
+        },
+        with_action=True,
+    )
+
+    plan = build_advanced_composition_plan(
+        task_spec,
+        extract_data_shape(task_spec),
+        get_cardplan_registry(),
+    )
+
+    assert plan is not None
+    assert plan.assignments[0].component_id == "ScheduleOverview"
+    assert plan.adaptive_template_id == "hero-action"
+    assert "list" not in plan.data_signals
+    assert plan.local_template_ids == (
+        "ux-calendar-content@1",
+        "ux-meeting-metadata@1",
+    )
+
+
+def test_sleep_plan_prefers_registered_ring_metric_over_generic_summary() -> None:
+    task_spec = _task(
+        "生成一张展示睡眠状态并支持设置早睡提醒的2×2卡片",
+        {
+            "data": {
+                "sleep": {
+                    "durationSeconds": _field("number", "睡眠时长", 24300),
+                    "status": _field("string", "睡眠状态", "睡眠不足"),
+                }
+            }
+        },
+        with_action=True,
+    )
+
+    plan = build_advanced_composition_plan(
+        task_spec,
+        extract_data_shape(task_spec),
+        get_cardplan_registry(),
+    )
+
+    assert plan is not None
+    assert plan.assignments[0].component_id == "SleepOverview"
+    assert plan.local_template_ids == (
+        "ux-sleep-metric@1",
+        "ux-action-summary@1",
+    )
+    assert "sleep-summary@1" not in plan.local_template_ids
 
 
 @pytest.mark.parametrize(
@@ -170,6 +332,10 @@ def test_commute_domains_select_coherent_components_and_action_template():
     assert plan is not None
     assert plan.adaptive_template_id == "hero-support-action"
     assert {item.domain_id for item in plan.assignments} == {"weather", "schedule"}
+    assert plan.local_template_ids == (
+        "ux-weather-hero@1",
+        "ux-context-summary@1",
+    )
     assert plan.action_count == 1
     assert plan.primary_chart_count <= 1
     validate_advanced_composition_plan(plan, registry)

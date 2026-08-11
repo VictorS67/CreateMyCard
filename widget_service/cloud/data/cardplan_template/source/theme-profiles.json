@@ -9,29 +9,37 @@
       ],
       "surfaceRole": "weather-surface",
       "primaryColorRole": "multi-color-02",
-      "textRole": "text-primary",
+      "textRole": "text-on-accent",
       "spacingScale": "card-default",
       "radiusScale": "card-default",
       "density": "sparse",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF28363E' : '#FFEAF5FA' }}",
-        "borderRadius": 18,
+        "backgroundColor": "#FF058BFF",
+        "borderRadius": 20,
         "padding": 10,
         "linearGradient": {
           "direction": "Bottom",
           "colors": [
             [
-              "#072973",
+              "#FF058BFF",
               0
             ],
             [
-              "#5e93ff",
+              "#FF05C5DD",
               1
             ]
           ]
         },
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFFFFFFF",
+        "fontColor": "#FF34C45A",
+        "height": 28,
+        "borderRadius": 14,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -48,29 +56,20 @@
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF1C405F' : '#FF1D4162' }}",
-        "borderRadius": 18,
-        "padding": 8,
+        "backgroundColor": "#FFFFFFFF",
+        "borderRadius": 20,
+        "padding": 11,
         "justifyContent": "spaceBetween",
-        "alignItems": "center",
-        "linearGradient": {
-          "direction": "Bottom",
-          "colors": [
-            [
-              "#102D38",
-              0
-            ],
-            [
-              "#0A466A",
-              0.6
-            ],
-            [
-              "#006995",
-              1
-            ]
-          ]
-        },
+        "alignItems": "start",
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFEAF4FF",
+        "fontColor": "#FF007DFF",
+        "height": 28,
+        "borderRadius": 14,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -82,34 +81,38 @@
       ],
       "surfaceRole": "weather-muted-surface",
       "primaryColorRole": "multi-color-02",
-      "textRole": "text-primary",
+      "textRole": "text-on-accent",
       "spacingScale": "card-default",
       "radiusScale": "card-default",
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF272D31' : '#FFEEF3F6' }}",
-        "borderRadius": 18,
-        "padding": 8,
+        "backgroundColor": "#FF3E4A50",
+        "borderRadius": 20,
+        "padding": 10,
         "justifyContent": "spaceBetween",
         "linearGradient": {
-          "direction": "RightBottom",
+          "direction": "Bottom",
           "colors": [
             [
-              "#B9C7D9",
+              "#FF3E4A50",
               0
             ],
             [
-              "#9AA9C7",
-              0.55
-            ],
-            [
-              "#8191B7",
+              "#FF2588A8",
               1
             ]
           ]
         },
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFFFFFFF",
+        "fontColor": "#FFFF9800",
+        "height": 28,
+        "borderRadius": 14,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -126,29 +129,20 @@
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF24314A' : '#FFE8EFFD' }}",
-        "borderRadius": 18,
-        "padding": 10,
+        "backgroundColor": "#FFFFFFFF",
+        "borderRadius": 20,
+        "padding": 11,
         "justifyContent": "spaceBetween",
-        "alignItems": "center",
-        "linearGradient": {
-          "direction": "Bottom",
-          "colors": [
-            [
-              "#06225C",
-              0
-            ],
-            [
-              "#0B55CB",
-              0.58
-            ],
-            [
-              "#4A9BFF",
-              1
-            ]
-          ]
-        },
+        "alignItems": "start",
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFFF9800",
+        "fontColor": "#FFFFFFFF",
+        "height": 28,
+        "borderRadius": 14,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -193,6 +187,14 @@
           ]
         },
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFFFFFFF",
+        "fontColor": "#FF6D5DFB",
+        "height": 30,
+        "borderRadius": 15,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -209,38 +211,33 @@
       "density": "sparse",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF471B78' : '#FF4B1E7D' }}",
-        "borderRadius": 18,
-        "padding": 9,
+        "backgroundColor": "#FFB72CFF",
+        "borderRadius": 20,
+        "padding": 11,
         "justifyContent": "spaceBetween",
-        "alignItems": "center",
+        "alignItems": "start",
         "linearGradient": {
           "direction": "RightBottom",
           "colors": [
             [
-              "#211044",
+              "#FFB72CFF",
               0
             ],
             [
-              "#3C126E",
-              0.43
-            ],
-            [
-              "#6C16F2",
+              "#FFD65FDF",
               1
             ]
           ]
         },
-        "shadow": {
-          "radius": 18,
-          "color": "#442B18FF",
-          "offsetX": 0,
-          "offsetY": 7,
-          "fill": false,
-          "type": "color",
-          "style": "outer"
-        },
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFFFFFFF",
+        "fontColor": "#FFBD32EE",
+        "height": 30,
+        "borderRadius": 15,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -288,6 +285,14 @@
           "style": "outer"
         },
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFFFFFFF",
+        "fontColor": "#FF8B7CFF",
+        "height": 30,
+        "borderRadius": 15,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -299,16 +304,38 @@
       ],
       "surfaceRole": "action-surface",
       "primaryColorRole": "multi-color-09",
-      "textRole": "text-primary",
+      "textRole": "text-on-accent",
       "spacingScale": "card-default",
       "radiusScale": "card-default",
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF4A3028' : '#FFFFEBDD' }}",
+        "backgroundColor": "#FFFF5A00",
         "borderRadius": 20,
-        "padding": 12,
+        "padding": 11,
+        "justifyContent": "spaceBetween",
+        "linearGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            [
+              "#FFFF5A00",
+              0
+            ],
+            [
+              "#FFFFA200",
+              1
+            ]
+          ]
+        },
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFFFFFFF",
+        "fontColor": "#FFFF5A00",
+        "height": 30,
+        "borderRadius": 15,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -326,38 +353,20 @@
       "density": "sparse",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FFA87365' : '#FFAC7769' }}",
-        "borderRadius": 18,
-        "padding": 10,
+        "backgroundColor": "#FFFFFFFF",
+        "borderRadius": 20,
+        "padding": 11,
         "justifyContent": "spaceBetween",
-        "alignItems": "center",
-        "linearGradient": {
-          "direction": "RightBottom",
-          "colors": [
-            [
-              "#9D491D",
-              0
-            ],
-            [
-              "#AC6A55",
-              0.55
-            ],
-            [
-              "#C08C85",
-              1
-            ]
-          ]
-        },
-        "shadow": {
-          "radius": 16,
-          "color": "#33251610",
-          "offsetX": 0,
-          "offsetY": 6,
-          "fill": false,
-          "type": "color",
-          "style": "outer"
-        },
+        "alignItems": "start",
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFEAF4FF",
+        "fontColor": "#FF007DFF",
+        "height": 28,
+        "borderRadius": 14,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -374,12 +383,20 @@
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "#FBFCFA",
-        "borderRadius": 18,
-        "padding": 7,
+        "backgroundColor": "#FFFFFFFF",
+        "borderRadius": 20,
+        "padding": 11,
         "justifyContent": "spaceBetween",
-        "alignItems": "center",
+        "alignItems": "start",
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFFFE9E7",
+        "fontColor": "#FFFF3B30",
+        "height": 28,
+        "borderRadius": 14,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     },
     {
@@ -396,29 +413,20 @@
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "{{ $__colorMode == 'dark' ? '#FF202224' : '#FFFFFFFF' }}",
-        "borderRadius": 18,
-        "padding": 10,
+        "backgroundColor": "#FFFFFFFF",
+        "borderRadius": 20,
+        "padding": 11,
         "justifyContent": "spaceBetween",
-        "alignItems": "center",
-        "linearGradient": {
-          "direction": "RightBottom",
-          "colors": [
-            [
-              "#08090A",
-              0
-            ],
-            [
-              "#17191B",
-              0.58
-            ],
-            [
-              "#2B2C2E",
-              1
-            ]
-          ]
-        },
+        "alignItems": "start",
         "clip": true
+      },
+      "actionStyle": {
+        "backgroundColor": "#FFEAF4FF",
+        "fontColor": "#FF007DFF",
+        "height": 28,
+        "borderRadius": 14,
+        "fontSize": 14,
+        "fontWeight": 600
       }
     }
   ]

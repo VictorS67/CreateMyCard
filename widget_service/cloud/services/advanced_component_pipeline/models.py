@@ -9,14 +9,43 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Availability = Literal[
     "available",
+    "empty",
+    "error",
     "unavailable",
     "permissionDenied",
     "unsupported",
     "stale",
 ]
-ComponentRole = Literal["hero", "support", "micro"]
-Presentation = Literal["compact", "standard", "expanded"]
+ComponentRole = Literal["hero", "support", "peer", "list", "action", "micro"]
+Presentation = Literal["auto", "compact", "standard", "expanded"]
 PrivacyMode = Literal["full", "masked", "hidden"]
+PaletteScene = Literal[
+    "generic",
+    "office.focus",
+    "office.schedule",
+    "weather.sunnyCare",
+    "weather.rainyCommute",
+    "sport.action",
+    "sleep.violet",
+    "device.earbuds",
+    "device.lowPower",
+    "device.cleanup",
+    "digitalWellbeing",
+]
+UX_LAYOUT_COMPONENT_IDS = frozenset(
+    {
+        "SingleFocusLayout",
+        "HeroActionLayout",
+        "HeroSupportLayout",
+        "HeroSupportActionLayout",
+        "PeerPairLayout",
+        "SequentialSummaryLayout",
+        "EqualItemsLayout",
+        "ListActionLayout",
+        "ActionMatrixLayout",
+        "WeatherNowForecastLayout",
+    }
+)
 
 
 class StrictModel(BaseModel):
@@ -35,7 +64,13 @@ class DataEnvelope(StrictModel):
     def availability_matches_data(self) -> DataEnvelope:
         if self.availability == "available" and self.data is None:
             raise ValueError("available data must not be null")
-        if self.availability in {"unavailable", "permissionDenied", "unsupported"}:
+        if self.availability in {
+            "empty",
+            "error",
+            "unavailable",
+            "permissionDenied",
+            "unsupported",
+        }:
             if self.data is not None:
                 raise ValueError("unavailable data must be null")
         return self
@@ -69,6 +104,155 @@ class AdvancedComponentCapability(StrictModel):
         if self.default_variant not in self.variants:
             raise ValueError("defaultVariant must be registered")
         return self
+
+
+class UxBusinessComponentCapability(StrictModel):
+    """UX 设计包中的业务高级组件能力；与旧整卡 Registry 隔离。"""
+
+    name: str
+    domain_id: str = Field(alias="domainId")
+    description: str
+    variants: tuple[str, ...]
+    supported_card_sizes: tuple[Literal["2x2", "2x4"], ...] = Field(alias="supportedCardSizes")
+    min_region: Literal["compact", "half", "full"] = Field(alias="minRegion")
+    roles: tuple[Literal["hero", "support", "peer", "list", "action"], ...]
+    max_items_by_size: dict[Literal["2x2", "2x4"], int] = Field(alias="maxItemsBySize")
+    supported_layouts: tuple[str, ...] = Field(alias="supportedLayouts")
+    supports_action: bool = Field(alias="supportsAction")
+    palette_scenes: tuple[PaletteScene, ...] = Field(alias="paletteScenes")
+    sensitive_fields: tuple[str, ...] = Field(default=(), alias="sensitiveFields")
+    detection_terms: tuple[str, ...] = Field(alias="detectionTerms")
+    data_capability_ids: tuple[str, ...] = Field(alias="dataCapabilityIds")
+    enabled_variants_by_capability: dict[str, tuple[str, ...]] = Field(
+        alias="enabledVariantsByCapability"
+    )
+    local_template_ids: tuple[str, ...] = Field(alias="localTemplateIds")
+
+    @model_validator(mode="after")
+    def valid_capability(self) -> UxBusinessComponentCapability:
+        if not self.variants:
+            raise ValueError("UX Business Component must register variants")
+        if not self.supported_layouts:
+            raise ValueError("UX Business Component must register layouts")
+        if not self.local_template_ids:
+            raise ValueError("UX Business Component must register local Templates")
+        if set(self.enabled_variants_by_capability) != set(self.data_capability_ids):
+            raise ValueError("UX Business Component capability variant gates are incomplete")
+        if any(
+            variant not in self.variants
+            for variants in self.enabled_variants_by_capability.values()
+            for variant in variants
+        ):
+            raise ValueError("UX Business Component capability gate references unknown variant")
+        return self
+
+    def enabled_variants(self, capability_ids: set[str]) -> tuple[str, ...]:
+        """Return variants backed by at least one effective production capability."""
+        return tuple(
+            dict.fromkeys(
+                variant
+                for capability_id in self.data_capability_ids
+                if capability_id in capability_ids
+                for variant in self.enabled_variants_by_capability[capability_id]
+            )
+        )
+
+
+class UxLayoutComponentCapability(StrictModel):
+    """只描述几何职责的布局高级组件，不能读取业务字段。"""
+
+    name: str
+    description: str
+    supported_card_sizes: tuple[Literal["2x2", "2x4"], ...] = Field(alias="supportedCardSizes")
+    min_children: int = Field(alias="minChildren", ge=0)
+    min_children_by_size: dict[Literal["2x2", "2x4"], int] = Field(
+        default_factory=dict,
+        alias="minChildrenBySize",
+    )
+    max_children_by_size: dict[Literal["2x2", "2x4"], int] = Field(alias="maxChildrenBySize")
+    action_policy: Literal["none", "optional", "required"] = Field(alias="actionPolicy")
+    min_action_children_by_size: dict[Literal["2x2", "2x4"], int] = Field(
+        alias="minActionChildrenBySize"
+    )
+    max_action_children_by_size: dict[Literal["2x2", "2x4"], int] = Field(
+        alias="maxActionChildrenBySize"
+    )
+    parameters_schema: dict[str, Any] = Field(alias="parametersSchema")
+    lowering_by_size: dict[Literal["2x2", "2x4"], Literal["row", "column"]] = Field(
+        alias="loweringBySize"
+    )
+
+    @model_validator(mode="after")
+    def valid_child_budget(self) -> UxLayoutComponentCapability:
+        sizes: tuple[Literal["2x2", "2x4"], ...] = ("2x2", "2x4")
+        expected_sizes = set(sizes)
+        if set(self.max_children_by_size) != expected_sizes:
+            raise ValueError("UX Layout child budget is incomplete")
+        if set(self.min_action_children_by_size) != expected_sizes:
+            raise ValueError("UX Layout minimum Action budget is incomplete")
+        if set(self.max_action_children_by_size) != expected_sizes:
+            raise ValueError("UX Layout maximum Action budget is incomplete")
+        minimums = {size: self.min_children_by_size.get(size, self.min_children) for size in sizes}
+        if any(self.max_children_by_size[size] < minimums[size] for size in sizes):
+            raise ValueError("UX Layout child budget is invalid")
+        if any(
+            self.max_action_children_by_size[size] < self.min_action_children_by_size[size]
+            for size in sizes
+        ):
+            raise ValueError("UX Layout Action budget is invalid")
+        if self.action_policy == "none" and any(self.max_action_children_by_size.values()):
+            raise ValueError("UX Layout without Actions must have a zero Action budget")
+        if self.action_policy == "required" and any(
+            minimum == 0 for minimum in self.min_action_children_by_size.values()
+        ):
+            raise ValueError("UX Layout requiring Actions must have a positive minimum")
+        schema_is_object = self.parameters_schema.get("type") == "object"
+        if not schema_is_object or self.parameters_schema.get("additionalProperties") is not False:
+            raise ValueError("UX Layout parametersSchema must be a closed object schema")
+        return self
+
+    def minimum_children(self, size: Literal["2x2", "2x4"]) -> int:
+        return self.min_children_by_size.get(size, self.min_children)
+
+
+class UxCardSizeBudget(StrictModel):
+    size: Literal["2x2", "2x4"]
+    recommended_business_components: int = Field(alias="recommendedBusinessComponents", gt=0)
+    max_business_components: int = Field(alias="maxBusinessComponents", gt=0)
+    max_primary_actions: int = Field(alias="maxPrimaryActions", ge=0)
+    max_primary_charts: int = Field(alias="maxPrimaryCharts", ge=0)
+    max_list_items: int = Field(alias="maxListItems", ge=0)
+    max_information_levels: int = Field(alias="maxInformationLevels", gt=0)
+
+
+class AdvancedScopeBrief(StrictModel):
+    """第五接口新第一层 LLM 的唯一输出：主题和业务高级组件范围。"""
+
+    scope_version: Literal["advanced-scope-brief/1"] = Field(
+        default="advanced-scope-brief/1",
+        alias="scopeVersion",
+    )
+    theme_id: str = Field(alias="themeId", min_length=1)
+    advanced_component_ids: tuple[str, ...] = Field(
+        alias="advancedComponentIds",
+        min_length=1,
+        max_length=4,
+    )
+
+    @field_validator("theme_id")
+    @classmethod
+    def non_empty_theme(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("themeId must not be empty")
+        return value
+
+    @field_validator("advanced_component_ids")
+    @classmethod
+    def unique_component_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(values) != len(set(values)):
+            raise ValueError("advancedComponentIds must be unique")
+        return values
 
 
 class AdaptiveTemplateSlot(StrictModel):
@@ -199,11 +383,9 @@ class UIBrief(BaseModel):
     @classmethod
     def versioned_template_ids(cls, values: list[str]) -> list[str]:
         pattern = re.compile(r"^[a-z][a-z0-9-]{0,63}@[1-9][0-9]*$")
-        if len(values) != len(set(values)):
-            raise ValueError("localTemplateIds must be unique")
         if any(pattern.fullmatch(value) is None for value in values):
             raise ValueError("localTemplateIds must contain versioned IDs")
-        return values
+        return list(dict.fromkeys(values))
 
 
 class SelectionConstraints(BaseModel):
@@ -257,7 +439,7 @@ class AdvancedPipelineOutput(BaseModel):
     style_id: str
     source_dsl: str
     source_format: Literal["terse", "a2ui"]
-    ui_brief: UIBrief
+    ui_brief: UIBrief | AdvancedScopeBrief
     invocation: dict[str, Any]
     planner_mode: Literal["llm", "offline"]
     mapper_mode: Literal["llm", "offline"]

@@ -23,7 +23,17 @@ SPEC = ComponentSpec(
     component_id="focus-mode",
     description="下一个会议摘要和专注模式动作。",
     supported_sizes=["2x2"],
-    required_signals={"focus-mode-intent": 20.0, "action": 1.0},
+    required_signals={"action": 1.0},
+    domains=["schedule", "productivity"],
+    scenarios=["upcoming-event"],
+    status_semantics=["do-not-disturb", "active"],
+    content_semantics=["event-title", "time-range", "event-count"],
+    action_semantics=["open-dnd-settings", "enable-focus"],
+    temporalities=["upcoming"],
+    min_semantic_score=8.0,
+    min_fields=3,
+    required_field_roles={"time-start": 1, "time-end": 1},
+    min_assets=1,
     min_actions=1,
 )
 

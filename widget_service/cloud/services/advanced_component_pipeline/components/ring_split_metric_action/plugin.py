@@ -74,6 +74,12 @@ SPEC = ComponentSpec(
     supported_sizes=["2x2"],
     required_signals={"metrics": 2.0, "action": 2.0},
     preferred_signals={"duration": 3.0, "percentage": 2.0},
+    domains=["health", "device"],
+    scenarios=["status-summary"],
+    status_semantics=["sleep-quality", "warning", "active"],
+    content_semantics=["metric", "percentage", "duration", "status"],
+    action_semantics=["open-details", "primary-action"],
+    temporalities=["now", "historical"],
     min_actions=1,
 )
 

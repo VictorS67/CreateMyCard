@@ -38,6 +38,11 @@ SPEC = ComponentSpec(
     supported_sizes=["2x2"],
     required_signals={"time-range": 4.0, "action": 2.0},
     preferred_signals={"schedule-intent": 3.0},
+    domains=["schedule", "productivity"],
+    scenarios=["schedule-detail"],
+    content_semantics=["event-title", "time-range", "countdown"],
+    action_semantics=["open-event", "open-details"],
+    temporalities=["upcoming"],
     min_actions=1,
 )
 

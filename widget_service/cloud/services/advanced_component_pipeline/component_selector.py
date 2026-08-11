@@ -13,19 +13,6 @@ def _signals(
     brief: UIBrief,
     constraints: SelectionConstraints,
 ) -> dict[str, float]:
-    purpose = brief.purpose.lower()
-    semantic_text = " ".join(
-        [
-            brief.purpose,
-            brief.visual_tone,
-            *brief.primary_information,
-            *brief.content_priorities,
-        ]
-    ).lower()
-
-    def has_any(*terms: str) -> float:
-        return float(any(term.lower() in semantic_text for term in terms))
-
     return {
         "metrics": min(1.0, data_shape.metric_count / 3.0),
         "duration": min(1.0, data_shape.duration_count / 2.0),
@@ -33,32 +20,29 @@ def _signals(
         "percentage": min(1.0, float(data_shape.percentage_count)),
         "repeated-metrics": float(data_shape.repeated_metric_group_count > 0),
         "action": float(constraints.action_count > 0),
-        "monitoring-intent": float(
-            any(word in purpose for word in ("monitor", "resource", "status"))
-        ),
-        "schedule-intent": float(
-            any(word in purpose for word in ("schedule", "appointment", "event"))
-        ),
-        "family-care-intent": has_any("family-care", "亲人关怀", "家庭关怀", "电话关怀"),
-        "race-countdown-intent": has_any(
-            "race-countdown", "赛事倒计时", "赛事陪伴", "马拉松", "距离比赛"
-        ),
-        "sleep-intent": has_any("sleep", "睡眠", "早睡", "深睡"),
-        "digital-wellbeing-intent": has_any(
-            "digital-wellbeing", "使用时长", "防沉迷", "管控时间", "屏幕时间"
-        ),
-        "low-power-intent": has_any("low-power", "低电量", "省电模式", "电量低"),
-        "focus-mode-intent": has_any(
-            "focus-mode",
-            "专注模式",
-            "会议倒计时",
-            "免打扰",
-            "下一个日程",
-            "未来日程",
-            "近期日程",
-        ),
-        "current-meeting-intent": has_any("current-meeting", "当前会议", "加入会议", "会议号"),
+        "monitoring-intent": float(brief.scenario == "resource-monitoring"),
+        "schedule-intent": float(brief.domain == "schedule"),
     }
+
+
+def _overlap_score(actual: list[str], expected: list[str], weight: float) -> float:
+    if not expected:
+        return 0.0
+    return weight * len(set(actual) & set(expected)) / len(set(expected))
+
+
+def _semantic_score(brief: UIBrief, spec) -> float:
+    score = 0.0
+    if brief.domain in spec.domains:
+        score += 6.0
+    if brief.scenario in spec.scenarios:
+        score += 7.0
+    score += _overlap_score(brief.status_semantics, spec.status_semantics, 4.0)
+    score += _overlap_score(brief.content_semantics, spec.content_semantics, 5.0)
+    score += _overlap_score(brief.action_semantics, spec.action_semantics, 5.0)
+    if brief.temporality in spec.temporalities:
+        score += 2.0
+    return score
 
 
 def select_component(
@@ -77,8 +61,27 @@ def select_component(
             score -= 100.0
             penalties.append("unsupported-size")
         if constraints.action_count < spec.min_actions:
-            score -= 8.0
+            score -= 100.0
             penalties.append("missing-required-action")
+        if constraints.asset_count < spec.min_assets:
+            score -= 100.0
+            penalties.append("missing-required-asset")
+        if len(data_shape.fields) < spec.min_fields:
+            score -= 100.0
+            penalties.append("missing-required-fields")
+        for role, required_count in spec.required_field_roles.items():
+            actual_count = sum(role in field.roles for field in data_shape.fields)
+            if actual_count < required_count:
+                score -= 100.0
+                penalties.append(f"missing-field-role:{role}")
+        semantic_score = _semantic_score(brief, spec)
+        if semantic_score < spec.min_semantic_score:
+            score -= 100.0
+            penalties.append("semantic-profile-mismatch")
+        else:
+            score += semantic_score
+            if semantic_score:
+                matched.append(f"semantic={semantic_score:.2f}")
         for signal, weight in spec.required_signals.items():
             value = signals.get(signal, 0.0)
             if value == 0.0:

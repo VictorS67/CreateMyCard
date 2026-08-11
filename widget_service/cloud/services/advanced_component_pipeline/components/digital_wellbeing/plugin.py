@@ -23,7 +23,15 @@ SPEC = ComponentSpec(
     component_id="digital-wellbeing",
     description="浅色应用使用时长和家长管控动作。",
     supported_sizes=["2x2"],
-    required_signals={"digital-wellbeing-intent": 20.0, "action": 1.0},
+    required_signals={"action": 1.0},
+    domains=["digital-wellbeing"],
+    scenarios=["usage-control"],
+    content_semantics=["app-usage", "duration"],
+    action_semantics=["manage-usage"],
+    temporalities=["now", "historical"],
+    min_semantic_score=8.0,
+    min_fields=2,
+    min_assets=1,
     min_actions=1,
 )
 

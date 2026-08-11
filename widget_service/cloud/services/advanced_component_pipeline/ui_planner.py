@@ -32,6 +32,9 @@ def build_ui_planner_prompt(
         "dataShape": data_shape.model_dump(exclude={"fields"}),
         "fields": [field.model_dump() for field in data_shape.fields],
         "eventIds": [event.id for event in task_spec.eventCandidates if event.id],
+        "eventCandidates": [
+            event.model_dump(exclude_none=True) for event in task_spec.eventCandidates
+        ],
         "cardPlanCandidates": selection_candidates(task_spec, registry),
     }
     return [
@@ -40,6 +43,9 @@ def build_ui_planner_prompt(
             "content": (
                 "你只负责输出抽象 UI 意图 JSON。themeId 和 localTemplateIds 只能从"
                 "cardPlanCandidates 选择；themeSemantics/layoutSemantics 只能表达语义，"
+                "domain、scenario、statusSemantics、contentSemantics、actionSemantics 必须"
+                "根据用户目标、字段含义和事件能力，从 JSON Schema 的枚举中选择；"
+                "这些字段描述业务语义，不能填写组件名或布局名。"
                 "不能输出颜色、圆角、组件树、布局源码、参数值或 DesignToken。"
                 "局部 Template 是可选能力，不适合时输出空列表。选择 Theme 时优先保证它与"
                 "所选局部 Template 的 compatibleThemeIds 一致。actionPlacement 只表达 Action "
@@ -87,31 +93,108 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
     """根据数据语义给出可预测的保守意图，保证选择器无需模型也能安全运行。"""
     query = task_spec.userQuery.lower()
     scene_rules = [
-        (("亲人关怀", "家庭关怀", "电话关怀"), "family-care", "亲人天气与关怀"),
-        (("赛事", "马拉松", "距离比赛"), "race-countdown", "赛事倒计时"),
-        (("睡眠", "早睡", "深睡"), "sleep-coach", "睡眠时长"),
-        (("防沉迷", "使用时长", "管控时间", "屏幕时间"), "digital-wellbeing", "应用使用时长"),
-        (("低电量", "省电模式", "电量低"), "low-power", "低电量状态"),
-        (("专注模式", "会议倒计时", "免打扰"), "focus-mode", "下一个会议"),
-        (("当前会议", "加入会议", "会议号"), "current-meeting", "当前会议"),
+        (
+            ("亲人关怀", "家庭关怀", "电话关怀"),
+            dict(
+                domain="weather",
+                scenario="family-care",
+                contentSemantics=["location", "temperature", "status"],
+                actionSemantics=["call-contact"],
+                temporality="now",
+                primary="亲人天气与关怀",
+            ),
+        ),
+        (
+            ("赛事", "马拉松", "距离比赛"),
+            dict(
+                domain="sports",
+                scenario="race-countdown",
+                contentSemantics=["event-title", "countdown"],
+                actionSemantics=["open-event"],
+                temporality="upcoming",
+                primary="赛事倒计时",
+            ),
+        ),
+        (
+            ("睡眠", "早睡", "深睡"),
+            dict(
+                domain="health",
+                scenario="sleep-summary",
+                statusSemantics=["sleep-quality"],
+                contentSemantics=["duration", "status"],
+                actionSemantics=["remind-sleep"],
+                temporality="historical",
+                primary="睡眠时长",
+            ),
+        ),
+        (
+            ("防沉迷", "使用时长", "管控时间", "屏幕时间"),
+            dict(
+                domain="digital-wellbeing",
+                scenario="usage-control",
+                contentSemantics=["app-usage", "duration"],
+                actionSemantics=["manage-usage"],
+                temporality="now",
+                primary="应用使用时长",
+            ),
+        ),
+        (
+            ("低电量", "省电模式", "电量低"),
+            dict(
+                domain="device",
+                scenario="low-power",
+                statusSemantics=["low-power", "warning"],
+                contentSemantics=["battery-level", "percentage", "status"],
+                actionSemantics=["enable-power-saving"],
+                temporality="now",
+                primary="低电量状态",
+            ),
+        ),
+        (
+            ("专注模式", "会议倒计时", "免打扰"),
+            dict(
+                domain="schedule",
+                scenario="upcoming-event",
+                statusSemantics=["do-not-disturb"],
+                contentSemantics=["event-title", "time-range"],
+                actionSemantics=["open-dnd-settings", "enable-focus"],
+                temporality="upcoming",
+                primary="下一个会议",
+            ),
+        ),
+        (
+            ("当前会议", "加入会议", "会议号"),
+            dict(
+                domain="schedule",
+                scenario="ongoing-event",
+                statusSemantics=["active"],
+                contentSemantics=["event-title", "time-range", "location-detail"],
+                actionSemantics=["join-meeting"],
+                temporality="now",
+                primary="当前会议",
+            ),
+        ),
     ]
-    for keywords, purpose, primary in scene_rules:
+    for keywords, semantics in scene_rules:
         if any(keyword in query for keyword in keywords):
+            primary = semantics.pop("primary")
             return UIBrief(
-                purpose=purpose,
+                purpose=primary,
                 primaryInformation=[primary],
                 informationHierarchy=["主信息", "补充信息", "主要操作"],
-                temporality="upcoming" if purpose in {"race-countdown", "focus-mode"} else "now",
-                attention="warning-capable"
-                if purpose in {"low-power", "digital-wellbeing"}
-                else "prominent",
-                visualTone=purpose,
+                attention="prominent",
+                visualTone="场景清晰、信息层级明确",
                 contentPriorities=[primary, "操作直接"],
                 reason="用户需求与已注册高级场景明确匹配。",
+                **semantics,
             )
     if data_shape.time_range_count:
         return UIBrief(
             purpose="schedule-management",
+            domain="schedule",
+            scenario="schedule-detail",
+            contentSemantics=["event-title", "time-range"],
+            actionSemantics=["open-details"],
             primaryInformation=["近期事项", "开始和结束时间"],
             informationHierarchy=["事项", "时间", "主要操作"],
             temporality="upcoming",
@@ -123,6 +206,11 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
     if is_monitoring or any(word in query for word in ("内存", "电量", "存储", "状态")):
         return UIBrief(
             purpose="resource-monitoring",
+            domain="device",
+            scenario="resource-monitoring",
+            statusSemantics=["warning"],
+            contentSemantics=["metric", "percentage", "status"],
+            actionSemantics=["primary-action"],
             primaryInformation=["核心占用", "关联指标"],
             informationHierarchy=["状态", "核心指标", "主要操作"],
             density="compact",
@@ -133,6 +221,10 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
         )
     return UIBrief(
         purpose="wellbeing-coaching",
+        domain="health",
+        scenario="status-summary",
+        contentSemantics=["metric", "duration", "status"],
+        actionSemantics=["open-details"],
         primaryInformation=["当前状态", "核心时长"],
         informationHierarchy=["状态", "时长", "主要操作"],
         temporality="historical" if data_shape.duration_count else "now",

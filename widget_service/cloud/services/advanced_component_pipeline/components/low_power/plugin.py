@@ -23,7 +23,16 @@ SPEC = ComponentSpec(
     component_id="low-power",
     description="低电阈值提醒、环形电量和省电动作。",
     supported_sizes=["2x2"],
-    required_signals={"low-power-intent": 20.0, "action": 1.0},
+    required_signals={"action": 1.0},
+    domains=["device"],
+    scenarios=["low-power"],
+    status_semantics=["low-power", "warning"],
+    content_semantics=["battery-level", "percentage", "status"],
+    action_semantics=["enable-power-saving"],
+    temporalities=["now"],
+    min_semantic_score=8.0,
+    min_fields=2,
+    min_assets=1,
     min_actions=1,
 )
 

@@ -24,7 +24,15 @@ SPEC = ComponentSpec(
     component_id="family-care",
     description="蓝色天气主指标卡，展示地点、温度、天气状态并提供亲人关怀动作。",
     supported_sizes=["2x2"],
-    required_signals={"family-care-intent": 20.0, "action": 1.0},
+    required_signals={"action": 1.0},
+    domains=["weather"],
+    scenarios=["family-care"],
+    content_semantics=["location", "temperature", "status"],
+    action_semantics=["call-contact"],
+    temporalities=["now"],
+    min_semantic_score=8.0,
+    min_fields=3,
+    min_assets=1,
     min_actions=1,
 )
 

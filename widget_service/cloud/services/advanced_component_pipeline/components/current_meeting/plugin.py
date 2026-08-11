@@ -25,7 +25,16 @@ SPEC = ComponentSpec(
     component_id="current-meeting",
     description="日期、会议详情和加入会议动作。",
     supported_sizes=["2x2"],
-    required_signals={"current-meeting-intent": 20.0, "action": 1.0},
+    required_signals={"action": 1.0},
+    domains=["schedule"],
+    scenarios=["ongoing-event"],
+    status_semantics=["active"],
+    content_semantics=["event-title", "time-range", "location-detail"],
+    action_semantics=["join-meeting"],
+    temporalities=["now"],
+    min_semantic_score=8.0,
+    min_fields=5,
+    required_field_roles={"time-start": 1, "time-end": 1},
     min_actions=1,
 )
 

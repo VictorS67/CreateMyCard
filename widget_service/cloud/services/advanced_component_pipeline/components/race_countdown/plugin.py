@@ -23,7 +23,15 @@ SPEC = ComponentSpec(
     component_id="race-countdown",
     description="高饱和赛事倒计时和主要训练动作。",
     supported_sizes=["2x2"],
-    required_signals={"race-countdown-intent": 20.0, "action": 1.0},
+    required_signals={"action": 1.0},
+    domains=["sports"],
+    scenarios=["race-countdown"],
+    content_semantics=["countdown", "event-title"],
+    action_semantics=["open-event", "primary-action"],
+    temporalities=["upcoming"],
+    min_semantic_score=8.0,
+    min_fields=2,
+    min_assets=1,
     min_actions=1,
 )
 

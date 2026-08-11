@@ -49,6 +49,12 @@ SPEC = ComponentSpec(
     supported_sizes=["2x2"],
     required_signals={"percentage": 4.0, "metrics": 2.0, "action": 2.0},
     preferred_signals={"repeated-metrics": 4.0, "monitoring-intent": 2.0},
+    domains=["device"],
+    scenarios=["resource-monitoring"],
+    status_semantics=["warning", "active"],
+    content_semantics=["metric", "percentage", "status"],
+    action_semantics=["primary-action"],
+    temporalities=["now"],
     min_actions=1,
 )
 

@@ -86,6 +86,7 @@ class AdvancedComponentPipeline:
             SelectionConstraints(
                 size=task_spec.size,
                 action_count=len(task_spec.eventCandidates),
+                asset_count=len(task_spec.assetCandidates),
             ),
         )
         selection_candidates = selection.candidates if selection is not None else []
@@ -242,8 +243,7 @@ async def _generate_hybrid_body(
     generate = model_client.generate
     parameters = inspect.signature(generate).parameters
     accepts_keywords = any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values()
+        parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
     )
     if accepts_keywords or "suppress_prompt_log" in parameters:
         result = generate(

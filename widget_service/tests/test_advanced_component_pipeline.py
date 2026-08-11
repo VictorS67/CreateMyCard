@@ -199,22 +199,93 @@ def _seven_scene_task_spec() -> TaskSpec:
 
 
 @pytest.mark.parametrize(
-    ("purpose", "component_id"),
+    ("purpose", "component_id", "domain", "scenario", "content", "action", "status", "temporality"),
     [
-        ("family-care", "family-care"),
-        ("race-countdown", "race-countdown"),
-        ("sleep-coach", "sleep-coach"),
-        ("digital-wellbeing", "digital-wellbeing"),
-        ("low-power", "low-power"),
-        ("focus-mode", "focus-mode"),
-        ("current-meeting", "current-meeting"),
+        (
+            "亲人关怀",
+            "family-care",
+            "weather",
+            "family-care",
+            ["location", "temperature"],
+            ["call-contact"],
+            [],
+            "now",
+        ),
+        (
+            "赛事陪伴",
+            "race-countdown",
+            "sports",
+            "race-countdown",
+            ["countdown"],
+            ["open-event"],
+            [],
+            "upcoming",
+        ),
+        (
+            "睡眠监测",
+            "sleep-coach",
+            "health",
+            "sleep-summary",
+            ["duration"],
+            ["remind-sleep"],
+            ["sleep-quality"],
+            "historical",
+        ),
+        (
+            "防沉迷",
+            "digital-wellbeing",
+            "digital-wellbeing",
+            "usage-control",
+            ["app-usage", "duration"],
+            ["manage-usage"],
+            [],
+            "now",
+        ),
+        (
+            "设备电量",
+            "low-power",
+            "device",
+            "low-power",
+            ["battery-level", "percentage"],
+            ["enable-power-saving"],
+            ["low-power"],
+            "now",
+        ),
+        (
+            "专注模式",
+            "focus-mode",
+            "schedule",
+            "upcoming-event",
+            ["event-title", "time-range"],
+            ["enable-focus"],
+            ["do-not-disturb"],
+            "upcoming",
+        ),
+        (
+            "当前会议",
+            "current-meeting",
+            "schedule",
+            "ongoing-event",
+            ["event-title", "time-range"],
+            ["join-meeting"],
+            ["active"],
+            "now",
+        ),
     ],
 )
-def test_seven_visual_scene_plugins_select_and_compile(purpose, component_id):
+def test_seven_visual_scene_plugins_select_and_compile(
+    purpose, component_id, domain, scenario, content, action, status, temporality
+):
     task_spec = _seven_scene_task_spec()
     data_shape = extract_data_shape(task_spec)
     brief = UIBrief(
         purpose=purpose,
+        domain=domain,
+        scenario=scenario,
+        contentSemantics=content,
+        actionSemantics=action,
+        statusSemantics=status,
+        temporality=temporality,
         primaryInformation=[purpose],
         informationHierarchy=["主信息", "操作"],
         visualTone=purpose,
@@ -224,7 +295,11 @@ def test_seven_visual_scene_plugins_select_and_compile(purpose, component_id):
     selection = select_component(
         data_shape,
         brief,
-        SelectionConstraints(size="2x2", action_count=1),
+        SelectionConstraints(
+            size="2x2",
+            action_count=1,
+            asset_count=len(task_spec.assetCandidates),
+        ),
     )
     assert selection is not None
     assert selection.component_id == component_id
@@ -266,6 +341,11 @@ def test_schedule_dnd_ui_brief_selects_focus_mode():
     task_spec = _seven_scene_task_spec()
     brief = UIBrief(
         purpose="以紧凑卡片形式展示未来日程概览，提示用户当前处于免打扰状态，并允许一键进入设置。",
+        domain="schedule",
+        scenario="upcoming-event",
+        statusSemantics=["do-not-disturb"],
+        contentSemantics=["event-title", "time-range", "event-count"],
+        actionSemantics=["open-dnd-settings"],
         primaryInformation=["今日及近期日程数量", "近期日程的时间与标题", "免打扰开启状态"],
         informationHierarchy=["免打扰状态", "近期日程", "设置入口"],
         density="compact",
@@ -280,7 +360,11 @@ def test_schedule_dnd_ui_brief_selects_focus_mode():
     selection = select_component(
         extract_data_shape(task_spec),
         brief,
-        SelectionConstraints(size="2x2", action_count=1),
+        SelectionConstraints(
+            size="2x2",
+            action_count=1,
+            asset_count=len(task_spec.assetCandidates),
+        ),
     )
 
     assert selection is not None
@@ -293,10 +377,7 @@ class OfflineModelClient:
         raise RuntimeError(f"offline: {phase}")
 
     async def generate(self, *_args, **_kwargs):
-        return (
-            'Template("card@1", {}, '
-            'Column("section", Text("清理内存", "body")));'
-        )
+        return 'Template("card@1", {}, Column("section", Text("清理内存", "body")));'
 
 
 class StructuredModelClient:
@@ -310,6 +391,11 @@ class StructuredModelClient:
         if phase == "advanced-ui-brief":
             return {
                 "purpose": "resource-monitoring",
+                "domain": "device",
+                "scenario": "resource-monitoring",
+                "statusSemantics": ["warning"],
+                "contentSemantics": ["metric", "percentage", "status"],
+                "actionSemantics": ["primary-action"],
                 "primaryInformation": ["内存占用"],
                 "informationHierarchy": ["指标", "操作"],
                 "density": "compact",
@@ -355,6 +441,10 @@ async def test_pipeline_uses_two_structured_model_calls_and_builds_template():
     assert output.planner_mode == "llm"
     assert output.mapper_mode == "llm"
     assert model_client.phases == ["advanced-ui-brief", "advanced-argument-map"]
+    planner_payload = json.loads(model_client.prompts["advanced-ui-brief"][1]["content"])
+    assert planner_payload["eventCandidates"] == [
+        event.model_dump(exclude_none=True) for event in task_spec.eventCandidates
+    ]
     argument_payload = json.loads(model_client.prompts["advanced-argument-map"][1]["content"])
     assert argument_payload["assetCandidates"] == task_spec.assetCandidates
     assert output.source_dsl.startswith('Column("card"')

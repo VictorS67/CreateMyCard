@@ -20,14 +20,15 @@ class Invocation(BaseModel):
 
 
 SPEC = ComponentSpec(
-    component_id="digital-wellbeing",
-    description="浅色应用使用时长和家长管控动作。",
+    component_id="usage-summary-action",
+    description="名称、使用量摘要和一个横向主要操作。",
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["digital-wellbeing"],
     scenarios=["usage-control"],
     content_semantics=["app-usage", "duration"],
     action_semantics=["manage-usage"],
+    layout_archetypes=["usage-summary-action"],
     temporalities=["now", "historical"],
     min_semantic_score=8.0,
     min_fields=2,

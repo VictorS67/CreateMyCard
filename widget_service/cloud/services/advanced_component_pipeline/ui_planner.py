@@ -46,6 +46,8 @@ def build_ui_planner_prompt(
                 "domain、scenario、statusSemantics、contentSemantics、actionSemantics 必须"
                 "根据用户目标、字段含义和事件能力，从 JSON Schema 的枚举中选择；"
                 "这些字段描述业务语义，不能填写组件名或布局名。"
+                "layoutArchetype 必须只根据需要呈现的数据槽位和视觉层级选择，"
+                "不得根据具体 App、品牌、人群或业务名称选择。"
                 "不能输出颜色、圆角、组件树、布局源码、参数值或 DesignToken。"
                 "局部 Template 是可选能力，不适合时输出空列表。选择 Theme 时优先保证它与"
                 "所选局部 Template 的 compatibleThemeIds 一致。actionPlacement 只表达 Action "
@@ -94,10 +96,37 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
     query = task_spec.userQuery.lower()
     scene_rules = [
         (
+            ("内存不足", "内存清理", "一键清理"),
+            dict(
+                domain="device",
+                scenario="memory-cleanup",
+                layoutArchetype="dual-ring-primary-action",
+                statusSemantics=["warning"],
+                contentSemantics=["memory-usage", "storage-usage", "percentage"],
+                actionSemantics=["clean-memory"],
+                temporality="now",
+                primary="内存占用和一键清理",
+            ),
+        ),
+        (
+            ("打车", "叫车", "出租车", "恶劣天气通勤"),
+            dict(
+                domain="weather",
+                scenario="bad-weather-commute",
+                layoutArchetype="hero-metric-icon-action",
+                statusSemantics=["warning"],
+                contentSemantics=["location", "temperature", "status"],
+                actionSemantics=["hail-taxi"],
+                temporality="now",
+                primary="恶劣天气和打车建议",
+            ),
+        ),
+        (
             ("亲人关怀", "家庭关怀", "电话关怀"),
             dict(
                 domain="weather",
                 scenario="family-care",
+                layoutArchetype="hero-metric-action",
                 contentSemantics=["location", "temperature", "status"],
                 actionSemantics=["call-contact"],
                 temporality="now",
@@ -109,6 +138,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
             dict(
                 domain="sports",
                 scenario="race-countdown",
+                layoutArchetype="hero-countdown",
                 contentSemantics=["event-title", "countdown"],
                 actionSemantics=["open-event"],
                 temporality="upcoming",
@@ -120,6 +150,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
             dict(
                 domain="health",
                 scenario="sleep-summary",
+                layoutArchetype="dual-duration-action",
                 statusSemantics=["sleep-quality"],
                 contentSemantics=["duration", "status"],
                 actionSemantics=["remind-sleep"],
@@ -132,6 +163,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
             dict(
                 domain="digital-wellbeing",
                 scenario="usage-control",
+                layoutArchetype="usage-summary-action",
                 contentSemantics=["app-usage", "duration"],
                 actionSemantics=["manage-usage"],
                 temporality="now",
@@ -143,6 +175,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
             dict(
                 domain="device",
                 scenario="low-power",
+                layoutArchetype="status-ring-action",
                 statusSemantics=["low-power", "warning"],
                 contentSemantics=["battery-level", "percentage", "status"],
                 actionSemantics=["enable-power-saving"],
@@ -155,6 +188,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
             dict(
                 domain="schedule",
                 scenario="upcoming-event",
+                layoutArchetype="upcoming-event-action",
                 statusSemantics=["do-not-disturb"],
                 contentSemantics=["event-title", "time-range"],
                 actionSemantics=["open-dnd-settings", "enable-focus"],
@@ -167,11 +201,24 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
             dict(
                 domain="schedule",
                 scenario="ongoing-event",
+                layoutArchetype="timeline-event-action",
                 statusSemantics=["active"],
                 contentSemantics=["event-title", "time-range", "location-detail"],
                 actionSemantics=["join-meeting"],
                 temporality="now",
                 primary="当前会议",
+            ),
+        ),
+        (
+            ("倒计时", "倒数日", "倒数"),
+            dict(
+                domain="general",
+                scenario="countdown",
+                layoutArchetype="hero-countdown",
+                contentSemantics=["countdown"],
+                actionSemantics=[],
+                temporality="upcoming",
+                primary="目标日期倒计时",
             ),
         ),
     ]
@@ -193,6 +240,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
             purpose="schedule-management",
             domain="schedule",
             scenario="schedule-detail",
+            layoutArchetype="upcoming-event-action",
             contentSemantics=["event-title", "time-range"],
             actionSemantics=["open-details"],
             primaryInformation=["近期事项", "开始和结束时间"],
@@ -208,6 +256,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
             purpose="resource-monitoring",
             domain="device",
             scenario="resource-monitoring",
+            layoutArchetype="dual-ring-primary-action",
             statusSemantics=["warning"],
             contentSemantics=["metric", "percentage", "status"],
             actionSemantics=["primary-action"],
@@ -223,6 +272,7 @@ def plan_ui_offline(task_spec: TaskSpec, data_shape: DataShape) -> UIBrief:
         purpose="wellbeing-coaching",
         domain="health",
         scenario="status-summary",
+        layoutArchetype="dual-duration-action",
         contentSemantics=["metric", "duration", "status"],
         actionSemantics=["open-details"],
         primaryInformation=["当前状态", "核心时长"],

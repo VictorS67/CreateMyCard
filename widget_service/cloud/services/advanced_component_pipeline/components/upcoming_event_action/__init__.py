@@ -1,4 +1,4 @@
-"""日程管家模板。"""
+"""未来事项与主操作模板。"""
 
 from .plugin import PLUGIN
 

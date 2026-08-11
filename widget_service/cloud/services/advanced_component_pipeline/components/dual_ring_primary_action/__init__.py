@@ -1,4 +1,4 @@
-"""低电量模板。"""
+"""双环指标与主操作模板。"""
 
 from .plugin import PLUGIN
 

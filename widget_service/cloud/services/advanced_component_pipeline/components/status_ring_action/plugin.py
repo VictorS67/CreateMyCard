@@ -20,8 +20,8 @@ class Invocation(BaseModel):
 
 
 SPEC = ComponentSpec(
-    component_id="low-power",
-    description="低电阈值提醒、环形电量和省电动作。",
+    component_id="status-ring-action",
+    description="状态摘要、单环形指标和圆形图片操作。",
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["device"],
@@ -29,6 +29,7 @@ SPEC = ComponentSpec(
     status_semantics=["low-power", "warning"],
     content_semantics=["battery-level", "percentage", "status"],
     action_semantics=["enable-power-saving"],
+    layout_archetypes=["status-ring-action"],
     temporalities=["now"],
     min_semantic_score=8.0,
     min_fields=2,

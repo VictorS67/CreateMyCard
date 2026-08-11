@@ -932,6 +932,22 @@ class WidgetGenerationService:
             )
         stage_started_at = time.perf_counter()
 
+        selected_template_id = None
+        if (
+            advanced_output is not None
+            and advanced_output.route == "whole-card-template"
+            and advanced_source_dsl
+            and source_dsl == advanced_source_dsl
+        ):
+            selected_template_id = advanced_output.component_id
+            task_spec = task_spec.model_copy(
+                update={"selectedTemplateId": selected_template_id}
+            )
+        logger.info(
+            f"{_MODULE} final_template_resolved "
+            f"selected_template_id={selected_template_id or 'none'}"
+        )
+
         # 工具3沿用非阻断校验；工具4、5仅在转换和严格校验策略通过后组装 artifact。
         design_token = None
         if policy.stores_design_token:

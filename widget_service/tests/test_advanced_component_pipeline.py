@@ -29,7 +29,7 @@ from services.advanced_component_pipeline.compiler import (
 )
 from services.advanced_component_pipeline.component_registry import component_plugins, get_component
 from services.advanced_component_pipeline.component_selector import select_component
-from services.advanced_component_pipeline.components.low_power.plugin import (
+from services.advanced_component_pipeline.components.status_ring_action.plugin import (
     Invocation as LowPowerInvocation,
 )
 from services.advanced_component_pipeline.data_shape import extract_data_shape
@@ -95,13 +95,15 @@ def test_component_plugins_are_discovered_from_component_directories():
     plugins = component_plugins()
 
     assert {plugin.component_id for plugin in plugins} == {
-        "current-meeting",
-        "digital-wellbeing",
-        "family-care",
-        "focus-mode",
-        "low-power",
-        "race-countdown",
-        "sleep-coach",
+        "dual-duration-action",
+        "dual-ring-primary-action",
+        "hero-countdown",
+        "status-ring-action",
+        "timeline-event-action",
+        "upcoming-event-action",
+        "usage-summary-action",
+        "hero-metric-action",
+        "hero-metric-icon-action",
     }
     assert all(plugin.invocation_model for plugin in plugins)
     assert all(callable(plugin.build_rows) for plugin in plugins)
@@ -137,6 +139,8 @@ def _seven_scene_task_spec() -> TaskSpec:
                     "date": field("string", "27日", "日期"),
                     "weekday": field("string", "星期一", "星期"),
                     "location": field("string", "深圳市龙岗区", "会议地点"),
+                    "memoryUsedPercent": field("integer", 87, "内存占用百分比"),
+                    "storageUsedPercent": field("integer", 72, "设备存储占用百分比"),
                 }
             }
         },
@@ -181,16 +185,47 @@ def _seven_scene_task_spec() -> TaskSpec:
                 "src": "resources/base/media/meeting.svg",
                 "description": "会议图标",
             },
+            {
+                "id": "asset.memory",
+                "src": "resources/base/media/memory.svg",
+                "description": "内存图标",
+            },
+            {
+                "id": "asset.storage",
+                "src": "resources/base/media/storage.svg",
+                "description": "设备存储图标",
+            },
+            {
+                "id": "asset.rain",
+                "src": "resources/base/media/rain.svg",
+                "description": "降雨天气图标",
+            },
+            {
+                "id": "asset.taxi",
+                "src": "resources/base/media/taxi.svg",
+                "description": "打车图标",
+            },
         ],
     )
 
 
 @pytest.mark.parametrize(
-    ("purpose", "component_id", "domain", "scenario", "content", "action", "status", "temporality"),
+    (
+        "purpose",
+        "component_id",
+        "layout",
+        "domain",
+        "scenario",
+        "content",
+        "action",
+        "status",
+        "temporality",
+    ),
     [
         (
             "亲人关怀",
-            "family-care",
+            "hero-metric-action",
+            "hero-metric-action",
             "weather",
             "family-care",
             ["location", "temperature"],
@@ -200,7 +235,8 @@ def _seven_scene_task_spec() -> TaskSpec:
         ),
         (
             "赛事陪伴",
-            "race-countdown",
+            "hero-countdown",
+            "hero-countdown",
             "sports",
             "race-countdown",
             ["countdown"],
@@ -210,7 +246,8 @@ def _seven_scene_task_spec() -> TaskSpec:
         ),
         (
             "睡眠监测",
-            "sleep-coach",
+            "dual-duration-action",
+            "dual-duration-action",
             "health",
             "sleep-summary",
             ["duration"],
@@ -220,7 +257,8 @@ def _seven_scene_task_spec() -> TaskSpec:
         ),
         (
             "防沉迷",
-            "digital-wellbeing",
+            "usage-summary-action",
+            "usage-summary-action",
             "digital-wellbeing",
             "usage-control",
             ["app-usage", "duration"],
@@ -230,7 +268,8 @@ def _seven_scene_task_spec() -> TaskSpec:
         ),
         (
             "设备电量",
-            "low-power",
+            "status-ring-action",
+            "status-ring-action",
             "device",
             "low-power",
             ["battery-level", "percentage"],
@@ -240,7 +279,8 @@ def _seven_scene_task_spec() -> TaskSpec:
         ),
         (
             "专注模式",
-            "focus-mode",
+            "upcoming-event-action",
+            "upcoming-event-action",
             "schedule",
             "upcoming-event",
             ["event-title", "time-range"],
@@ -250,7 +290,8 @@ def _seven_scene_task_spec() -> TaskSpec:
         ),
         (
             "当前会议",
-            "current-meeting",
+            "timeline-event-action",
+            "timeline-event-action",
             "schedule",
             "ongoing-event",
             ["event-title", "time-range"],
@@ -258,10 +299,32 @@ def _seven_scene_task_spec() -> TaskSpec:
             ["active"],
             "now",
         ),
+        (
+            "内存不足",
+            "dual-ring-primary-action",
+            "dual-ring-primary-action",
+            "device",
+            "memory-cleanup",
+            ["memory-usage", "storage-usage", "percentage"],
+            ["clean-memory"],
+            ["warning"],
+            "now",
+        ),
+        (
+            "雨天打车回家",
+            "hero-metric-icon-action",
+            "hero-metric-icon-action",
+            "weather",
+            "bad-weather-commute",
+            ["location", "temperature", "status"],
+            ["hail-taxi"],
+            ["warning"],
+            "now",
+        ),
     ],
 )
-def test_seven_visual_scene_plugins_select_and_compile(
-    purpose, component_id, domain, scenario, content, action, status, temporality
+def test_visual_scene_plugins_select_and_compile(
+    purpose, component_id, layout, domain, scenario, content, action, status, temporality
 ):
     task_spec = _seven_scene_task_spec()
     data_shape = extract_data_shape(task_spec)
@@ -269,6 +332,7 @@ def test_seven_visual_scene_plugins_select_and_compile(
         purpose=purpose,
         domain=domain,
         scenario=scenario,
+        layoutArchetype=layout,
         contentSemantics=content,
         actionSemantics=action,
         statusSemantics=status,
@@ -324,12 +388,13 @@ def test_seven_visual_scene_plugins_select_and_compile(
     assert [error for error in errors if not error.startswith("EFFECTIVE_")] == []
 
 
-def test_schedule_dnd_ui_brief_selects_focus_mode():
+def test_schedule_dnd_ui_brief_selects_upcoming_event_layout():
     task_spec = _seven_scene_task_spec()
     brief = UIBrief(
         purpose="以紧凑卡片形式展示未来日程概览，提示用户当前处于免打扰状态，并允许一键进入设置。",
         domain="schedule",
         scenario="upcoming-event",
+        layoutArchetype="upcoming-event-action",
         statusSemantics=["do-not-disturb"],
         contentSemantics=["event-title", "time-range", "event-count"],
         actionSemantics=["open-dnd-settings"],
@@ -355,8 +420,122 @@ def test_schedule_dnd_ui_brief_selects_focus_mode():
     )
 
     assert selection is not None
-    assert selection.component_id == "focus-mode"
+    assert selection.component_id == "upcoming-event-action"
     assert selection.confidence >= 0.75
+
+
+def test_structural_weather_hero_selection_does_not_require_business_name_or_asset():
+    task_spec = TaskSpec(
+        userQuery="生成一张状态概览卡片",
+        size="2x2",
+        eventCandidates=[EventAction(id="event.open", call="clickToApi", args={})],
+        dataModelSchema={
+            "data": {
+                "summary": {
+                    "city": {"type": "string", "description": "地点", "sampleValue": "深圳"},
+                    "temperatureText": {
+                        "type": "string",
+                        "description": "当前温度",
+                        "sampleValue": "28°",
+                    },
+                    "condition": {
+                        "type": "string",
+                        "description": "当前状态",
+                        "sampleValue": "晴",
+                    },
+                    "rangeText": {
+                        "type": "string",
+                        "description": "范围摘要",
+                        "sampleValue": "26°/18°",
+                    },
+                }
+            }
+        },
+        assetCandidates=[],
+    )
+    brief = UIBrief(
+        purpose="突出一个主指标，并在底部展示摘要和快捷操作",
+        domain="general",
+        scenario="general",
+        layoutArchetype="hero-metric-action",
+        primaryInformation=["地点", "主指标", "状态"],
+        informationHierarchy=["地点", "主指标", "摘要和操作"],
+        visualTone="清晰简洁",
+        contentPriorities=["主指标"],
+        reason="使用单个大指标布局。",
+    )
+
+    selection = select_component(
+        extract_data_shape(task_spec),
+        brief,
+        SelectionConstraints(size="2x2", action_count=1, asset_count=0),
+    )
+
+    assert selection is not None
+    assert selection.component_id == "hero-metric-action"
+    plugin = get_component(selection.component_id)
+    invocation = plugin.map_offline(task_spec, extract_data_shape(task_spec))
+    assert invocation.location_icon is None
+    plugin.validate(invocation, task_spec)
+    assert "Image(" not in build_terse_nested2(
+        selection.component_id, invocation, task_spec, "system-teal"
+    )
+
+
+def test_countdown_template_supports_one_field_without_action():
+    task_spec = TaskSpec(
+        userQuery="做个运动会倒数日卡片",
+        size="2x2",
+        eventCandidates=[],
+        dataModelSchema={
+            "data": {
+                "countdown": {
+                    "countdownDays": {
+                        "type": "integer",
+                        "description": "距离目标日期的剩余天数",
+                        "sampleValue": 35,
+                    }
+                }
+            }
+        },
+        assetCandidates=[],
+    )
+    data_shape = extract_data_shape(task_spec)
+    brief = UIBrief(
+        purpose="运动会倒数日",
+        domain="sports",
+        scenario="race-countdown",
+        layoutArchetype="hero-countdown",
+        contentSemantics=["countdown"],
+        actionSemantics=[],
+        primaryInformation=["剩余天数"],
+        informationHierarchy=["标题", "倒计时"],
+        temporality="upcoming",
+        interaction="none",
+        visualTone="活力运动感",
+        contentPriorities=["倒计时"],
+        reason="突出剩余天数。",
+    )
+
+    selection = select_component(
+        data_shape,
+        brief,
+        SelectionConstraints(size="2x2", action_count=0, asset_count=0),
+    )
+
+    assert selection is not None
+    assert selection.component_id == "hero-countdown"
+    plugin = get_component(selection.component_id)
+    invocation = plugin.map_offline(task_spec, data_shape)
+    assert invocation.action is None
+    terse = build_terse_nested2(
+        selection.component_id,
+        invocation,
+        task_spec,
+        "race-orange",
+    )
+    assert "Button(" not in terse
+    assert '"path":"/data/countdown/countdownDays"' in terse
 
 
 class OfflineModelClient:
@@ -384,6 +563,7 @@ class StructuredModelClient:
                 "purpose": "低电量状态和省电操作",
                 "domain": "device",
                 "scenario": "low-power",
+                "layoutArchetype": "status-ring-action",
                 "statusSemantics": ["low-power", "warning"],
                 "contentSemantics": ["battery-level", "percentage", "status"],
                 "actionSemantics": ["enable-power-saving"],
@@ -413,7 +593,7 @@ async def test_pipeline_uses_two_structured_model_calls_and_builds_template():
     output = await AdvancedComponentPipeline().generate(task_spec, model_client)
 
     assert output is not None
-    assert output.component_id == "low-power"
+    assert output.component_id == "status-ring-action"
     assert output.planner_mode == "llm"
     assert output.mapper_mode == "llm"
     assert model_client.phases == ["advanced-ui-brief", "advanced-argument-map"]
@@ -509,7 +689,7 @@ async def test_advanced_template_converts_to_standard_a2ui():
     ("component_id", "invocation", "style_id"),
     [
         (
-            "low-power",
+            "status-ring-action",
             LowPowerInvocation(
                 status_text=BindingRef(path="/data/metric/caption"),
                 percentage=BindingRef(path="/data/metric/progress"),
@@ -586,7 +766,7 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
     ("component_id", "invocation", "style_id"),
     [
         (
-            "low-power",
+            "status-ring-action",
             LowPowerInvocation(
                 status_text=BindingRef(path="/data/metric/caption"),
                 percentage=BindingRef(path="/data/metric/progress"),
@@ -614,7 +794,7 @@ def test_direct_a2ui_templates_use_original_aesthetic_component_tree(
     update = messages[1]["updateComponents"]
     ids = {component["id"] for component in update["components"]}
     expected_original_ids = {
-        "low-power": {"battery-stack", "battery-progress", "action-wrap"},
+        "status-ring-action": {"battery-stack", "battery-progress", "action-wrap"},
     }
     assert update["root"] == "root"
     assert expected_original_ids[component_id] <= ids
@@ -669,6 +849,7 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
 ):
     saved_genui: list[str] = []
     saved_design_tokens: list[str | None] = []
+    saved_task_specs: list[dict] = []
 
     async def unavailable_json(_client, _prompt, *, phase):
         raise RuntimeError(f"offline: {phase}")
@@ -679,6 +860,7 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
     def save_artifact(store, artifact):
         saved_genui.append(artifact.genui)
         saved_design_tokens.append(store.design_token)
+        saved_task_specs.append(artifact.taskSpec)
         return ArtifactSaveResult(
             artifactUrl="https://artifact.test/advanced",
             artifactDigest="sha256:advanced",
@@ -732,6 +914,7 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
     assert response.artifactUrl == "https://artifact.test/advanced"
     assert len(saved_genui[0].splitlines()) == 3
     assert saved_design_tokens[0] is not None
+    assert saved_task_specs[0]["selectedTemplateId"] == "status-ring-action"
     if output_format == "terse":
         assert saved_design_tokens[0].startswith('Column("card"')
     else:
@@ -742,10 +925,11 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
 @pytest.mark.asyncio
 async def test_invalid_advanced_template_falls_back_to_original_terse(monkeypatch):
     calls: list[str] = []
+    saved_task_specs: list[dict] = []
 
     async def invalid_advanced(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
         return AdvancedPipelineOutput(
-            component_id="low-power",
+            component_id="status-ring-action",
             style_id="night-violet",
             source_dsl='["broken","Text",{}]',
             source_format="terse",
@@ -766,16 +950,20 @@ async def test_invalid_advanced_template_falls_back_to_original_terse(monkeypatc
         calls.append("terse")
         return 'Column("card", Text("回退成功", "title"));'
 
+    def save_fallback_artifact(_store, artifact):
+        saved_task_specs.append(artifact.taskSpec)
+        return ArtifactSaveResult(
+            artifactUrl="https://artifact.test/fallback",
+            artifactDigest="sha256:fallback",
+        )
+
     monkeypatch.setattr(AdvancedComponentPipeline, "generate", invalid_advanced)
     monkeypatch.setattr(A2UIModelClient, "generate", generate_terse)
     monkeypatch.setattr(ArtifactValidator, "validate", lambda *_args: [])
     monkeypatch.setattr(
         ArtifactStore,
         "save",
-        lambda *_args: ArtifactSaveResult(
-            artifactUrl="https://artifact.test/fallback",
-            artifactDigest="sha256:fallback",
-        ),
+        save_fallback_artifact,
     )
     request = GenerateWidgetCardRequest(
         uid="fallback-e2e",
@@ -791,6 +979,7 @@ async def test_invalid_advanced_template_falls_back_to_original_terse(monkeypatc
     assert response.status == GenerationStatus.SUCCESS
     assert response.artifactUrl == "https://artifact.test/fallback"
     assert calls == ["terse"]
+    assert "selectedTemplateId" not in saved_task_specs[0]
 
 
 @pytest.mark.asyncio

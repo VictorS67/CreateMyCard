@@ -1,4 +1,4 @@
-"""数字健康模板。"""
+"""使用摘要与主操作模板。"""
 
 from .plugin import PLUGIN
 

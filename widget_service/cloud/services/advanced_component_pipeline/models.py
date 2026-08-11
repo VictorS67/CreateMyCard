@@ -52,16 +52,38 @@ class UIBrief(BaseModel):
     scenario: Literal[
         "family-care",
         "race-countdown",
+        "countdown",
         "sleep-summary",
         "usage-control",
         "low-power",
         "upcoming-event",
         "ongoing-event",
         "resource-monitoring",
+        "memory-cleanup",
+        "bad-weather-commute",
         "status-summary",
         "schedule-detail",
         "general",
     ] = "general"
+    layout_archetype: Literal[
+        "auto",
+        "hero-metric-action",
+        "hero-metric-icon-action",
+        "dual-ring-primary-action",
+        "hero-countdown",
+        "dual-duration-action",
+        "usage-summary-action",
+        "status-ring-action",
+        "upcoming-event-action",
+        "timeline-event-action",
+    ] = Field(
+        default="auto",
+        alias="layoutArchetype",
+        description=(
+            "纯视觉结构选择，不表达业务名称：单主指标、带双图标的单主指标、"
+            "双环指标、倒计时、双时长、使用摘要、状态环、未来事项或时间线事项。"
+        ),
+    )
     status_semantics: list[
         Literal["do-not-disturb", "low-power", "warning", "active", "sleep-quality"]
     ] = Field(default_factory=list, alias="statusSemantics")
@@ -78,6 +100,8 @@ class UIBrief(BaseModel):
             "event-count",
             "location-detail",
             "metric",
+            "memory-usage",
+            "storage-usage",
             "percentage",
             "status",
         ]
@@ -94,6 +118,8 @@ class UIBrief(BaseModel):
             "join-meeting",
             "open-details",
             "primary-action",
+            "clean-memory",
+            "hail-taxi",
         ]
     ] = Field(default_factory=list, alias="actionSemantics")
     primary_information: list[str] = Field(alias="primaryInformation", min_length=1)
@@ -156,6 +182,7 @@ class ComponentSpec(BaseModel):
     action_semantics: list[str] = Field(default_factory=list)
     temporalities: list[str] = Field(default_factory=list)
     min_semantic_score: float = 0.0
+    layout_archetypes: list[str] = Field(default_factory=list)
 
 
 class CandidateScore(BaseModel):

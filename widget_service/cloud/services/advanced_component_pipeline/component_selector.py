@@ -42,6 +42,8 @@ def _semantic_score(brief: UIBrief, spec) -> float:
     score += _overlap_score(brief.action_semantics, spec.action_semantics, 5.0)
     if brief.temporality in spec.temporalities:
         score += 2.0
+    if brief.layout_archetype in spec.layout_archetypes:
+        score += 15.0
     return score
 
 
@@ -74,6 +76,9 @@ def select_component(
             if actual_count < required_count:
                 score -= 100.0
                 penalties.append(f"missing-field-role:{role}")
+        if spec.layout_archetypes and brief.layout_archetype not in spec.layout_archetypes:
+            score -= 100.0
+            penalties.append("layout-archetype-mismatch")
         semantic_score = _semantic_score(brief, spec)
         if semantic_score < spec.min_semantic_score:
             score -= 100.0

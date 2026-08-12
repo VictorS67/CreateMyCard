@@ -29,6 +29,8 @@ _LEAVES = frozenset({"Text", "Image", "Divider", "Progress", "Button", "Checkbox
 _COMPONENTS = _CONTAINERS | _LEAVES
 _TEXT_DESIGNS = {
     "title": {"fontSize": 20, "fontWeight": 700, "fontColor": "font_primary"},
+    "compact-title": {"fontSize": 14, "fontWeight": 700, "fontColor": "font_primary"},
+    "compact-action": {"fontSize": 12, "fontWeight": 600, "fontColor": "font_primary"},
     "body": {"fontSize": 14, "fontWeight": 400, "fontColor": "font_primary"},
     "subtitle": {"fontSize": 12, "fontWeight": 500, "fontColor": "font_secondary"},
     "success": {"fontSize": 14, "fontWeight": 600, "fontColor": "confirm"},
@@ -36,6 +38,7 @@ _TEXT_DESIGNS = {
 }
 _IMAGE_DESIGNS = {
     "icon": {"width": 24, "height": 24, "objectFit": "contain"},
+    "compact-icon": {"width": 16, "height": 16, "objectFit": "contain"},
     "thumbnail": {"width": 40, "height": 40, "objectFit": "cover", "borderRadius": 10},
     "hero": {"width": 64, "height": 64, "objectFit": "contain"},
 }
@@ -85,13 +88,15 @@ def convert_terse_dsl_nested2_to_a2ui(
     protocol_profile: dict[str, Any],
 ) -> str:
     """Convert one literal-only Nested-2 component tree to three A2UI messages."""
-    root = parse_terse_dsl_nested2(source)
+    root, data_model = _parse_terse_dsl_nested2_document(source)
     compact_rows: list[list[Any]] = []
     _append_compact_rows(root, "root", size, compact_rows)
-    compact_rows.append(["/ui/state", "ready"])
+    if data_model is not None:
+        compact_rows.append(["/data", data_model])
+    else:
+        compact_rows.append(["/ui/state", "ready"])
     compact_dsl = "\n".join(
-        json.dumps(row, ensure_ascii=False, separators=(",", ":"))
-        for row in compact_rows
+        json.dumps(row, ensure_ascii=False, separators=(",", ":")) for row in compact_rows
     )
     try:
         return convert_compact_dsl_to_a2ui(
@@ -105,6 +110,14 @@ def convert_terse_dsl_nested2_to_a2ui(
 
 def parse_terse_dsl_nested2(source: str) -> Nested2Node:
     """Parse Nested-2 with Python's AST parser, then enforce a closed data grammar."""
+    root, _data_model = _parse_terse_dsl_nested2_document(source)
+    return root
+
+
+def _parse_terse_dsl_nested2_document(
+    source: str,
+) -> tuple[Nested2Node, dict[str, Any] | None]:
+    """解析组件树以及模板可选的静态示例 ``data`` 对象。"""
     if not isinstance(source, str) or not source.strip():
         raise TerseDslNested2ConversionError("TerseDSL-Nested-2 output is empty.")
     if len(source) > MAX_INPUT_LENGTH:
@@ -115,9 +128,9 @@ def parse_terse_dsl_nested2(source: str) -> Nested2Node:
         raise TerseDslNested2ConversionError(
             f"TerseDSL-Nested-2 syntax error at line {exc.lineno}: {exc.msg}."
         ) from exc
-    if len(module.body) != 1 or not isinstance(module.body[0], ast.Expr):
+    if len(module.body) not in {1, 2} or not isinstance(module.body[0], ast.Expr):
         raise TerseDslNested2ConversionError(
-            "TerseDSL-Nested-2 must contain exactly one component call."
+            "TerseDSL-Nested-2 must contain one component call and optional data assignment."
         )
     state = {"components": 0}
     root = _parse_component(module.body[0].value, 1, state)
@@ -125,7 +138,23 @@ def parse_terse_dsl_nested2(source: str) -> Nested2Node:
         raise TerseDslNested2ConversionError("The root component must be Column.")
     if not root.values or root.values[0] != "card":
         raise TerseDslNested2ConversionError('The root must use Column("card", ...).')
-    return root
+    data_model = None
+    if len(module.body) == 2:
+        assignment = module.body[1]
+        if (
+            not isinstance(assignment, ast.Assign)
+            or len(assignment.targets) != 1
+            or not isinstance(assignment.targets[0], ast.Name)
+            or assignment.targets[0].id != "data"
+        ):
+            raise TerseDslNested2ConversionError(
+                "The optional second statement must assign one object to data."
+            )
+        parsed_data = _literal_value(assignment.value, 1)
+        if not isinstance(parsed_data, dict):
+            raise TerseDslNested2ConversionError("data must be one object.")
+        data_model = parsed_data
+    return root, data_model
 
 
 def _python_compatible_source(source: str) -> str:
@@ -168,7 +197,7 @@ def _next_token_is_colon(
         tokenize.NEWLINE,
         tokenize.COMMENT,
     }
-    for candidate in tokens[index + 1:]:
+    for candidate in tokens[index + 1 :]:
         if candidate.type in ignored:
             continue
         return candidate.type == tokenize.OP and candidate.string == ":"
@@ -179,14 +208,10 @@ def _parse_component(node: ast.AST, depth: int, state: dict[str, int]) -> Nested
     if depth > MAX_NESTING_DEPTH:
         raise TerseDslNested2ConversionError("Component nesting exceeds 32 levels.")
     if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-        raise TerseDslNested2ConversionError(
-            "Only direct Catalog component calls are allowed."
-        )
+        raise TerseDslNested2ConversionError("Only direct Catalog component calls are allowed.")
     component_type = node.func.id
     if component_type not in _COMPONENTS:
-        raise TerseDslNested2ConversionError(
-            f'Unsupported component type "{component_type}".'
-        )
+        raise TerseDslNested2ConversionError(f'Unsupported component type "{component_type}".')
     if node.keywords:
         raise TerseDslNested2ConversionError("Keyword arguments are not allowed.")
     state["components"] += 1
@@ -207,9 +232,7 @@ def _parse_component(node: ast.AST, depth: int, state: dict[str, int]) -> Nested
             )
         values.append(_literal_value(argument, depth))
     if children and component_type not in _CONTAINERS:
-        raise TerseDslNested2ConversionError(
-            f"{component_type} cannot contain child components."
-        )
+        raise TerseDslNested2ConversionError(f"{component_type} cannot contain child components.")
     return Nested2Node(component_type, tuple(values), tuple(children))
 
 
@@ -258,7 +281,8 @@ def _append_compact_rows(
     rows: list[list[Any]],
 ) -> None:
     child_ids = [
-        f"{component_id}_{index}" for index in range(len(node.children))
+        _explicit_component_id(child) or f"{component_id}_{index}"
+        for index, child in enumerate(node.children)
     ]
     props = _component_props(node, component_id, size)
     row: list[Any] = [component_id, node.component_type, props]
@@ -267,6 +291,17 @@ def _append_compact_rows(
     rows.append(row)
     for child, child_id in zip(node.children, child_ids, strict=True):
         _append_compact_rows(child, child_id, size, rows)
+
+
+def _explicit_component_id(node: Nested2Node) -> str | None:
+    for value in reversed(node.values):
+        if not isinstance(value, dict) or "_id" not in value:
+            continue
+        component_id = value["_id"]
+        if not isinstance(component_id, str) or not component_id:
+            raise TerseDslNested2ConversionError("Internal component _id must be non-empty.")
+        return component_id
+    return None
 
 
 def _component_props(
@@ -294,9 +329,7 @@ def _component_props(
         props = {"strokeWidth": 1, "vertical": False, "color": "comp_divider"}
         _merge_options(props, node.values)
         return props
-    raise TerseDslNested2ConversionError(
-        f"{component_id}: unsupported component conversion."
-    )
+    raise TerseDslNested2ConversionError(f"{component_id}: unsupported component conversion.")
 
 
 def _designed_leaf_props(
@@ -305,9 +338,7 @@ def _designed_leaf_props(
     designs: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     if not node.values:
-        raise TerseDslNested2ConversionError(
-            f"{node.component_type} requires {required_name}."
-        )
+        raise TerseDslNested2ConversionError(f"{node.component_type} requires {required_name}.")
     props = {required_name: node.values[0]}
     remaining = list(node.values[1:])
     if remaining and isinstance(remaining[0], str):
@@ -329,7 +360,7 @@ def _merge_options(props: dict[str, Any], values: Any) -> None:
         raise TerseDslNested2ConversionError(
             "Options must be one non-empty object in the final value position."
         )
-    props.update(values[0])
+    props.update({key: value for key, value in values[0].items() if key != "_id"})
 
 
 def _container_props(
@@ -369,7 +400,7 @@ def _container_props(
             raise TerseDslNested2ConversionError(
                 'Root must be Column("card", ...) with a supported size.'
             )
-        return {
+        locked = {
             **dimensions,
             "padding": 12,
             "borderRadius": 20,
@@ -377,6 +408,11 @@ def _container_props(
             "backgroundColor": "background_primary",
             "itemMargin": 8,
         }
+        if "width" in props or "height" in props:
+            raise TerseDslNested2ConversionError(
+                "Root options cannot override the size-locked width or height."
+            )
+        return {**locked, **props}
     if layout is None:
         return props
     preset = layouts.get((node.component_type, layout))

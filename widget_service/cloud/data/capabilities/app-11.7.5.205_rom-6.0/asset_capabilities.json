@@ -204,7 +204,8 @@
     "description": "耳机收纳盒实心图标，黑色，图形为无线耳机充电盒造型，适用场景：蓝牙耳机设备连接、音频设备管理",
     "sceneTags": [
       "device",
-      "audio"
+      "audio",
+      "product"
     ],
     "minXiaoyiVersion": "1.0.0"
   },
@@ -613,7 +614,9 @@
     "type": "asset",
     "src": "resources/base/media/icon_watermark.svg",
     "description": "水印图标，适用场景：当下日程",
-    "sceneTags": [],
+    "sceneTags": [
+      "watermark"
+    ],
     "minXiaoyiVersion": "1.0.0"
   },
   {
@@ -637,7 +640,9 @@
     "type": "asset",
     "src": "resources/base/media/icon_high_temperature.svg",
     "description": "高温/温度计图标，适用场景：亲人关怀",
-    "sceneTags": [],
+    "sceneTags": [
+      "alert"
+    ],
     "minXiaoyiVersion": "1.0.0"
   },
   {
@@ -645,7 +650,9 @@
     "type": "asset",
     "src": "resources/base/media/icon_weather1.svg",
     "description": "天气/雨伞图标，适用场景：亲人关怀",
-    "sceneTags": [],
+    "sceneTags": [
+      "condition"
+    ],
     "minXiaoyiVersion": "1.0.0"
   },
   {
@@ -789,7 +796,10 @@
     "type": "asset",
     "src": "resources/base/media/icon_schedule2.svg",
     "description": "日程图标，适用场景：当下日程",
-    "sceneTags": [],
+    "sceneTags": [
+      "calendar",
+      "schedule"
+    ],
     "minXiaoyiVersion": "1.0.0"
   },
   {

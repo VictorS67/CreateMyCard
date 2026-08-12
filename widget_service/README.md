@@ -91,6 +91,9 @@ The service follows `docs/AGENTS.md`:
   WebSocket query parameters. The service atomically stores the raw input, structured response, exact final plugin
   frame, A2UI JSONL, and server latency before sending the final frame. Query/download endpoints reuse
   `WIDGET_SERVICE_WEBSOCKET_BEARER_TOKEN`; ordinary calls without batch parameters retain their previous behavior.
+  Batch runs may temporarily relax first-layer data admission and Query-to-variant adaptation through
+  `WIDGET_SERVICE_ENABLE_ADVANCED_COMPONENT_DATA_ADMISSION_BYPASS_FOR_BATCH`. Capability, Registry, trusted fact
+  projection, compiler, event, asset, and final protocol validation remain enforced.
 - The server logs process-wide WebSocket `active_connections`, cumulative `total_connections`, and `running_tasks` every 10 seconds.
 - Starlette synchronous handlers use the AnyIO worker pool with 80 concurrent tokens by default.
   Override it with `WIDGET_SERVICE_ANYIO_THREAD_POOL_TOKENS` when deployment capacity requires a different limit.
@@ -210,8 +213,13 @@ standard A2UI messages and never sends Template nodes to the client.
 
 ```text
 WIDGET_SERVICE_ENABLE_WIDGET_BATCH_RECORDING=true
+WIDGET_SERVICE_ENABLE_ADVANCED_COMPONENT_DATA_ADMISSION_BYPASS_FOR_BATCH=true
 WIDGET_SERVICE_WIDGET_BATCH_RESULTS_PATH=/data/widget_batch_runs
 ```
+
+批测临时开关默认为 `false`：仅在批次记录与本开关同时开启时，第一层高级组件候选会跳过确定性数据适配准入，
+Activity/Workout 的投影也会忽略 Query 到可渲染变体的严格映射，以便观察模型选择与视觉效果；普通生成、
+可信事实投影和最终编译校验不受影响。完成批测后将开关设为 `false` 即恢复完整准入。
 
 端侧对每条 Nested-2 用例连接
 `...?batchId=nested2-2x2-1720000000000&caseId=2x2-q1&size=2x2`。批次完成后可下载：

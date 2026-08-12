@@ -154,6 +154,7 @@ class ToolRequestEnvelope(BaseModel):
 
 class VersionedToolRequest(BaseModel):
     _model_request_context: ModelRequestContext | None = PrivateAttr(default=None)
+    _widget_batch_request: bool = PrivateAttr(default=False)
 
     locale: str = "zh-CN"
     uid: str
@@ -286,3 +287,6 @@ class GenerateWidgetCardResponse(BaseModel):
     templateCallCount: int = Field(default=0, exclude=True)
     expandedComponentCount: int = Field(default=0, exclude=True)
     generationFallbackUsed: bool = Field(default=False, exclude=True)
+    # 仅供批测存档每次模型调用的阶段、耗时、原始输出与异常；不进入工具协议。
+    modelSteps: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
+    batchDiagnostics: dict[str, Any] = Field(default_factory=dict, exclude=True)

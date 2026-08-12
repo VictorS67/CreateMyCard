@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import sys
+import time
 import traceback
 import uuid
 from pathlib import Path
@@ -114,6 +115,7 @@ class A2UIModelClient:
                 self.runtime,
                 operation_name=operation_name,
             )
+        self.model_step_records: list[dict[str, object]] = []
 
     @property
     def model_failure_retry_count(self) -> int:
@@ -244,30 +246,63 @@ class A2UIModelClient:
         phase: str,
     ) -> str:
         """调用注入的测试 Transport 或应用级共享模型 Runtime。"""
-        if self.transport is not None:
-            try:
+        started_at = time.perf_counter()
+        try:
+            if self.transport is not None:
                 generate = self.transport.generate
                 if inspect.iscoroutinefunction(generate):
-                    return await generate(prompt)
-                result = await asyncio.to_thread(generate, prompt)
-                if inspect.isawaitable(result):
-                    return await result
-                return result
-            except ModelTransportError as exc:
-                return self._recover_design_output_after_abort(
-                    exc,
-                    protocol_profile,
+                    raw_output = await generate(prompt)
+                else:
+                    result = await asyncio.to_thread(generate, prompt)
+                    raw_output = await result if inspect.isawaitable(result) else result
+            else:
+                if self.unified_client is None:
+                    raise A2UIModelGenerationError("model runtime is not initialized")
+                allow_partial_abort = protocol_profile.get("id") == DESIGN_COMPACT_PROFILE_ID
+                raw_output = await self.unified_client.generate(
+                    self.backend,
+                    prompt,
+                    self.request_context,
+                    phase=phase,
+                    allow_mep_partial_abort=allow_partial_abort,
                 )
-        if self.unified_client is None:
-            raise A2UIModelGenerationError("model runtime is not initialized")
-        allow_partial_abort = protocol_profile.get("id") == DESIGN_COMPACT_PROFILE_ID
-        return await self.unified_client.generate(
-            self.backend,
-            prompt,
-            self.request_context,
-            phase=phase,
-            allow_mep_partial_abort=allow_partial_abort,
-        )
+            self._record_model_step(phase, started_at, "success", str(raw_output), prompt=prompt)
+            return str(raw_output)
+        except ModelTransportError as exc:
+            try:
+                recovered = self._recover_design_output_after_abort(exc, protocol_profile)
+            except ModelTransportError:
+                self._record_model_step(phase, started_at, "failed", "", exc, prompt=prompt)
+                raise
+            self._record_model_step(phase, started_at, "recovered", recovered, prompt=prompt)
+            return recovered
+        except Exception as exc:
+            self._record_model_step(phase, started_at, "failed", "", exc, prompt=prompt)
+            raise
+
+    def _record_model_step(
+        self,
+        phase: str,
+        started_at: float,
+        status: str,
+        raw_output: str,
+        error: Exception | None = None,
+        *,
+        prompt: list[dict[str, str]] | None = None,
+    ) -> None:
+        record: dict[str, object] = {
+            "sequence": len(self.model_step_records) + 1,
+            "phase": phase,
+            "status": status,
+            "durationMs": round((time.perf_counter() - started_at) * 1000, 2),
+            "rawOutput": raw_output,
+        }
+        if error is not None:
+            record["errorType"] = type(error).__name__
+            record["errorMessage"] = str(error)
+        if self.settings.enable_widget_batch_recording and prompt is not None:
+            record["inputMessages"] = prompt
+        self.model_step_records.append(record)
 
     def _default_request_context(self) -> ModelRequestContext:
         """为本地直调和单元测试生成不含硬编码会话 ID 的上下文。"""

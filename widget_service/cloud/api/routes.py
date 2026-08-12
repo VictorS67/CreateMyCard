@@ -10,6 +10,7 @@ from contextlib import suppress
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -652,6 +653,8 @@ async def _record_widget_batch_case(
     error_code: str,
     artifact_url: str = "",
     artifact_digest: str = "",
+    model_steps: list[dict[str, Any]] | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> None:
     """批测记录失败不反向改变正式工具响应。"""
     if store is None or context is None:
@@ -670,6 +673,8 @@ async def _record_widget_batch_case(
         error_code=error_code,
         artifact_url=artifact_url,
         artifact_digest=artifact_digest,
+        model_steps=model_steps or [],
+        diagnostics=diagnostics or {},
     )
     try:
         await run_in_threadpool(store.record_case, record)
@@ -794,6 +799,7 @@ async def _serve_operation_websocket(
                     source_rom_version = device_arguments.pop("_sourceRomVersion", None)
                 request = request_model(**arguments)
                 request.device._source_rom_version = source_rom_version
+                request._widget_batch_request = batch_context is not None
                 if operation in GENERATION_OPERATIONS:
                     request._model_request_context = _model_request_context_from_payload(
                         payload,
@@ -895,6 +901,8 @@ async def _serve_operation_websocket(
                     str(result_data.get("errorCode", "")),
                     str(result_data.get("artifactUrl", "")),
                     str(result_data.get("artifactDigest", "")),
+                    getattr(result, "modelSteps", []),
+                    getattr(result, "batchDiagnostics", {}),
                 )
                 if operation in GENERATION_OPERATIONS:
                     directive_state, artifact_url = _generation_result_directive(result_data)
@@ -1041,6 +1049,28 @@ async def _serve_operation_websocket(
         return
     finally:
         metrics.connection_closed()
+
+
+@router.get("/artifacts/{file_name}")
+async def download_widget_artifact(file_name: str) -> FileResponse:
+    """下载本地 mock OBS 中的不可变卡片产物。"""
+    prefix = "artifact_"
+    suffix = ".md"
+    if not file_name.startswith(prefix) or not file_name.endswith(suffix):
+        raise HTTPException(status_code=404, detail="artifact not found")
+    artifact_id = file_name[len(prefix) : -len(suffix)]
+    try:
+        uuid.UUID(artifact_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="artifact not found") from exc
+    artifact_path = get_settings().WORKSPACE_ROOT / "mock_obs" / file_name
+    if not artifact_path.is_file():
+        raise HTTPException(status_code=404, detail="artifact not found")
+    return FileResponse(
+        artifact_path,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.get("/widget-batches")

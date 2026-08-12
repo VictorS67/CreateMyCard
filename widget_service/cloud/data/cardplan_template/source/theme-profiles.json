@@ -15,18 +15,18 @@
       "density": "sparse",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "#FF058BFF",
+        "backgroundColor": "#FF317AF7",
         "borderRadius": 20,
         "padding": 10,
         "linearGradient": {
           "direction": "Bottom",
           "colors": [
             [
-              "#FF058BFF",
+              "#FF317AF7",
               0
             ],
             [
-              "#FF05C5DD",
+              "#FF46B1E3",
               1
             ]
           ]
@@ -35,7 +35,7 @@
       },
       "actionStyle": {
         "backgroundColor": "#FFFFFFFF",
-        "fontColor": "#FF34C45A",
+        "fontColor": "#FF64BB5C",
         "height": 28,
         "borderRadius": 14,
         "fontSize": 14,
@@ -61,11 +61,24 @@
         "padding": 11,
         "justifyContent": "spaceBetween",
         "alignItems": "start",
+        "linearGradient": {
+          "direction": "Bottom",
+          "colors": [
+            [
+              "#1A0A59F7",
+              0
+            ],
+            [
+              "#00FFFFFF",
+              1
+            ]
+          ]
+        },
         "clip": true
       },
       "actionStyle": {
-        "backgroundColor": "#FFEAF4FF",
-        "fontColor": "#FF007DFF",
+        "backgroundColor": "#1A0A59F7",
+        "fontColor": "#FF0A59F7",
         "height": 28,
         "borderRadius": 14,
         "fontSize": 14,
@@ -87,7 +100,7 @@
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "#FF3E4A50",
+        "backgroundColor": "#FF46484D",
         "borderRadius": 20,
         "padding": 10,
         "justifyContent": "spaceBetween",
@@ -95,11 +108,11 @@
           "direction": "Bottom",
           "colors": [
             [
-              "#FF3E4A50",
+              "#FF46484D",
               0
             ],
             [
-              "#FF2588A8",
+              "#FF467794",
               1
             ]
           ]
@@ -108,7 +121,7 @@
       },
       "actionStyle": {
         "backgroundColor": "#FFFFFFFF",
-        "fontColor": "#FFFF9800",
+        "fontColor": "#FFF9A01E",
         "height": 28,
         "borderRadius": 14,
         "fontSize": 14,
@@ -134,10 +147,23 @@
         "padding": 11,
         "justifyContent": "spaceBetween",
         "alignItems": "start",
+        "linearGradient": {
+          "direction": "Bottom",
+          "colors": [
+            [
+              "#1AF9A01E",
+              0
+            ],
+            [
+              "#00FFFFFF",
+              1
+            ]
+          ]
+        },
         "clip": true
       },
       "actionStyle": {
-        "backgroundColor": "#FFFF9800",
+        "backgroundColor": "#FFF9A01E",
         "fontColor": "#FFFFFFFF",
         "height": 28,
         "borderRadius": 14,
@@ -159,29 +185,19 @@
       "density": "normal",
       "rootComponent": "Stack",
       "rootStyles": {
-        "backgroundColor": "#F7F8FF",
-        "borderRadius": 18,
-        "padding": 0,
+        "backgroundColor": "#FFFFFFFF",
+        "borderRadius": 20,
+        "padding": 11,
         "alignContent": "topStart",
-        "shadow": {
-          "radius": 18,
-          "color": "#22091D4B",
-          "offsetX": 0,
-          "offsetY": 8
-        },
         "linearGradient": {
           "direction": "RightBottom",
           "colors": [
             [
-              "#FBFCFF",
+              "#1A64BB5C",
               0
             ],
             [
-              "#F0F0FF",
-              0.6
-            ],
-            [
-              "#D8D7F5",
+              "#00FFFFFF",
               1
             ]
           ]
@@ -190,7 +206,7 @@
       },
       "actionStyle": {
         "backgroundColor": "#FFFFFFFF",
-        "fontColor": "#FF6D5DFB",
+        "fontColor": "#FF64BB5C",
         "height": 30,
         "borderRadius": 15,
         "fontSize": 14,
@@ -211,7 +227,7 @@
       "density": "sparse",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "#FFB72CFF",
+        "backgroundColor": "#FFAC49F5",
         "borderRadius": 20,
         "padding": 11,
         "justifyContent": "spaceBetween",
@@ -220,11 +236,11 @@
           "direction": "RightBottom",
           "colors": [
             [
-              "#FFB72CFF",
+              "#FFAC49F5",
               0
             ],
             [
-              "#FFD65FDF",
+              "#FFC386F0",
               1
             ]
           ]
@@ -233,7 +249,7 @@
       },
       "actionStyle": {
         "backgroundColor": "#FFFFFFFF",
-        "fontColor": "#FFBD32EE",
+        "fontColor": "#FFAC49F5",
         "height": 30,
         "borderRadius": 15,
         "fontSize": 14,
@@ -242,53 +258,41 @@
     },
     {
       "themeProfileId": "race-night-violet",
-      "description": "赛事夜间紫",
+      "description": "赛事活力橙（兼容历史主题标识）",
       "supportedCapabilityIds": [
         "GetCountdownDays",
         "GetHealthAndSportSummary"
       ],
-      "surfaceRole": "night-surface",
-      "primaryColorRole": "multi-color-06",
+      "surfaceRole": "action-surface",
+      "primaryColorRole": "multi-color-09",
       "textRole": "text-on-accent",
       "spacingScale": "card-default",
       "radiusScale": "card-default",
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "#191D2B",
-        "borderRadius": 18,
-        "padding": 9,
+        "backgroundColor": "#FFED6F21",
+        "borderRadius": 20,
+        "padding": 11,
+        "justifyContent": "spaceBetween",
         "linearGradient": {
           "direction": "RightBottom",
           "colors": [
             [
-              "#171823",
+              "#FFED6F21",
               0
             ],
             [
-              "#20245A",
-              0.56
-            ],
-            [
-              "#7164FF",
+              "#FFF9A01E",
               1
             ]
           ]
-        },
-        "shadow": {
-          "radius": 18,
-          "color": "#553654FF",
-          "offsetX": 0,
-          "offsetY": 6,
-          "fill": false,
-          "type": "color",
-          "style": "outer"
         },
         "clip": true
       },
       "actionStyle": {
         "backgroundColor": "#FFFFFFFF",
-        "fontColor": "#FF8B7CFF",
+        "fontColor": "#FFED6F21",
         "height": 30,
         "borderRadius": 15,
         "fontSize": 14,
@@ -310,7 +314,7 @@
       "density": "normal",
       "rootComponent": "Column",
       "rootStyles": {
-        "backgroundColor": "#FFFF5A00",
+        "backgroundColor": "#FFED6F21",
         "borderRadius": 20,
         "padding": 11,
         "justifyContent": "spaceBetween",
@@ -318,11 +322,11 @@
           "direction": "RightBottom",
           "colors": [
             [
-              "#FFFF5A00",
+              "#FFED6F21",
               0
             ],
             [
-              "#FFFFA200",
+              "#FFF9A01E",
               1
             ]
           ]
@@ -331,7 +335,7 @@
       },
       "actionStyle": {
         "backgroundColor": "#FFFFFFFF",
-        "fontColor": "#FFFF5A00",
+        "fontColor": "#FFED6F21",
         "height": 30,
         "borderRadius": 15,
         "fontSize": 14,
@@ -358,11 +362,24 @@
         "padding": 11,
         "justifyContent": "spaceBetween",
         "alignItems": "start",
+        "linearGradient": {
+          "direction": "Bottom",
+          "colors": [
+            [
+              "#1A0A59F7",
+              0
+            ],
+            [
+              "#00FFFFFF",
+              1
+            ]
+          ]
+        },
         "clip": true
       },
       "actionStyle": {
-        "backgroundColor": "#FFEAF4FF",
-        "fontColor": "#FF007DFF",
+        "backgroundColor": "#1A0A59F7",
+        "fontColor": "#FF0A59F7",
         "height": 28,
         "borderRadius": 14,
         "fontSize": 14,
@@ -388,11 +405,24 @@
         "padding": 11,
         "justifyContent": "spaceBetween",
         "alignItems": "start",
+        "linearGradient": {
+          "direction": "Bottom",
+          "colors": [
+            [
+              "#1AE84026",
+              0
+            ],
+            [
+              "#00FFFFFF",
+              1
+            ]
+          ]
+        },
         "clip": true
       },
       "actionStyle": {
-        "backgroundColor": "#FFFFE9E7",
-        "fontColor": "#FFFF3B30",
+        "backgroundColor": "#1AE84026",
+        "fontColor": "#FFE84026",
         "height": 28,
         "borderRadius": 14,
         "fontSize": 14,
@@ -418,11 +448,24 @@
         "padding": 11,
         "justifyContent": "spaceBetween",
         "alignItems": "start",
+        "linearGradient": {
+          "direction": "Bottom",
+          "colors": [
+            [
+              "#1A0A59F7",
+              0
+            ],
+            [
+              "#00FFFFFF",
+              1
+            ]
+          ]
+        },
         "clip": true
       },
       "actionStyle": {
-        "backgroundColor": "#FFEAF4FF",
-        "fontColor": "#FF007DFF",
+        "backgroundColor": "#1A0A59F7",
+        "fontColor": "#FF0A59F7",
         "height": 28,
         "borderRadius": 14,
         "fontSize": 14,

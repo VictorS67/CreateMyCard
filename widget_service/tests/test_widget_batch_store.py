@@ -49,6 +49,25 @@ def _record(store: WidgetBatchStore, case_id: str = "2x2-q1") -> dict:
             error_code="",
             artifact_url="https://example.test/a",
             artifact_digest="sha256:test",
+            model_steps=[
+                {
+                    "sequence": 1,
+                    "phase": "advanced-scope",
+                    "status": "success",
+                    "durationMs": 42.5,
+                    "inputMessages": [{"role": "user", "content": "scope input"}],
+                    "rawOutput": '{"components":[]}',
+                },
+                {
+                    "sequence": 2,
+                    "phase": "advanced-mixed-body",
+                    "status": "success",
+                    "durationMs": 81.25,
+                    "inputMessages": [{"role": "user", "content": "body input"}],
+                    "rawOutput": "@layout(...)",
+                },
+            ],
+            diagnostics={"modelStepCount": 2},
         )
     )
 
@@ -68,6 +87,13 @@ def test_store_records_manifest_case_files_and_download(tmp_path):
     ]
     metrics = json.loads((case_dir / "metrics.json").read_text(encoding="utf-8"))
     assert metrics["durationMs"] == 123.46
+    scope_input = case_dir / "llm-step-01-advanced-scope-input.jsonl"
+    assert [json.loads(line) for line in scope_input.read_text(encoding="utf-8").splitlines()] == [
+        {"role": "user", "content": "scope input"}
+    ]
+    step_metadata = json.loads((case_dir / "llm-steps.json").read_text(encoding="utf-8"))
+    assert "inputMessages" not in step_metadata["steps"][0]
+    assert step_metadata["steps"][0]["inputFile"] == scope_input.name
 
     filename, archive_bytes = store.build_download("nested2-2x2-1")
     assert filename == "widget-batch-nested2-2x2-1.zip"
@@ -78,6 +104,12 @@ def test_store_records_manifest_case_files_and_download(tmp_path):
             "cases/2x2-q1/metrics.json",
             "cases/2x2-q1/output.a2ui.jsonl",
             "cases/2x2-q1/response.json",
+            "cases/2x2-q1/llm-steps.json",
+            "cases/2x2-q1/llm-step-01-advanced-scope.txt",
+            "cases/2x2-q1/llm-step-01-advanced-scope-input.jsonl",
+            "cases/2x2-q1/llm-step-02-advanced-mixed-body.txt",
+            "cases/2x2-q1/llm-step-02-advanced-mixed-body-input.jsonl",
+            "cases/2x2-q1/diagnostics.json",
         }
 
 

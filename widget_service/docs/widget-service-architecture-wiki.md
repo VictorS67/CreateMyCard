@@ -3,6 +3,8 @@
 > 文档范围：`CreateMyCard/widget_service` 当前 Python 正式服务。
 >
 > 本文以代码为准，描述服务边界、目录职责、生成链路、各层输入输出、模板融合机制、验证与持久化。方案背景和协议决策仍以仓库根目录的 `docs/云侧方案设计.md` 为权威文档。
+>
+> Nested-2 批量用例的端到端故障、修复和真机验收记录见 [Nested-2 卡片批跑端到端修复 Wiki](nested2-batch-e2e-fix-wiki.md)。
 
 ## 1. 一句话定位
 

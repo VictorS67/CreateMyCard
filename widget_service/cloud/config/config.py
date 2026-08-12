@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     hybrid_test_bypass_token: str = ""
     websocket_bearer_token: str = ""
     enable_widget_batch_recording: bool = False
+    enable_advanced_component_data_admission_bypass_for_batch: bool = False
     widget_batch_results_path: str = "workspace/widget_batch_runs"
     widget_batch_max_input_bytes: int = Field(default=512 * 1024, ge=1)
     widget_batch_max_output_bytes: int = Field(default=2 * 1024 * 1024, ge=1)

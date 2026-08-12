@@ -58,7 +58,7 @@
       "cardTemplate": {
         "themeProfileId": "meeting-paper-neutral",
         "requestTemplateIds": [
-          "ux-schedule-overview@2"
+          "ux-meeting-metadata@1"
         ],
         "headerTextCandidates": [
           {
@@ -80,7 +80,7 @@
       },
       "providerContractStatus": "compatible",
       "providerContractGaps": [],
-      "rawHybridSource": "HeroActionLayout(Template(\"ux-schedule-overview@2\", \"hero\", { title: \"UI需求评审会\", timeText: \"14:00 - 15:30\", location: \"深圳市龙岗区五和大道华为园区\" }), PillAction({ actionId: \"event.enter.meeting\" }));",
+      "rawHybridSource": "HeroActionLayout(Template(\"ux-meeting-metadata@1\", \"medium\", { title: \"UI需求评审会\", time: \"14:00 - 15:30\", timeIcon: \"resources/base/media/ux_golden_asset_time_beige.svg\", location: \"深圳市龙岗区五和大道华为园区\", locationIcon: \"resources/base/media/ux_golden_asset_icon_id.svg\" }), PillAction({ actionId: \"event.enter.meeting\" }));",
       "goldenFile": "current-meeting.a2ui.jsonl",
       "goldenSha256": "db59aa1d6999ef64e8f758df51a8f515d54cf5034544cbf9bb4e5e554b4b7ea1",
       "goldenSummary": {
@@ -158,7 +158,7 @@
       "cardTemplate": {
         "themeProfileId": "focus-warm-amber",
         "requestTemplateIds": [
-          "ux-schedule-overview@2"
+          "ux-calendar-content@1"
         ],
         "headerTextCandidates": [
           {
@@ -175,7 +175,7 @@
       },
       "providerContractStatus": "compatible",
       "providerContractGaps": [],
-      "rawHybridSource": "HeroActionLayout(Template(\"ux-schedule-overview@2\", \"medium\", { title: \"UI需求评审会\", timeText: \"14:00 - 15:30\" }), PillAction({ actionId: \"event.open.settings.dnd\" }));",
+      "rawHybridSource": "HeroActionLayout(Template(\"ux-calendar-content@1\", \"medium\", { title: \"UI需求评审会\", time: \"14:00 - 15:30\" }), PillAction({ actionId: \"event.open.settings.dnd\" }));",
       "goldenFile": "focus-mode.a2ui.jsonl",
       "goldenSha256": "762c378c1a20003af960065616fff6dc1a3ef6755b10ba466ebc69b807a70f51",
       "goldenSummary": {

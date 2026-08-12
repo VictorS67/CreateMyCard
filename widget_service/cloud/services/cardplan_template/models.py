@@ -51,6 +51,8 @@ class HybridBodyContract(StrictModel):
     action_bindings: tuple[ActionBinding, ...] = ()
     content_action_ids: tuple[str, ...] = ()
     allowed_layout_component_ids: tuple[str, ...] = ()
+    allowed_business_component_ids: tuple[str, ...] = ()
+    required_business_component_ids: tuple[str, ...] = ()
     limits: HybridLimits
 
 

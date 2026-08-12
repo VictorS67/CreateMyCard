@@ -58,6 +58,8 @@ class WidgetBatchCaseRecord:
     error_code: str
     artifact_url: str
     artifact_digest: str
+    model_steps: list[dict[str, Any]]
+    diagnostics: dict[str, Any]
 
 
 class WidgetBatchStore:
@@ -122,16 +124,21 @@ class WidgetBatchStore:
             raise WidgetBatchStoreError("widget batch output exceeds configured limit")
 
         with _STORE_LOCK:
-            self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            self._ensure_private_dir(self.root)
             batch_dir = self._batch_dir(record.context.batch_id)
-            case_dir = batch_dir / "cases" / record.context.case_id
-            case_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            self._ensure_private_dir(batch_dir)
+            cases_dir = batch_dir / "cases"
+            self._ensure_private_dir(cases_dir)
+            case_dir = cases_dir / record.context.case_id
+            self._ensure_private_dir(case_dir)
             self._write_json(case_dir / "input.json", record.raw_payload)
             self._write_json(case_dir / "response.json", response_document)
             self._write_text(case_dir / "output.a2ui.jsonl", output_jsonl)
+            model_step_files = self._write_model_steps(case_dir, record.model_steps)
+            self._write_json(case_dir / "diagnostics.json", record.diagnostics)
             metrics = self._metrics_document(record)
             self._write_json(case_dir / "metrics.json", metrics)
-            manifest = self._updated_manifest(batch_dir, record, metrics)
+            manifest = self._updated_manifest(batch_dir, record, metrics, model_step_files)
             self._write_json(batch_dir / "manifest.json", manifest)
             return manifest
 
@@ -182,7 +189,11 @@ class WidgetBatchStore:
         archive_buffer = BytesIO()
         with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
             for file_path in sorted(batch_dir.rglob("*")):
-                if not file_path.is_file() or file_path.name.endswith(".tmp"):
+                if (
+                    file_path.is_symlink()
+                    or not file_path.is_file()
+                    or file_path.name.endswith(".tmp")
+                ):
                     continue
                 archive.write(file_path, arcname=file_path.relative_to(batch_dir))
         return f"widget-batch-{batch_id}.zip", archive_buffer.getvalue()
@@ -192,6 +203,7 @@ class WidgetBatchStore:
         batch_dir: Path,
         record: WidgetBatchCaseRecord,
         metrics: dict[str, Any],
+        model_step_files: list[str],
     ) -> dict[str, Any]:
         manifest_path = batch_dir / "manifest.json"
         if manifest_path.is_file():
@@ -211,7 +223,7 @@ class WidgetBatchStore:
             raise WidgetBatchStoreError("batch operation cannot change")
         if manifest.get("size") != record.context.size:
             raise WidgetBatchStoreError("batch size cannot change")
-        case_summary = self._case_summary(record, metrics)
+        case_summary = self._case_summary(record, metrics, model_step_files)
         cases = [
             item
             for item in manifest.get("cases", [])
@@ -228,6 +240,7 @@ class WidgetBatchStore:
         self,
         record: WidgetBatchCaseRecord,
         metrics: dict[str, Any],
+        model_step_files: list[str],
     ) -> dict[str, Any]:
         relative_root = f"cases/{record.context.case_id}"
         return {
@@ -244,6 +257,9 @@ class WidgetBatchStore:
                 "response": f"{relative_root}/response.json",
                 "output": f"{relative_root}/output.a2ui.jsonl",
                 "metrics": f"{relative_root}/metrics.json",
+                "llmSteps": f"{relative_root}/llm-steps.json",
+                "llmOutputs": [f"{relative_root}/{name}" for name in model_step_files],
+                "diagnostics": f"{relative_root}/diagnostics.json",
             },
         }
 
@@ -274,6 +290,50 @@ class WidgetBatchStore:
         ]
         return "\n".join(rows) + "\n"
 
+    def _write_model_steps(
+        self,
+        case_dir: Path,
+        model_steps: list[dict[str, Any]],
+    ) -> list[str]:
+        metadata: list[dict[str, Any]] = []
+        output_files: list[str] = []
+        for index, step in enumerate(model_steps, start=1):
+            phase = re.sub(r"[^A-Za-z0-9._-]+", "-", str(step.get("phase", "unknown")))
+            output_name = f"llm-step-{index:02d}-{phase or 'unknown'}.txt"
+            raw_output = str(step.get("rawOutput", ""))
+            if len(raw_output.encode("utf-8")) > self.settings.widget_batch_max_output_bytes:
+                raise WidgetBatchStoreError("widget batch LLM step output exceeds configured limit")
+            self._write_text(case_dir / output_name, raw_output)
+            output_files.append(output_name)
+            input_messages = step.get("inputMessages")
+            input_name = ""
+            input_bytes = 0
+            if isinstance(input_messages, list):
+                input_jsonl = self._render_messages_jsonl(input_messages)
+                input_bytes = len(input_jsonl.encode("utf-8"))
+                if input_bytes > self.settings.widget_batch_max_input_bytes:
+                    raise WidgetBatchStoreError(
+                        "widget batch LLM step input exceeds configured limit"
+                    )
+                input_name = f"llm-step-{index:02d}-{phase or 'unknown'}-input.jsonl"
+                self._write_text(case_dir / input_name, input_jsonl)
+                output_files.append(input_name)
+            metadata.append(
+                {
+                    key: value
+                    for key, value in step.items()
+                    if key not in {"rawOutput", "inputMessages"}
+                }
+                | {
+                    "inputFile": input_name,
+                    "inputBytes": input_bytes,
+                    "outputFile": output_name,
+                    "outputBytes": len(raw_output.encode("utf-8")),
+                }
+            )
+        self._write_json(case_dir / "llm-steps.json", {"steps": metadata})
+        return output_files
+
     @staticmethod
     def _encoded_json_size(value: dict[str, Any]) -> int:
         return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
@@ -289,6 +349,11 @@ class WidgetBatchStore:
     def _require_enabled(self) -> None:
         if not self.enabled:
             raise WidgetBatchRecordingDisabledError("widget batch recording is disabled")
+
+    @staticmethod
+    def _ensure_private_dir(path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.chmod(0o700)
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any]:

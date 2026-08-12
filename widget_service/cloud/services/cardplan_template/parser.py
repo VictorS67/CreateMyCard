@@ -8,7 +8,10 @@ import tokenize
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from services.advanced_component_pipeline.models import UX_LAYOUT_COMPONENT_IDS
+from services.advanced_component_pipeline.models import (
+    UX_DIRECT_BUSINESS_COMPONENT_IDS,
+    UX_LAYOUT_COMPONENT_IDS,
+)
 from services.terse_dsl_nested2_converter import (
     MAX_COMPONENTS,
     MAX_INPUT_LENGTH,
@@ -27,6 +30,7 @@ _UX_ACTION_COMPONENTS = frozenset({"PillAction", "IconAction", "ActionTile"})
 _LEAVES = (
     frozenset({"Text", "Image", "Divider", "Progress", "Button", "Checkbox"})
     | _UX_ACTION_COMPONENTS
+    | UX_DIRECT_BUSINESS_COMPONENT_IDS
 )
 _COMPONENTS = _CONTAINERS | _LEAVES
 
@@ -144,6 +148,8 @@ def _parse_call(
         if isinstance(argument, ast.Call):
             child_started = True
             children.append(_parse_call(argument, source, depth + 1, state))
+        elif _is_wrapped_layout_config(name, argument, values, child_started):
+            values.append(_literal_value(argument.elts[0], depth + 1))
         elif isinstance(argument, ast.List) and argument.elts:
             if not all(isinstance(child, ast.Call) for child in argument.elts):
                 raise TerseDslNested2ConversionError(
@@ -160,6 +166,22 @@ def _parse_call(
     if children and name not in _CONTAINERS:
         raise TerseDslNested2ConversionError(f"{name} cannot contain child components.")
     return ParsedCall("component", name, tuple(values), tuple(children), span)
+
+
+def _is_wrapped_layout_config(
+    name: str,
+    argument: ast.AST,
+    values: list[Any],
+    child_started: bool,
+) -> bool:
+    """Accept the recurrent model form Layout([{...}], child) as one config object."""
+    if name not in UX_LAYOUT_COMPONENT_IDS or values or child_started:
+        return False
+    return (
+        isinstance(argument, ast.List)
+        and len(argument.elts) == 1
+        and isinstance(argument.elts[0], ast.Dict)
+    )
 
 
 def _parse_template_call(

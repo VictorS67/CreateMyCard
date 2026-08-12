@@ -31,7 +31,7 @@ _ACTION_LABELS = {
     "event.open.settings.bluetooth": "蓝牙设置",
     "event.open.settings.battery": "电池设置",
     "event.open.settings.batteryHealth": "电池健康",
-    "event.open.settings.parentControl": "家长控制",
+    "event.open.settings.parentControl": "管控时间",
     "event.open.settings.storage": "存储设置",
     "event.open.weather": "天气详情",
     "event.open.clock.alarm": "设置闹钟",
@@ -46,14 +46,60 @@ _ACTION_LABELS = {
 _ASSET_SEMANTIC_TERMS = {
     "calendar": ("calendar", "schedule", "日程", "日历"),
     "schedule": ("schedule", "日程"),
+    "meeting": ("meeting", "conference", "会议", "入会"),
+    "time": ("time", "clock", "时间", "时钟"),
+    "location": ("location", "place", "room", "地点", "位置", "会议室"),
+    "focus": ("focus", "dnd", "专注", "勿扰"),
     "sport": ("sport", "training", "run", "运动", "训练", "跑步"),
     "run": ("run", "running", "跑步"),
+    "activity": ("activity", "steps", "walk", "活动", "步数", "步行"),
+    "steps": ("steps", "step count", "walk", "步数", "步行"),
+    "calories": ("calorie", "calories", "kcal", "热量", "卡路里"),
+    "energy": ("energy", "flame", "fire", "能量", "火焰"),
+    "distance": ("distance", "mileage", "距离", "里程"),
+    "route": ("route", "path", "路线", "路径"),
+    "workout": ("workout", "exercise", "training", "锻炼", "训练", "运动"),
+    "heart": ("heart", "cardiac", "心脏", "心率"),
+    "heart-rate": ("heart rate", "heartrate", "心率"),
+    "pulse": ("pulse", "bpm", "脉搏", "心率"),
     "call": ("call", "phone", "电话", "拨打"),
     "weather": ("weather", "天气"),
     "alert": ("alert", "warning", "预警", "警告"),
     "product": ("product", "earphone", "headphone", "耳机"),
+    "audio": ("audio", "music", "earphone", "headphone", "音频", "音乐", "耳机"),
+    "earphone": ("earphone", "earbud", "headphone", "耳机", "耳塞"),
+    "phone-device": ("smartphone", "phone icon", "icon_phone", "手机图标"),
+    "music": ("music", "playlist", "音乐", "歌单"),
+    "favorite": ("favorite", "like", "heart", "收藏", "心动", "心形"),
     "battery": ("battery", "charge", "charging", "电池", "电量", "充电"),
     "power": ("power", "charge", "charging", "省电", "电量", "充电"),
+    "power-saving": (
+        "power saving",
+        "power-saving",
+        "battery saver",
+        "save power",
+        "leaf",
+        "省电",
+        "节电",
+        "节能",
+        "绿叶",
+        "叶片",
+        "叶子",
+    ),
+    "memory": ("memory", "ram", "内存"),
+    "resource": ("system resource", "resource usage", "系统资源", "资源占用"),
+    "clean": ("clean", "cleanup", "clear", "清理", "释放"),
+    "app": ("app", "application", "应用", "软件"),
+    "timer": ("timer", "timing", "hourglass", "计时", "时长", "时间"),
+    "settings": ("settings", "setting", "设置"),
+    "parental-control": (
+        "parental control",
+        "parent control",
+        "digital wellbeing",
+        "家长控制",
+        "健康使用",
+        "管控时间",
+    ),
 }
 
 
@@ -479,14 +525,16 @@ def _composition_rules(ux_layout_root: bool) -> tuple[str, ...]:
     if ux_layout_root:
         return (
             '根必须直接是一个批准的布局高级组件；禁止 Template("card@1", ...)。',
-            "布局调用可省略配置；需要覆盖默认重排时，只能把 Contract 声明的一个闭合配置对象"
+            "布局调用可省略配置；需要覆盖默认重排时，"
+            "只能把 Contract 声明的一个闭合配置对象"
             "放在第一个 child 前。布局的 businessChildren 数量不含 Action；"
             "所有 Action 必须是布局根的"
             "连续末尾直接 children，禁止放进 Column/Row/Stack/List/Template。除 ActionMatrixLayout"
             "可按 Contract 使用2到4个控制项外，其它布局最多一个 Action。",
             "禁止独立整卡 Header。若 cardComposition.businessTitleCandidate 能准确命名"
             "当前业务，"
-            "可在业务内容区使用；若局部 Template 或事实已表达则省略，禁止从 request 截取标题。",
+            "可在业务内容区使用；若局部 Template 或事实已表达则省略，"
+            "禁止从 request 截取标题。",
             'Action 只允许 PillAction({"actionId":"批准ID","icon":"可选批准素材"})、'
             'IconAction({"actionId":"批准ID","icon":"必填批准素材"}) 或 '
             'ActionTile({"actionId":"批准ID","icon":"可选批准素材"})。',
@@ -797,6 +845,8 @@ def _unique(values: list[str]) -> tuple[str, ...]:
 
 
 def _action_label(event: Any) -> str:
+    if getattr(event, "id", "") == "event.open.settings.parentControl":
+        return "管控时间"
     display_label = getattr(event, "displayLabel", None)
     if isinstance(display_label, str) and display_label.strip():
         return display_label.strip()

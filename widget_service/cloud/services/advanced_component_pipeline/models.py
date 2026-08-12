@@ -46,6 +46,21 @@ UX_LAYOUT_COMPONENT_IDS = frozenset(
         "WeatherNowForecastLayout",
     }
 )
+UX_DIRECT_BUSINESS_COMPONENT_IDS = frozenset(
+    {
+        "ActivityOverview",
+        "AppUsageOverview",
+        "BatteryOverview",
+        "BluetoothDeviceOverview",
+        "DateOverview",
+        "HeartRateOverview",
+        "ResourceUsageOverview",
+        "ScheduleOverview",
+        "SleepOverview",
+        "WeatherOverview",
+        "WorkoutOverview",
+    }
+)
 
 
 class StrictModel(BaseModel):
@@ -126,7 +141,8 @@ class UxBusinessComponentCapability(StrictModel):
     enabled_variants_by_capability: dict[str, tuple[str, ...]] = Field(
         alias="enabledVariantsByCapability"
     )
-    local_template_ids: tuple[str, ...] = Field(alias="localTemplateIds")
+    implementation: Literal["template", "terse-dsl"] = "template"
+    local_template_ids: tuple[str, ...] = Field(default=(), alias="localTemplateIds")
 
     @model_validator(mode="after")
     def valid_capability(self) -> UxBusinessComponentCapability:
@@ -134,8 +150,12 @@ class UxBusinessComponentCapability(StrictModel):
             raise ValueError("UX Business Component must register variants")
         if not self.supported_layouts:
             raise ValueError("UX Business Component must register layouts")
-        if not self.local_template_ids:
+        if self.implementation == "template" and not self.local_template_ids:
             raise ValueError("UX Business Component must register local Templates")
+        if self.implementation == "terse-dsl" and self.name not in UX_DIRECT_BUSINESS_COMPONENT_IDS:
+            raise ValueError("UX Business Component has an unsupported TerseDSL implementation")
+        if self.implementation == "terse-dsl" and self.local_template_ids:
+            raise ValueError("TerseDSL UX Business Component cannot depend on local Templates")
         if set(self.enabled_variants_by_capability) != set(self.data_capability_ids):
             raise ValueError("UX Business Component capability variant gates are incomplete")
         if any(
@@ -523,3 +543,4 @@ class AdvancedPipelineOutput(BaseModel):
     template_used_ids: list[str] = Field(default_factory=list)
     expanded_component_count: int = 0
     advanced_composition: AdvancedCompositionPlan | None = None
+    trusted_internal_asset_sources: tuple[str, ...] = ()

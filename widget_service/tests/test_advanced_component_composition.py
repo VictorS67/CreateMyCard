@@ -74,6 +74,117 @@ def _task(
     )
 
 
+def _semantic_scope_task(component_name: str, query: str, capability_ids: tuple[str, ...]):
+    schema = {capability_id: {} for capability_id in capability_ids}
+    if component_name == "WeatherOverview":
+        schema = {
+            "ViewWeather": {
+                "districtName": _field("string", "地区", "深圳"),
+                "temperatureText": _field("string", "当前温度", "38°"),
+                "condition": _field("string", "天气状态", "晴"),
+                "airQuality": _field("string", "空气质量", "空气优"),
+                "temperatureRangeText": _field("string", "当日温度范围", "26° / 16°"),
+            }
+        }
+    elif component_name == "DateOverview":
+        query = "展示会议日期"
+        schema = {
+            "GetCalendarEvents": {
+                "events": [
+                    {
+                        "title": _field("string", "会议标题", "产品评审"),
+                        "startDate": _field("string", "会议日期", "08-27"),
+                    }
+                ],
+                "updatedAt": _field("string", "更新时间", "2026-08-11 09:00"),
+            }
+        }
+    elif component_name == "ScheduleOverview":
+        query = "展示下一场会议"
+        schema = {
+            "GetCalendarEvents": {
+                "events": [
+                    {
+                        "title": _field("string", "会议标题", "产品评审"),
+                        "dtStart": _field("string", "会议开始时间", "09:30"),
+                    }
+                ]
+            }
+        }
+    elif component_name == "ActivityOverview":
+        query = "展示今日活动概览"
+        schema = {
+            "GetHealthAndSportSummary": {
+                "dailySteps": _field("integer", "今日步数", 6321),
+                "dailyTotalCaloriesText": _field("string", "今日热量", "320 千卡"),
+                "dailyDistanceText": _field("string", "今日距离", "4.2 公里"),
+            }
+        }
+    elif component_name == "WorkoutOverview":
+        query = "展示最近运动"
+        schema = {
+            "GetHealthAndSportSummary": {
+                "exerciseTypeName": _field("string", "运动类型", "户外跑步"),
+                "exerciseDurationText": _field("string", "运动时长", "42 分钟"),
+                "exerciseCalorieText": _field("string", "运动热量", "368 千卡"),
+            }
+        }
+    elif component_name == "HeartRateOverview":
+        query = "展示运动平均心率"
+        schema = {
+            "GetHealthAndSportSummary": {
+                "exerciseHeartRateAvg": _field("integer", "运动平均心率", 128)
+            }
+        }
+    elif component_name == "SleepOverview":
+        query = "展示昨晚睡眠总时长"
+        schema = {
+            "GetHealthAndSportSummary": {
+                "nightSleepDurationText": _field("string", "夜间睡眠总时长", "7小时5分钟")
+            }
+        }
+    elif component_name == "BatteryOverview":
+        schema = {
+            "GetPhoneBatteryInfo": {
+                "batterySOC": _field("integer", "手机电量百分比", 68),
+                "batterySOCText": _field("string", "手机电量文本", "68%"),
+                "batteryCapacityLevelDesc": _field("string", "电量等级", "电量正常"),
+                "chargingStatusDesc": _field("string", "充电状态", "未充电"),
+            }
+        }
+    elif component_name == "BluetoothDeviceOverview":
+        query = "展示蓝牙耳机双耳电量"
+        schema = {
+            "GetEarphoneInfo": {
+                "isConnected": _field("boolean", "连接状态", True),
+                "earphoneName": _field("string", "耳机名称", "FreeBuds Pro"),
+                "leftBatteryLevel": _field("integer", "左耳电量", 76),
+                "rightBatteryLevel": _field("integer", "右耳电量", 72),
+                "batteryLevel": _field("integer", "充电盒电量", 64),
+            }
+        }
+    elif component_name == "ResourceUsageOverview":
+        schema = {
+            "GetSystemMemInfo": {
+                "usagePercent": _field("number", "内存占用", 48.5),
+                "availableMemText": _field("string", "可用内存", "4.1 GB"),
+                "totalMemText": _field("string", "总内存", "8 GB"),
+            }
+        }
+    elif component_name == "AppUsageOverview":
+        query = "展示视频今天的使用时长"
+        schema = {
+            "GetAppUsageDuration": {
+                "appUsage": {
+                    "appName": _field("string", "应用名称", "视频"),
+                    "durationText": _field("string", "使用时长", "25 分钟"),
+                },
+                "updatedAt": _field("string", "更新时间", "今日 21:30"),
+            }
+        }
+    return _task(query, schema)
+
+
 def test_registry_contains_fifteen_components_and_eight_adaptive_templates():
     registry = get_cardplan_registry()
 
@@ -125,9 +236,10 @@ def test_provider_variant_gate_does_not_advertise_unimplemented_content_variants
 def test_each_ux_business_family_is_exposed_by_semantic_scope_candidates():
     registry = get_cardplan_registry()
     for capability in registry.ux_business_components.values():
-        task_spec = _task(
+        task_spec = _semantic_scope_task(
+            capability.name,
             capability.detection_terms[0],
-            {capability_id: {} for capability_id in capability.data_capability_ids},
+            capability.data_capability_ids,
         )
         if not capability.data_capability_ids:
             with pytest.raises(ValueError, match="no provider-backed"):
@@ -162,7 +274,7 @@ def test_advanced_scope_model_rejects_legacy_ui_brief_fields():
 
 @pytest.mark.asyncio
 async def test_scope_planner_rejects_theme_outside_selected_component_palette():
-    task_spec = _task("天气", {"ViewWeather": {}})
+    task_spec = _semantic_scope_task("WeatherOverview", "天气", ("ViewWeather",))
 
     async def generate_json(_prompt, _phase):
         return {

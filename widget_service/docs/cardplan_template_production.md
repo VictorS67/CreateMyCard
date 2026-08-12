@@ -6,8 +6,10 @@
 
 1. 第一次模型调用走独立 `advanced-component-scope` 入口，只输出 `themeId` 和
    `advancedComponentIds`，不接触旧 UI Brief/Template 候选。
-2. 服务端根据版本化 UX Registry 校验业务组件范围，并解析可用的布局高级组件和局部 Template。
-3. 第二次模型调用直接以批准的布局高级组件为根，在业务区混排局部 Template 和标准组件，并把 Action
+2. 服务端根据版本化 UX Registry 校验业务组件范围，并解析可用的布局高级组件、局部 Template 和受限
+   直接 TerseDSL 业务构造。
+3. 第二次模型调用直接以批准的布局高级组件为根，在业务区混排局部 Template、注册的直接业务构造和标准
+   组件，并把 Action
    放在布局规定的末尾槽位；不再生成 `card@1`。
 4. 服务端静态展开布局、Action 与 Template，并在可信端补齐 CardFrame，复用现有 Terse Nested2 到 A2UI
    Adapter，端侧只接收标准 A2UI。
@@ -37,16 +39,51 @@
 
 ## 高级组件补齐
 
-新 `advanced-component-ux-registry/1` 根据 UX 设计注册 10 个布局高级组件、16 个业务高级组件、Palette
+新 `advanced-component-ux-registry/1` 根据 UX 设计注册 10 个布局高级组件、17 个业务高级组件、Palette
 Scene、2x2/2x4 内容预算和 `radius=20/safeInset=12/moduleGap=8/pillActionHeight=36` 等 Token。第一层
 Scope Planner 根据 Query 与 TaskSpec Schema 最多下发 8 个候选，只接受版本化的 Theme 与业务组件范围。
 
 布局高级组件声明几何、业务槽位、每种尺寸的业务/Action 数量和闭合参数 Schema；业务高级组件只声明领域
-语义、角色、variant、隐私、Action/Chart 能力和版本化局部 Template 映射。第二轮根必须恰好是一个允许
+语义、角色、variant、隐私、Action/Chart 能力，以及版本化局部 Template 或显式注册的直接构造。当前
+`WeatherOverview`、`DateOverview`、`ScheduleOverview`、`ResourceUsageOverview`、`AppUsageOverview`、
+`ActivityOverview`、`WorkoutOverview`、`HeartRateOverview`、`SleepOverview` 使用受限直接构造。
+其中 Schedule 模型侧只输出
+`ScheduleOverview({variant, role, sourceIcon?, timeIcon?, locationIcon?})`，不得输出业务事实或样式；服务端从
+同一可信首项日程确定性展开 title、timeText 和可选 location。所有可选图标均须由第二步模型从本轮
+`trustedAssetSources` 语义匹配选择，Action 只能由布局引用本轮批准的 `eventCandidates`。其余视觉树、样式和
+2x2/2x4 尺寸重排由可信 Terse UI IR 构造完成，不新增或依赖 JSON 视觉模板。第二轮根必须恰好是一个允许
 布局。布局配置可省略；需要覆盖默认重排时，只允许一个位于业务 child 前的 Schema 对象。Action 必须是
 连续的末尾直接 children；除 `ActionMatrixLayout` 可使用 2～4 个不重复 `ActionTile` 外，其它布局最多一个
 `PillAction`、`IconAction` 或 `ActionTile`。标签和事件由可信服务端绑定。独立 Header 为可选能力且默认
 省略，业务标题由业务区负责。服务端展开后出现 `Template` 或任何高级组件名即失败。
+
+`SleepOverview` 只在 `GetHealthAndSportSummary` 同一记录含可无损解析的
+`nightSleepDurationText` 时进入候选；状态和严格 `HH:mm` 入睡/醒来时刻按字段分别可选。批量效果测试阶段，
+得分、阶段、午睡、目标、趋势和建议等睡眠请求允许进入候选，但只降级展示 `duration`；状态或作息字段缺失
+时同样降级，不补造数据。`insufficient` 只由明确可信不足状态启用，不能由时长推断。第二层只输出
+`SleepOverview({variant, role, sourceIcon?})`，图标必须来自本轮 sleep/moon/alarm 语义素材。2x2 使用
+30fp/12fp 双值时长；2x4 使用时长 Hero 和入睡/醒来 Support；无批准 `event.open.clock.alarm` 时不得生成
+动作。新链路不请求或新增 Sleep JSON Template。
+
+`WeatherOverview` 的第一层候选和模型输出后复核都要求 `ViewWeather` 提供五个完整事实：城市取
+`districtName` 或 `prefectureName`，其余依次取 `temperatureText`、`condition`、`airQuality` 和
+`temperatureRangeText`；字段必须声明为字符串且样例值非空。小时预报、日出日落、气压、能见度、AQI、
+体感、湿度、风、紫外线、预警、降雨概率和未来预报等未支持请求会在进入 Scope 前被拒绝。2x2 的
+Weather + Location 仍归一化为单一
+Weather 原子组件。Weather 内部标题 Row、内容区和布局承载容器统一用 `matchParent` 填充父区域；不能用
+渲染器会按 100vp 处理的 `"100%"`。2x2 单业务使用顺序 Column：标题 Row 的地点在 leading、32vp 天气图标在 trailing，之后是 38fp 温度和底部天气/空气质量/高低温，禁止 Overlay 重叠。晴天且素材具有 `sun` 语义时注入黄色 `fillColor`，其它图标保留原色。`event.open.weather` 天气详情动作绑定到 CardFrame 整卡 `onClick`，不渲染 PillAction/IconAction；其它天气场景动作仍按布局 Action 处理。没有独立 forecast 业务组件时不允许 `WeatherNowForecastLayout`。
+`ViewWeather.location.districtName` 的展示样例优先使用本轮绑定参数中的非空 `districtName`，避免请求城市
+与注册表静态样例城市不一致。
+
+`ResourceUsageOverview` 只开放 `memory`，要求 `GetSystemMemInfo` 的 `usagePercent` 为 0..100 的有限 number，
+且 `availableMemText/totalMemText` 为可信非空 string；投影与直接构造只使用这三项。存储/磁盘、缓存、进程、
+CPU/GPU、swap、趋势、历史和 freeMemText-only 请求均在第一层及模型返回后禁选。单业务 Ring 为 52vp；
+2×2 与 Battery 组合为两个 44vp 等权 Ring，2×4 为 56:44 内存 Hero + 电量 Support。不得从百分比推断压力
+状态。清理动作只允许批准的 `event.clean.memory`，所有图标只引用本轮语义匹配素材；缺事件或素材时分别
+回退无动作布局或无图标表现。
+受控批测开启时，每个模型步骤额外保存 `*-input.jsonl` 与原始输出，并在 `diagnostics.json` 保存投影后的
+TaskSpec、编译前 DSL 及 Weather requested/renderable/visible 字段覆盖率；这些内容不进入工具响应或生产
+日志。
 
 ### 布局规范映射
 
@@ -81,8 +118,8 @@ Golden 场景、Fixture ID 或业务名称：
 ## 安全边界
 
 - Parser 使用 Python AST 解析声明式调用和字面量，不使用 `eval` 或 `exec`。
-- 新 UX 主链路只允许本次批准的布局根、三个 Action 高级组件、Registry 中的版本化 Template、Catalog
-  标准组件及白名单字段；旧 `card@1` 只由隔离的兼容入口接受。
+- 新 UX 主链路只允许本次批准的布局根、三个 Action 高级组件、Registry 中的版本化 Template、显式注册
+  的直接业务构造、Catalog 标准组件及白名单字段；旧 `card@1` 只由隔离的兼容入口接受。
 - Template 展开前后分别校验 variant、参数 Schema、父组件、Action、素材、字面量、节点、深度和空间预算。
 - Template 只在可信服务端展开；编译后 A2UI 出现 `Template` 即失败。
 - 模型只能引用本次 Contract 暴露的数据路径、素材和 Action。Template 的占位 Action 在展开后绑定回
@@ -113,6 +150,20 @@ Golden 场景、Fixture ID 或业务名称：
 
 生产默认关闭。`testAuthorization` 从 Pydantic 序列化中排除，并由日志清洗器无条件移除。任何条件不满足都
 返回未授权错误。create 本身已固定进入新混合路线，该兼容参数不会切换路由。
+
+### 临时批跑数据准入旁路
+
+为批量观察高级组件视觉效果，可临时同时设置：
+
+- `WIDGET_SERVICE_ENABLE_WIDGET_BATCH_RECORDING=true`；
+- `WIDGET_SERVICE_ENABLE_ADVANCED_COMPONENT_DATA_ADMISSION_BYPASS_FOR_BATCH=true`。
+
+两项同时开启时，第一层候选和 Scope 输出复核暂不执行各业务组件的 Query 细分、字段完整性及动作闭环
+适配判断，并在 Prompt、invocation 和批测证据中记录 `temporaryDataAdmissionBypass=true`。Provider、尺寸、
+Registry 组合、布局约束、第二层可信事实投影、直接 TerseDSL 构造、Action/素材白名单和最终编译校验仍然
+保留；服务端不会补造缺失字段、状态、事件或图标。因此批跑样例仍需提供目标组件最终展示所需的真实事实。
+
+批跑结束后关闭任一开关并重启服务即可恢复严格准入；该旁路不得用于生产流量。
 
 ## DeepSeek 硬预算
 
@@ -280,6 +331,8 @@ Registry、Compiler 和 A2UI Adapter 得到，没有以 Golden A2UI 覆盖结果
 
 - 独立 Header 尚未开放给模型；默认不生成卡片级标题，语义标题由业务内容承担。需要 Header 时必须先补齐
   版本化 Contract、UX Token 和防重复标题校验。
+- `ResourceUsageOverview.storage` 仅保留 Registry 声明，尚无正式 Provider；freeMemText、压力状态、趋势和
+  历史曲线均未开放。
 - 新增布局、Action 或 Template 必须先更新 source Registry/Prompt，再通过生成物 SHA 门禁。
 - 空间估算是服务端保守预算，超过推荐高度会标记 `space_constrained`，硬节点/深度限制仍会拒绝。
 - 共享 SQLite 预算依赖文件锁；跨不共享文件系统的多副本不能宣称全局 400 次保证。

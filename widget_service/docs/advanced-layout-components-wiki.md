@@ -5,6 +5,9 @@
 > 表达约定：本文统一使用 **TerseDSL**。高级组件是生成期语义宏，由可信服务端确定性展开为
 > “基础组件 + 内联样式对象”的 TerseDSL，再转换为标准 A2UI v0.9；端侧 Catalog 不新增
 > `SingleFocusLayout` 节点。
+>
+> 业务内容组件的字段、变体和内部样式见
+> [`advanced-business-components-wiki.md`](advanced-business-components-wiki.md)。
 
 ## 1. 设计目标
 
@@ -422,16 +425,438 @@ SingleFocusLayout(
 - [ ] 展开结果只包含标准基础组件和可映射样式。
 - [ ] 最终 A2UI wire version 为 `v0.9`，且无高级组件名泄漏。
 
-## 9. 后续布局组件
+## 9. 布局组件总览
 
-后续按相同结构逐个补充：
+| 布局组件 | 核心语义 | 业务 children | Action | 典型场景 |
+| --- | --- | --- | --- | --- |
+| `SingleFocusLayout` | 一个主要对象 | 1 | 0～1 | 大数值、单条详情、单一进度 |
+| `HeroActionLayout` | 一个主要对象和必要动作 | 1 | 1 | 入会、回拨、省电、开始训练 |
+| `HeroSupportLayout` | 主对象和解释对象 | 2 | 0 | 天气+日程、活动+睡眠 |
+| `HeroSupportActionLayout` | 主对象、解释对象和必要动作 | 2 | 1 | 天气+会议+打车、电量+建议+省电 |
+| `PeerPairLayout` | 两个同权对象 | 2 | 0～1 | 左右耳电量、两个位置、两个同类指标 |
+| `SequentialSummaryLayout` | 先总览、后分解 | 2～3 / 2～4 | 0 | 总进度+分项、总状态+部件状态 |
+| `EqualItemsLayout` | 多个同权对象 | 2 / 2～4 | 0 | 预报项、设备项、排行项 |
+| `ListActionLayout` | 一个列表对象和整体动作 | 1 | 0～1 | 待办、通话记录、日程列表 |
+| `ActionMatrixLayout` | 可选摘要和多个同级动作 | 0～1 | 2 / 2～4 | 系统模式、快捷设置、媒体控制 |
+| `WeatherNowForecastLayout` | 当前天气和未来天气 | 1 / 1～4 | 0～1 | 当前天气、未来三项预报、天气快捷动作 |
 
-1. `HeroActionLayout`
-2. `HeroSupportLayout`
-3. `HeroSupportActionLayout`
-4. `PeerPairLayout`
-5. `SequentialSummaryLayout`
-6. `EqualItemsLayout`
-7. `ListActionLayout`
-8. `ActionMatrixLayout`
-9. `WeatherNowForecastLayout`
+表格中使用“2×2 / 2×4”表示两个尺寸分别允许的数量。所有 Action 都必须是布局根连续的末尾
+直接 children；业务 children 的内部组件数不计入布局 Slot 数量。
+
+## 10. `HeroActionLayout`
+
+### 10.1 使用场景与边界
+
+用于一个主状态、指标或对象加一个完成当前任务所必需的动作，例如加入会议、回拨、省电、开始训练
+或立即管控。动作不是必要入口时应回到 `SingleFocusLayout`；还需要独立解释对象时改用
+`HeroSupportActionLayout`。
+
+```text
+HeroActionLayout([config], heroChild, actionChild);
+```
+
+| 配置 | 取值 | 默认 | 约束 |
+| --- | --- | --- | --- |
+| `actionPlacement` | `bottom \| end` | `bottom` | `end` 仅支持 2×4 |
+
+业务 child 固定 1 个，Action 固定 1 个且必须位于最后。2×2 优先 `PillAction`；只有动作语义可由
+图标准确表达时使用右下 `IconAction`。2×4 可使用底部动作或右侧动作区。
+
+### 10.2 UX 规范
+
+- 2×2 `bottom`：Hero 使用剩余高度，底部动作高 `36vp`，两区间距 `8vp`。
+- 2×2 图标动作：复用 `SingleFocusLayout` 的 `38×38vp` 右下预留区。
+- 2×4 `end`：Hero 与动作区按 `60:40` 分配，横向间距 `8vp`；动作在右区靠下。
+- 2×4 `bottom`：Hero 单区铺开，动作位于所属区域底部。
+- Hero 必须保持唯一视觉焦点；动作区不得承载第二个业务组件。
+
+### 10.3 可信 TerseDSL + 样式展开
+
+`bottom` 使用以下骨架：
+
+```text
+Column("section", {
+  "width": "100%", "height": "100%",
+  "itemMargin": 8, "justifyContent": "spaceBetween"
+},
+  Column("compact", {
+    "layoutWeight": 1, "justifyContent": "start",
+    "alignItems": "start", "clip": true,
+    "constraintSize": { "minWidth": 0, "minHeight": 0 }
+  }, HERO),
+  ACTION
+)
+```
+
+2×4 `end` 使用两个可收缩的等高区域：
+
+```text
+Row("between", { "width": "100%", "height": "100%", "itemMargin": 8 },
+  Column("compact", { "layoutWeight": 60, "clip": true }, HERO),
+  Column("compact", {
+    "layoutWeight": 40, "justifyContent": "end",
+    "alignItems": "start", "clip": true
+  }, ACTION)
+)
+```
+
+## 11. `HeroSupportLayout`
+
+### 11.1 使用场景与契约
+
+用于一个主对象和一个支持对象，二者存在明确主次但没有显式主动作。典型组合包括天气+日程、日期+
+待办、设备电量+耳机状态、活动+睡眠和位置+天气。
+
+```text
+HeroSupportLayout([config], heroChild, supportChild);
+```
+
+| 配置 | 取值 | 默认 |
+| --- | --- | --- |
+| `ratio` | `balanced \| heroWide \| supportWide` | 2×2 `heroWide`；2×4 `balanced` |
+| `direction` | `auto \| horizontal \| vertical` | `auto` |
+
+业务 children 固定 2 个，不接受 Action。`auto` 在 2×4 固定使用横向；2×2 遇到 Image、Progress
+等视觉区域时优先横向，纯文本区域优先纵向。
+
+### 11.2 UX 规范
+
+- `balanced` 为 `50:50`，`heroWide` 为 `56:44`，`supportWide` 为 `44:56`。
+- 2×2 必须通过字号、面积或位置体现主次，不能把两个区域都渲染成 Hero。
+- 2×4 默认左右布局，区域间距 `8vp`。
+- 2×4 纯文本 Support 使用中性半透明底托、`8vp` 圆角，横向 `12vp`、纵向 `8vp` 内边距。
+- Support 是图片或 Ring 时可不增加底托，但必须在自己的区域内居中并裁剪。
+
+### 11.3 可信 TerseDSL + 样式展开
+
+横向模式：
+
+```text
+Row("between", {
+  "width": "100%", "height": "100%",
+  "itemMargin": 8, "alignItems": "center"
+},
+  Column("compact", {
+    "layoutWeight": HERO_WEIGHT, "clip": true,
+    "constraintSize": { "minWidth": 0, "minHeight": 0 }
+  }, HERO),
+  Column("compact", {
+    "layoutWeight": SUPPORT_WEIGHT, "clip": true,
+    "constraintSize": { "minWidth": 0, "minHeight": 0 }
+  }, SUPPORT_PANEL)
+)
+```
+
+纵向模式把根替换为 `Column("section", ...)`，两个区域分别使用相同权重与纵向可收缩约束。
+
+## 12. `HeroSupportActionLayout`
+
+### 12.1 使用场景与契约
+
+用于一个主对象、一个解释或上下文对象以及一个必要动作，是信息与行动并重的结构。
+
+```text
+HeroSupportActionLayout([config], heroChild, supportChild, actionChild);
+```
+
+| 配置 | 取值 | 默认 |
+| --- | --- | --- |
+| `heroRatio` | `wide \| balanced` | `wide` |
+
+业务 children 固定 2 个，Action 固定 1 个。2×2 Support 只能是 1～2 行紧凑信息；2×4 支持
+`PillAction`、`IconAction` 或单个 `ActionTile`，但同一卡片仍只有一个主动作。
+
+### 12.2 UX 规范
+
+- 2×2 顺序固定为 Hero → Support → Action，区间距均为 `8vp`。
+- 2×2 Support 高度上限 `36vp`；空间不足时删除非必需 Support，不压缩或遮挡 Action。
+- 2×4 默认左右 `56:44`；`balanced` 为 `50:50`。
+- 2×4 左侧是 Hero；右侧纵向放 Support 和 Action，右上/右下间距 `8vp`。
+- 纯文本 Support 使用中性底托；动作色可以表达语义，但不能改变整卡主色家族。
+
+### 12.3 可信 TerseDSL + 样式展开
+
+2×4：
+
+```text
+Row("between", { "width": "100%", "height": "100%", "itemMargin": 8 },
+  Column("compact", { "layoutWeight": HERO_WEIGHT, "clip": true }, HERO),
+  Column("section", {
+    "layoutWeight": SUPPORT_WEIGHT, "height": "100%",
+    "itemMargin": 8, "justifyContent": "spaceBetween", "clip": true
+  },
+    Stack("overlay", {
+      "layoutWeight": 1, "padding": { "left": 12, "top": 8, "right": 12, "bottom": 8 },
+      "borderRadius": 8, "clip": true
+    }, SUPPORT),
+    ACTION
+  )
+)
+```
+
+2×2 使用纵向 `Column("section")`，Hero 获得剩余权重，Support 固定不超过 `36vp`，Action 固定
+在底部。
+
+## 13. `PeerPairLayout`
+
+### 13.1 使用场景与契约
+
+用于两个同权、可独立阅读且结构相近的对象，例如左右耳电量、两个联系人、两个位置或两个同类健康
+指标。对象存在先后或解释关系时应使用 `SequentialSummaryLayout`。
+
+```text
+PeerPairLayout([config], firstChild, secondChild[, actionChild]);
+```
+
+| 配置 | 取值 | 默认 |
+| --- | --- | --- |
+| `orientation` | `auto \| rows \| columns` | `auto` |
+
+业务 children 固定 2 个，Action 为 0～1 个。`auto` 在 2×4 使用左右列；2×2 纯文本优先上下行，
+包含图片、Ring 或 Progress 时优先左右列。有 Action 的 2×2 强制把两个对象放在上方左右列。
+
+### 13.2 UX 规范
+
+- 两个区域权重固定 `50:50`，区域间距 `8vp`。
+- 同级对象必须使用一致的字号、图标尺寸、Ring 尺寸和内部结构。
+- 2×2 `rows` 每行可采用“图标/图片 + 文本”；`columns` 采用图标在上、文字在下。
+- 可选动作属于两个对象的整体任务，不能只作用于其中一项而造成语义歧义。
+
+### 13.3 可信 TerseDSL + 样式展开
+
+```text
+Row("between", { "width": "100%", "height": "100%", "itemMargin": 8 },
+  Column("compact", { "layoutWeight": 50, "clip": true }, FIRST),
+  Column("compact", { "layoutWeight": 50, "clip": true }, SECOND)
+)
+```
+
+`rows` 将根替换为 `Column("section")`。存在 Action 时，再使用与 `SingleFocusLayout` 相同的底部
+动作或右下图标动作包装。
+
+## 14. `SequentialSummaryLayout`
+
+### 14.1 使用场景与契约
+
+用于“先看总览，再看解释或分解”的有序结构，例如主进度+分类、总使用量+分项、总体设备状态+
+部件状态。
+
+```text
+SequentialSummaryLayout([config], primaryChild, detailChild1[, detailChild2 ...]);
+```
+
+| 配置 | 类型 | 默认 | 限制 |
+| --- | --- | --- | --- |
+| `detailColumns` | `1..4` | Detail 数量 | 2×2 最多 2 列，2×4 最多 4 列 |
+
+2×2 业务 children 为 2～3 个，2×4 为 2～4 个；第一个固定是 Primary，其余均为 Detail。不接受
+Action。
+
+### 14.2 UX 规范
+
+- Primary 占上部并保持唯一主视觉；Detail 位于下部。
+- Primary 与 Detail 区间距 `8vp`，Detail 之间也使用 `8vp`。
+- Detail 使用一致的中性底托、`8vp` 圆角和相同结构。
+- 2×2 Detail 最多 2 个；2×4 最多 3 个 Detail，可按 1～4 列组织。
+- Detail 不得重复 Primary 已展示的同一事实。
+
+### 14.3 可信 TerseDSL + 样式展开
+
+```text
+Column("section", { "width": "100%", "height": "100%", "itemMargin": 8 },
+  Column("compact", { "layoutWeight": 1, "clip": true }, PRIMARY),
+  Row("between", { "layoutWeight": 1, "itemMargin": 8, "clip": true },
+    Stack("overlay", { "layoutWeight": 1, "padding": 8, "borderRadius": 8 }, DETAIL_1),
+    Stack("overlay", { "layoutWeight": 1, "padding": 8, "borderRadius": 8 }, DETAIL_2)
+  )
+)
+```
+
+Detail 超过列数时由可信展开器生成多行等权网格；模型不手写行列循环。
+
+## 15. `EqualItemsLayout`
+
+### 15.1 使用场景与契约
+
+用于多个没有天然主次、结构完全一致的对象，例如未来天气、设备电量、App 排行或近期事件。
+
+```text
+EqualItemsLayout([config], item1, item2[, item3, item4]);
+```
+
+| 配置 | 取值 | 默认 |
+| --- | --- | --- |
+| `arrangement` | `auto \| row \| grid` | `auto` |
+
+2×2 只允许 2 个 item；2×4 允许 2～4 个。`auto` 对 2～3 项使用单行，对 4 项使用 `2×2`
+网格。不接受 Action。
+
+### 15.2 UX 规范
+
+- 所有 item 等权、同高并使用完全一致的字体、图标、圆角和内部对齐。
+- 每个 item 使用 `8vp` 内边距、`8vp` 圆角；区域间距 `8vp`。
+- 2×4 三项使用三列等宽；四项默认 `2×2`，只有内容足够短时才可四列。
+- 图片必须完整显示且等分；大数值和控制摘要在单元中心对齐。
+
+### 15.3 可信 TerseDSL + 样式展开
+
+```text
+Row("between", { "width": "100%", "height": "100%", "itemMargin": 8 },
+  Stack("overlay", {
+    "layoutWeight": 1, "padding": 8,
+    "borderRadius": 8, "alignContent": "center", "clip": true
+  }, ITEM_1),
+  Stack("overlay", {
+    "layoutWeight": 1, "padding": 8,
+    "borderRadius": 8, "alignContent": "center", "clip": true
+  }, ITEM_2)
+)
+```
+
+`grid` 由纵向 `Column("section")` 包装两个等权 `Row`，各行最多 2 项。
+
+## 16. `ListActionLayout`
+
+### 16.1 使用场景与契约
+
+用于一个短列表对象和一个针对整组列表的可选动作，例如查看全部待办、打开通话记录、打开日历或
+进入设置列表。
+
+```text
+ListActionLayout([config], listChild[, actionChild]);
+```
+
+| 配置 | 取值 | 默认 | 约束 |
+| --- | --- | --- | --- |
+| `actionPlacement` | `bottom \| end` | `bottom` | `end` 仅支持 2×4 |
+
+业务 child 固定 1 个，其内部必须是同一业务主题的 List；Action 为 0～1 个。
+
+### 16.2 UX 规范
+
+- 2×2 最多 2 项；有底部动作且空间不足时降为 1 项。
+- 2×4 最多 3 项；动作可位于底部或右侧独立区。
+- 列表项主文字 12fp，辅助信息 10fp，均单行省略。
+- 同组列表项使用一致的底托、圆角、图标和文字位置。
+- Action 作用于整组列表；单项动作应留在业务详情页，不在卡片上重复。
+
+### 16.3 可信 TerseDSL + 样式展开
+
+`bottom` 复用底部动作骨架，List 作为可收缩主区：
+
+```text
+Column("section", {
+  "width": "100%", "height": "100%",
+  "itemMargin": 8, "justifyContent": "spaceBetween"
+},
+  Column("compact", { "layoutWeight": 1, "clip": true }, LIST),
+  ACTION
+)
+```
+
+2×4 `end` 使用 `60:40` 横向区域，右侧 Action 靠下，规则与 `HeroActionLayout` 一致。
+
+## 17. `ActionMatrixLayout`
+
+### 17.1 使用场景与契约
+
+用于可选业务摘要和 2～4 个同级控制项，主要覆盖系统模式、快捷设置、智能设备和媒体控制。
+
+```text
+ActionMatrixLayout([config], [summaryChild], action1, action2[, action3, action4]);
+```
+
+| 配置 | 类型 | 默认 | 约束 |
+| --- | --- | --- | --- |
+| `primaryActionIndex` | `0..3` | `0` | 必须小于实际 Action 数量 |
+
+2×2 可有 0～1 个摘要和恰好 2 个 Action；2×4 可有 0～1 个摘要和 2～4 个 Action。Action 必须
+全部使用 `ActionTile`，并具有不同的动作 ID。
+
+### 17.2 UX 规范
+
+- 2×2 两个控制项同宽、同高，不再叠加全宽 CTA。
+- 2×4 两项并排；三项为一个主项加两个次项；四项为 `2×2` 网格。
+- 同级动作统一使用 12fp 文字、16vp 图标、`8vp` 圆角和 `8vp` 间距。
+- 主动作只能通过面积或色彩适度增强，不能切换到另一套字体和图标体系。
+- 摘要只说明当前模式或设备状态，不能成为第二个操作区。
+
+### 17.3 可信 TerseDSL + 样式展开
+
+四项矩阵：
+
+```text
+Column("section", { "width": "100%", "height": "100%", "itemMargin": 8 },
+  Row("between", { "layoutWeight": 1, "itemMargin": 8 }, ACTION_1, ACTION_2),
+  Row("between", { "layoutWeight": 1, "itemMargin": 8 }, ACTION_3, ACTION_4)
+)
+```
+
+三项把主动作放在第一行，两个次动作放在第二行。存在摘要时，2×2 使用上下各一半，2×4 使用
+摘要 `56%`、矩阵 `44%` 的横向结构。
+
+## 18. `WeatherNowForecastLayout`
+
+### 18.1 使用场景与契约
+
+用于当前天气与真实未来预报的专用结构。没有 forecast 数据时只能展示当前天气，不能根据当前状态
+推测未来天气。
+
+```text
+WeatherNowForecastLayout(currentChild[, forecast1, forecast2, forecast3][, actionChild]);
+```
+
+该布局没有配置对象。2×2 业务 child 固定 1 个；2×4 允许 1～4 个，其中第一个固定为 current，
+其余最多 3 个 forecast。Action 为 0～1 个。
+
+### 18.2 UX 规范
+
+- 2×2 只显示当前天气，不展示未来列表；城市、主温度、天气/空气和高低温组成一个原子内容组件。
+- 2×2 主天气图标 48/56vp、温度 38fp；可在右下使用一个天气语义 `IconAction`。
+- 2×4 当前天气为唯一 Hero，未来预报最多 3 项且结构完全一致。
+- 2×4 当前天气与预报区按纵向 `3:2` 分配，区间距 `8vp`。
+- 预报项使用中性底托；风险色只作用于预警文字或图标，不把整卡根面改为告警色。
+- 当前天气、预报项和支持信息之间不得重复展示相同事实。
+
+### 18.3 可信 TerseDSL + 样式展开
+
+2×4：
+
+```text
+Column("section", { "width": "100%", "height": "100%", "itemMargin": 8 },
+  Column("compact", { "layoutWeight": 3, "clip": true }, CURRENT),
+  Row("between", { "layoutWeight": 2, "itemMargin": 8, "clip": true },
+    Stack("overlay", { "layoutWeight": 1, "padding": 8, "borderRadius": 8 }, FORECAST_1),
+    Stack("overlay", { "layoutWeight": 1, "padding": 8, "borderRadius": 8 }, FORECAST_2),
+    Stack("overlay", { "layoutWeight": 1, "padding": 8, "borderRadius": 8 }, FORECAST_3)
+  )
+)
+```
+
+2×2 退化为单区当前天气；存在动作时复用右下 `IconAction` 预留规则。2×4 若存在动作，则可信端
+根据动作类型在不破坏当前天气和预报权重的前提下增加底部或右下动作层。
+
+## 19. 布局选择规则
+
+布局选择按用户任务语义进行，而不是按可用数据数量机械组合：
+
+1. 先确认业务对象数量和主次关系。
+2. 再确认动作数量、动作是否是任务完成的必要入口。
+3. 有先后关系选择 `SequentialSummaryLayout`，同权关系选择 `PeerPairLayout` 或
+   `EqualItemsLayout`。
+4. 列表是一个业务对象，不因列表包含多行就选择多对象布局。
+5. 天气“当前+预报”优先进入天气专用布局。
+6. 2×2 无法同时容纳 Hero、Support 和 Action 时，删除非必需 Support；不得压缩主信息和动作。
+7. 任何布局都不能为了填满空间生成不存在的事实、动作或素材。
+
+## 20. 全布局验收清单
+
+- [ ] 10 个布局都有闭合配置 Schema、2×2/2×4 child 预算和 Action 预算。
+- [ ] 每个布局根只接收直接 Slot children，禁止嵌套另一个布局高级组件。
+- [ ] 所有样式只由可信展开器写入 TerseDSL options 对象。
+- [ ] 纵横重排、区域权重、间距、圆角、内边距和裁剪均为确定性结果。
+- [ ] `ActionMatrixLayout` 之外每张卡片最多一个主动作。
+- [ ] 布局 Action 始终位于连续末尾 children，并绑定已批准事件。
+- [ ] 2×2 列表最多 2 项，2×4 列表和预报最多 3 项。
+- [ ] 展开结果不包含绝对坐标、网络素材或动态执行表达式。
+- [ ] 最终 A2UI 只包含标准基础组件，不残留任何布局或 Action 高级组件名。

@@ -30,6 +30,8 @@ class TaskSpecBuilder:
         effective_data_capabilities: list[DataCapability],
         event_candidates: list[EventAction],
         asset_candidates: list[AssetCapability],
+        *,
+        include_all_output_fields: bool = False,
     ) -> TaskSpec:
         """按有效能力 outputSchema 构造传给 A2UI 模型的 TaskSpec。"""
         data_model_schema: dict[str, Any] = {"data": {}}
@@ -60,15 +62,18 @@ class TaskSpecBuilder:
             invalid_paths: list[str] = []
             seen: set[tuple[PathPart, ...]] = set()
 
-            for pointer in requested_paths:
-                resolved = self._resolve_leaf(capability.outputSchema, pointer)
-                if resolved is None:
-                    invalid_paths.append(pointer)
-                    continue
-                parts, leaf = resolved
-                if parts not in seen:
-                    seen.add(parts)
-                    valid_fields.append((parts, leaf))
+            if include_all_output_fields:
+                valid_fields = list(self._iter_valid_leaves(capability.outputSchema))
+            else:
+                for pointer in requested_paths:
+                    resolved = self._resolve_leaf(capability.outputSchema, pointer)
+                    if resolved is None:
+                        invalid_paths.append(pointer)
+                        continue
+                    parts, leaf = resolved
+                    if parts not in seen:
+                        seen.add(parts)
+                        valid_fields.append((parts, leaf))
 
             if invalid_paths:
                 logger.warning(
@@ -78,7 +83,7 @@ class TaskSpecBuilder:
                 )
 
             # 未传投影或全部投影非法时，回退为该能力全部合法叶子，保证模型仍有可用结构。
-            if not requested_paths or not valid_fields:
+            if not include_all_output_fields and (not requested_paths or not valid_fields):
                 valid_fields = list(self._iter_valid_leaves(capability.outputSchema))
                 logger.info(
                     f"{_MODULE} candidate_output_fields_fallback "
@@ -94,6 +99,12 @@ class TaskSpecBuilder:
                 else:
                     sample_value = DEFAULT_SAMPLE_VALUES[leaf["type"]]
                     generated_sample_count += 1
+                sample_value = self._binding_consistent_sample(
+                    binding,
+                    relative_parts,
+                    leaf,
+                    sample_value,
+                )
                 metadata = {
                     "type": leaf["type"],
                     "description": leaf["description"],
@@ -122,6 +133,27 @@ class TaskSpecBuilder:
                 for item in asset_candidates
             ],
         )
+
+    @staticmethod
+    def _binding_consistent_sample(
+        binding: CandidateDataBinding,
+        relative_parts: tuple[PathPart, ...],
+        leaf: dict[str, Any],
+        fallback: Any,
+    ) -> Any:
+        """Keep trusted request identity fields consistent with generated preview facts."""
+        is_weather_district = (
+            binding.capabilityId == "ViewWeather"
+            and bool(relative_parts)
+            and relative_parts[-1] == "districtName"
+            and leaf.get("type") == "string"
+        )
+        if not is_weather_district:
+            return fallback
+        district = binding.arguments.get("districtName")
+        if not isinstance(district, str) or not district.strip():
+            return fallback
+        return district.strip()
 
     def _preview_schema(self, value: Any) -> Any:
         if isinstance(value, dict):

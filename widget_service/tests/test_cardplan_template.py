@@ -20,6 +20,7 @@ from custom.model_transport import ModelTransportError
 from custom.unified_model_client import UnifiedModelClient
 from models.generation import EventAction, TaskSpec
 from services.advanced_component_pipeline.content_selectors import (
+    extract_app_usage_overview_facts,
     project_content_component_facts,
 )
 from services.advanced_component_pipeline.models import (
@@ -951,7 +952,7 @@ def test_weather_layout_reserves_2x2_icon_slot_and_builds_2x4_forecast_strip():
 
     assert '"alignContent":"bottomEnd"' in compact.effective_output
     assert '"padding":{"right":38,"bottom":38}' in compact.effective_output
-    assert '"backgroundColor":"#FFFF3B30"' in compact.effective_output
+    assert '"backgroundColor":"#FFE84026"' in compact.effective_output
     assert '"fillColor":"#FFFFFFFF"' in compact.effective_output
     assert wide.effective_output.count('"backgroundColor":"#14000000"') == 3
     assert '"layoutWeight":3' in wide.effective_output
@@ -1091,7 +1092,10 @@ def _scenario_inputs(scenario: dict) -> tuple[TaskSpec, dict, UIBrief]:
         assetCandidates=scenario["assets"],
     )
     capability_ids = {item["capabilityId"] for item in scenario["dataEntries"]}
-    if "GetAppUsageDuration" in capability_ids:
+    if (
+        "GetAppUsageDuration" in capability_ids
+        and extract_app_usage_overview_facts(task_spec.dataModelSchema) is not None
+    ):
         task_spec = project_content_component_facts(
             task_spec,
             capability_ids,
@@ -1147,6 +1151,60 @@ def test_generated_prompt_bundle_has_no_drift() -> None:
     )
 
 
+def test_theme_registry_matches_ux_color_style_matrix() -> None:
+    registry = get_cardplan_registry()
+    expected = {
+        "family-weather-care-blue": (
+            "text-on-accent",
+            "#FF317AF7",
+            ("#FF317AF7", "#FF46B1E3"),
+        ),
+        "rainy-commute-gray-blue": (
+            "text-on-accent",
+            "#FF46484D",
+            ("#FF46484D", "#FF467794"),
+        ),
+        "sleep-night-violet": (
+            "text-on-accent",
+            "#FFAC49F5",
+            ("#FFAC49F5", "#FFC386F0"),
+        ),
+        "race-sunrise-action": (
+            "text-on-accent",
+            "#FFED6F21",
+            ("#FFED6F21", "#FFF9A01E"),
+        ),
+        "device-clean-blue-teal": (
+            "text-primary",
+            "#FFFFFFFF",
+            ("#1A0A59F7", "#00FFFFFF"),
+        ),
+        "system-low-power-blue": (
+            "text-primary",
+            "#FFFFFFFF",
+            ("#1AF9A01E", "#00FFFFFF"),
+        ),
+        "audio-product-neutral-violet": (
+            "text-primary",
+            "#FFFFFFFF",
+            ("#1A64BB5C", "#00FFFFFF"),
+        ),
+        "meeting-paper-neutral": (
+            "text-primary",
+            "#FFFFFFFF",
+            ("#1AE84026", "#00FFFFFF"),
+        ),
+    }
+
+    for theme_id, (text_role, background, gradient_colors) in expected.items():
+        theme = registry.require_theme(theme_id)
+        assert theme.text_role == text_role
+        assert theme.root_styles["backgroundColor"] == background
+        assert tuple(
+            item[0] for item in theme.root_styles["linearGradient"]["colors"]
+        ) == gradient_colors
+
+
 @pytest.mark.parametrize(
     (
         "template_id",
@@ -1179,17 +1237,6 @@ def test_generated_prompt_bundle_has_no_drift() -> None:
             (),
             {},
             ('"fontSize":30', '"fontSize":14'),
-        ),
-        (
-            "ux-schedule-overview@2",
-            "meeting-paper-neutral",
-            'SingleFocusLayout(Template("ux-schedule-overview@2", "hero", '
-            '{"title":"UI需求评审会","timeText":"14:00 - 15:30",'
-            '"location":"深圳园区"}));',
-            ("UI需求评审会", "14:00 - 15:30", "深圳园区"),
-            (),
-            {},
-            ('"fontSize":20', '"fontSize":14', '"fontSize":10'),
         ),
     ],
 )
@@ -1450,6 +1497,15 @@ def test_provider_gated_v2_content_templates_have_deterministic_compilers(
     assert "Template" not in result.a2ui
     assert '"fontSize":14' in result.effective_output
     assert '"fontSize":10' in result.effective_output
+    messages = [json.loads(line) for line in result.a2ui.splitlines()]
+    components = messages[1]["updateComponents"]["components"]
+    by_id = {component["id"]: component for component in components}
+    root = by_id[messages[1]["updateComponents"]["root"]]
+    layout_root = by_id[root["children"][0]]
+    template_root = by_id[layout_root["children"][0]]
+    assert template_root["component"] == "Column"
+    assert template_root["styles"]["justifyContent"] == "start"
+    assert by_id[template_root["children"][0]]["component"] == "Text"
 
 
 def test_call_template_rejects_unmasked_phone_number() -> None:
@@ -1696,7 +1752,7 @@ def test_text_on_accent_theme_applies_to_card_chrome_and_standard_text() -> None
     }
 
     assert text_by_content["睡眠不足"]["fontColor"] == "#FFFFFFFF"
-    assert text_by_content["设置早睡提醒"]["fontColor"] == "#FFBD32EE"
+    assert text_by_content["设置早睡提醒"]["fontColor"] == "#FFAC49F5"
 
 
 def test_device_clean_theme_applies_trusted_card_action_style() -> None:
@@ -1713,7 +1769,7 @@ def test_device_clean_theme_applies_trusted_card_action_style() -> None:
         if item.get("component") == "Text"
     }
 
-    assert text_by_content["一键清理"]["fontColor"] == "#FF007DFF"
+    assert text_by_content["一键清理"]["fontColor"] == "#FF0A59F7"
     action_stack = next(
         item
         for item in update["components"]
@@ -1721,7 +1777,7 @@ def test_device_clean_theme_applies_trusted_card_action_style() -> None:
     )
     assert action_stack["styles"]["height"] == 28
     assert action_stack["styles"]["borderRadius"] == 14
-    assert action_stack["styles"]["backgroundColor"] == "#FFEAF4FF"
+    assert action_stack["styles"]["backgroundColor"] == "#1A0A59F7"
 
 
 def test_white_theme_local_templates_keep_business_text_readable() -> None:

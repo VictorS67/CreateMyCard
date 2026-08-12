@@ -122,6 +122,22 @@ def test_nested2_batch_route_records_and_exposes_download(monkeypatch, tmp_path)
         assert "cases/2x2-q1/output.a2ui.jsonl" in archive.namelist()
 
 
+def test_artifact_download_exposes_only_uuid_named_mock_obs_files(monkeypatch, tmp_path):
+    artifact_id = "5b2efdf6-2aa3-485a-9c48-23cc50a2fa56"
+    artifact_dir = tmp_path / "mock_obs"
+    artifact_dir.mkdir()
+    artifact_path = artifact_dir / f"artifact_{artifact_id}.md"
+    artifact_path.write_text("```genui\n{}\n```\n", encoding="utf-8")
+    monkeypatch.setattr(get_settings(), "WORKSPACE_ROOT", tmp_path)
+
+    response = TestClient(app).get(f"/api/v1/artifacts/{artifact_path.name}")
+
+    assert response.status_code == 200
+    assert response.text == artifact_path.read_text(encoding="utf-8")
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert TestClient(app).get("/api/v1/artifacts/not-an-artifact.md").status_code == 404
+
+
 def test_batch_http_routes_reuse_websocket_bearer_token(monkeypatch, tmp_path):
     settings = get_settings()
     monkeypatch.setattr(settings, "enable_widget_batch_recording", True)

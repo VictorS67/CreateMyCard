@@ -13,11 +13,39 @@ from services.cardplan_template.models import Fact, HybridBodyContract
 from services.cardplan_template.prompt import build_hybrid_prompt
 from services.cardplan_template.registry import CardPlanRegistry
 
-from .models import AdvancedScopeBrief
+from .content_selectors import (
+    activity_overview_variants,
+    advanced_component_data_admission_is_relaxed,
+    approved_app_usage_action_ids,
+    approved_battery_power_action_ids,
+    approved_bluetooth_music_action_ids,
+    approved_memory_cleanup_action_ids,
+    approved_schedule_action_ids,
+    approved_sleep_action_ids,
+    approved_workout_action_ids,
+    extract_app_usage_overview_facts,
+    extract_battery_overview_facts,
+    extract_bluetooth_device_overview_facts,
+    extract_resource_usage_overview_facts,
+    extract_schedule_overview_facts,
+    extract_sleep_overview_facts,
+    relaxed_activity_overview_variants,
+    relaxed_workout_overview_variants,
+    schedule_query_requests_focus,
+    sleep_overview_variants,
+    workout_overview_variants,
+)
+from .models import AdvancedScopeBrief, UxBusinessComponentCapability
 from .scope_planner import (
     resolve_available_capability_ids,
     resolve_scope_layout_ids,
     scope_template_ids,
+)
+
+_WEATHER_BUILTIN_ASSETS = (
+    "resources/base/media/icon_weather1.svg",
+    "resources/base/media/sun_max.svg",
+    "resources/base/media/cold.svg",
 )
 
 
@@ -61,7 +89,7 @@ def build_ux_mixed_validation_retry_prompt(
                 f"{error}。不要解释；保持同一个 uxAdvancedScope，重新输出完整布局根 DSL。"
                 "只能逐字使用原请求 trustedStringLiterals/trustedAssetSources，"
                 "不得新增标签、单位、颜色、尺寸、Action 或未批准 Template；"
-                "必须逐组补齐 requiredLocalTemplateGroups。"
+                "必须逐组补齐 requiredLocalTemplateGroups，并保留 directBusinessComponents。"
             ),
         },
     ]
@@ -81,12 +109,13 @@ def build_ux_mixed_prompt(
         registry,
         available_capability_ids,
     )
-    allowed_layout_ids = resolve_scope_layout_ids(scope, task_spec, registry)
-    if not allowed_layout_ids:
-        raise ValueError("Advanced Scope has no compatible UX layout")
     components = tuple(
         registry.require_ux_business_component(item) for item in scope.advanced_component_ids
     )
+    task_spec = _task_spec_with_scope_actions(task_spec, components)
+    allowed_layout_ids = resolve_scope_layout_ids(scope, task_spec, registry)
+    if not allowed_layout_ids:
+        raise ValueError("Advanced Scope has no compatible UX layout")
     bridge = _ScopePromptBridge(
         theme_id=scope.theme_id,
         local_template_ids=scope_template_ids(scope, registry, task_spec),
@@ -100,14 +129,108 @@ def build_ux_mixed_prompt(
         registry=registry,
         ux_layout_root_ids=allowed_layout_ids,
     )
+    template_components = tuple(
+        component for component in components if component.implementation == "template"
+    )
+    direct_components = tuple(
+        component.name for component in components if component.implementation == "terse-dsl"
+    )
     required_template_groups = tuple(
         _required_template_group(component.local_template_ids, base.requested_template_ids)
-        for component in components
+        for component in template_components
     )
     if any(not group for group in required_template_groups):
         raise ValueError("Advanced Scope component has no satisfiable trusted Template")
+    allowed_assets = tuple(
+        dict.fromkeys(
+            (
+                *base.contract.allowed_asset_sources,
+                *(_WEATHER_BUILTIN_ASSETS if "WeatherOverview" in direct_components else ()),
+            )
+        )
+    )
+    asset_tags = dict(base.contract.asset_semantic_tags_by_source)
+    if "WeatherOverview" in direct_components:
+        asset_tags.update(
+            {
+                _WEATHER_BUILTIN_ASSETS[0]: ("weather", "condition", "rain"),
+                _WEATHER_BUILTIN_ASSETS[1]: ("weather", "condition", "sun"),
+                _WEATHER_BUILTIN_ASSETS[2]: ("weather", "condition", "cold", "snow"),
+            }
+        )
+    required_literals = base.contract.required_literals
+    protected_literals = base.contract.protected_literals
+    if "ScheduleOverview" in direct_components:
+        schedule_facts = extract_schedule_overview_facts(task_spec.dataModelSchema)
+        optional_literals = {
+            schedule_facts.location
+            if schedule_facts is not None and schedule_facts.location is not None
+            else ""
+        }
+        required_literals = tuple(
+            item for item in required_literals if item not in optional_literals
+        )
+        protected_literals = tuple(
+            item for item in protected_literals if item not in optional_literals
+        )
+    if "AppUsageOverview" in direct_components:
+        app_usage_facts = extract_app_usage_overview_facts(task_spec.dataModelSchema)
+        if app_usage_facts is None:
+            raise ValueError("AppUsageOverview has no complete trusted single-app facts")
+        required_literals = tuple(
+            item for item in required_literals if item != app_usage_facts.duration_text
+        )
+        protected_literals = tuple(
+            item for item in protected_literals if item != app_usage_facts.duration_text
+        )
+    if "SleepOverview" in direct_components:
+        sleep_facts = extract_sleep_overview_facts(task_spec.dataModelSchema)
+        if sleep_facts is None:
+            raise ValueError("SleepOverview has no losslessly renderable night duration")
+        server_owned_sleep_literals = {
+            sleep_facts.duration_text,
+            sleep_facts.status,
+            sleep_facts.fall_asleep_time,
+            sleep_facts.wakeup_time,
+        }
+        required_literals = tuple(
+            item for item in required_literals if item not in server_owned_sleep_literals
+        )
+        protected_literals = tuple(
+            item for item in protected_literals if item not in server_owned_sleep_literals
+        )
+    if "BluetoothDeviceOverview" in direct_components:
+        bluetooth_facts = extract_bluetooth_device_overview_facts(
+            task_spec.dataModelSchema
+        )
+        if bluetooth_facts is None:
+            raise ValueError(
+                "BluetoothDeviceOverview has no compatible trusted earphone facts"
+            )
+        server_owned_bluetooth_literals = {bluetooth_facts.earphone_name}
+        required_literals = tuple(
+            item
+            for item in required_literals
+            if item not in server_owned_bluetooth_literals
+        )
+        protected_literals = tuple(
+            item
+            for item in protected_literals
+            if item not in server_owned_bluetooth_literals
+        )
     contract = base.contract.model_copy(
-        update={"required_template_groups": required_template_groups}
+        update={
+            "required_template_groups": required_template_groups,
+            "allowed_components": tuple(
+                dict.fromkeys((*base.contract.allowed_components, *direct_components))
+            ),
+            "allowed_business_component_ids": direct_components,
+            "required_business_component_ids": direct_components,
+            "allowed_asset_sources": allowed_assets,
+            "asset_semantic_tags_by_source": asset_tags,
+            "required_literals": required_literals,
+            "protected_literals": protected_literals,
+        }
     )
     layout_lines = [
         (
@@ -123,20 +246,12 @@ def build_ux_mixed_prompt(
         for layout in (registry.require_ux_layout_component(layout_id),)
     ]
     business_lines = [
-        (
-            f"- {component.name}: {component.description}; "
-            f"variants={list(component.enabled_variants(effective_capability_ids))}; "
-            f"roles={list(component.roles)}; "
-            f"maxItems={component.max_items_by_size[task_spec.size]}; "
-            "可信局部Template="
-            + json.dumps(
-                [
-                    item
-                    for item in component.local_template_ids
-                    if item in base.requested_template_ids
-                ],
-                ensure_ascii=False,
-            )
+        _business_component_line(
+            component,
+            effective_capability_ids,
+            task_spec.size,
+            base.requested_template_ids,
+            task_spec,
         )
         for component in components
     ]
@@ -148,8 +263,8 @@ def build_ux_mixed_prompt(
             *layout_lines,
             "已批准的业务高级组件范围：",
             *business_lines,
-            "每个业务高级组件必须从对应 requiredLocalTemplateGroups 中至少使用一个可信局部"
-            " Template；标准组件只能补充未覆盖事实，不能完整替代所选业务高级组件。",
+            "template 实现的业务高级组件必须逐组使用 requiredLocalTemplateGroups；"
+            "terse-dsl 实现必须使用对应的 directBusinessComponents 调用，不能改用 JSON Template。",
             "最终输出必须直接以唯一批准的布局高级组件为根并以分号结束；禁止 card@1。",
         )
     )
@@ -161,6 +276,7 @@ def build_ux_mixed_prompt(
             "allowedUxLayouts=" + json.dumps(allowed_layout_ids, ensure_ascii=False),
             "requiredLocalTemplateGroups="
             + json.dumps(required_template_groups, ensure_ascii=False),
+            "directBusinessComponents=" + json.dumps(direct_components, ensure_ascii=False),
             "只输出混合 DSL，不输出说明。",
         )
     )
@@ -192,6 +308,283 @@ def _required_template_group(
     )
     current = tuple(template_id for template_id in eligible if template_id.endswith("@2"))
     return current or eligible
+
+
+def _business_component_line(
+    component: UxBusinessComponentCapability,
+    capability_ids: set[str],
+    size: str,
+    requested_template_ids: tuple[str, ...],
+    task_spec: TaskSpec,
+) -> str:
+    common = (
+        f"- {component.name}: {component.description}; "
+        f"variants={list(component.enabled_variants(capability_ids))}; "
+        f"roles={list(component.roles)}; maxItems={component.max_items_by_size[size]}"
+    )
+    if component.implementation == "terse-dsl":
+        if component.name == "ActivityOverview":
+            variants = (
+                relaxed_activity_overview_variants(task_spec, capability_ids)
+                if advanced_component_data_admission_is_relaxed()
+                else activity_overview_variants(task_spec, capability_ids)
+            )
+            if not variants:
+                raise ValueError("ActivityOverview has no query-backed trusted variant")
+            return (
+                common
+                + "; effectiveVariants="
+                + json.dumps(variants, ensure_ascii=False)
+                + '; syntax=ActivityOverview({"variant":"steps|dailySummary",'
+                '"role":"hero|support","stepsIcon?":"<trustedAssetSources item>",'
+                '"caloriesIcon?":"<trustedAssetSources item>",'
+                '"distanceIcon?":"<trustedAssetSources item>"}); '
+                "不得输出步数、热量、距离、目标、比例、状态、样式、尺寸、Ring、Progress、Action 或 "
+                "Template；服务端从可信投影确定性展开。图标均可省略；引用时必须逐字复制 "
+                "trustedAssetSources 中与 steps/activity、calories/energy、distance/route 分别语义"
+                "匹配的素材。单业务使用 hero；与 Sleep/HeartRate 组合时 Activity 必须是首个 hero；"
+                "与 Workout "
+                "组合时 Activity 必须是第二个 support。"
+            )
+        if component.name == "WorkoutOverview":
+            variants = (
+                relaxed_workout_overview_variants(task_spec, capability_ids)
+                if advanced_component_data_admission_is_relaxed()
+                else workout_overview_variants(task_spec, capability_ids)
+            )
+            if not variants:
+                raise ValueError("WorkoutOverview has no query-backed trusted variant")
+            return (
+                common
+                + "; effectiveVariants="
+                + json.dumps(variants, ensure_ascii=False)
+                + '; syntax=WorkoutOverview({"variant":"latest|countdown","role":"hero",'
+                '"sourceIcon?":"<trustedAssetSources item>",'
+                '"caloriesIcon?":"<trustedAssetSources item>"}); '
+                "不得输出运动类型、时长、热量、倒计时天数、赛事名、训练计划、状态、距离、配速、"
+                "轨迹、心率区间、总量、比例、样式、尺寸、Ring、Progress 或 Template；服务端从可信"
+                "投影确定性展开。图标可省略；引用时必须逐字复制 sport/workout 或 calories/energy "
+                "语义匹配素材。Action 只允许布局末尾 PillAction，且只使用本轮批准的 "
+                "event.open.health.sport；没有批准 contentActions 时必须使用无动作布局。与 "
+                "Activity "
+                "组合时 Workout 必须是首个 hero，Activity 为 support。"
+            )
+        if component.name == "HeartRateOverview":
+            return (
+                common
+                + '; effectiveVariants=["average"]; '
+                'syntax=HeartRateOverview({"variant":"average","role":"hero|support",'
+                '"sourceIcon?":"<trustedAssetSources item>"}); '
+                "不得输出心率值、更新时间、current/attention、state、异常结论、区间、趋势、波形、"
+                "最大/最低心率、样式、尺寸、Ring、Progress、Action 或 Template；服务端只展开可信"
+                "运动平均心率和可选更新时间。sourceIcon 可省略；引用时必须逐字复制 "
+                "trustedAssetSources 中与 heart/heart-rate/pulse 语义匹配的素材。多业务时必须位于"
+                "第二个"
+                " child 并使用 support。"
+            )
+        if component.name == "SleepOverview":
+            variants = sleep_overview_variants(task_spec, capability_ids)
+            if not variants:
+                raise ValueError("SleepOverview has no query-backed trusted variant")
+            return (
+                common
+                + "; effectiveVariants="
+                + json.dumps(variants, ensure_ascii=False)
+                + '; syntax=SleepOverview({"variant":"duration|insufficient|schedule",'
+                '"role":"hero|support","sourceIcon?":'
+                '"<trustedAssetSources item>"}); '
+                "不得输出 sleepStatus、时长、入睡/醒来时刻、派生数值/单位、样式、尺寸、"
+                "Ring、Progress、阶段图、建议、Action 或 Template；服务端只从同一可信睡眠"
+                "记录确定性展开。上游因批测宽松准入的得分、阶段、午睡、目标、趋势、建议或"
+                "缺失状态/作息请求也只能按 effectiveVariants 输出，通常降级 duration，不得补造。"
+                "sourceIcon 可省略；引用时必须逐字复制 trustedAssetSources "
+                "中与 sleep/moon/alarm 语义匹配的一项。2x2 单业务使用 hero，只展示标题与"
+                "双值总时长；多业务 Sleep 固定为第二个 support。2x4 单业务内部使用总时长 Hero "
+                "与入睡/醒来 Support；多业务可由 HeroSupportLayout 或 SequentialSummaryLayout "
+                "表达主辅关系。Action 只允许布局末尾 PillAction，actionId 只能是本轮批准的 "
+                "event.open.clock.alarm；没有批准 contentActions 时必须使用无动作布局。"
+            )
+        if component.name == "AppUsageOverview":
+            facts = extract_app_usage_overview_facts(task_spec.dataModelSchema)
+            if facts is None:
+                raise ValueError("AppUsageOverview has no complete trusted single-app facts")
+            return (
+                common
+                + '; effectiveVariants=["singleApp"]; '
+                'syntax=AppUsageOverview({"variant":"singleApp","role":"hero",'
+                '"appIcon?":"<trustedAssetSources item>"}); '
+                "不得输出 appName、durationText、updatedAt、数值片段、样式、尺寸、进度、"
+                "限额、超限、排行、状态或 Template；服务端仅从同一可信数据树的三项原始"
+                "字段和无损时长解析结果确定性展开。appIcon 可省略；引用时必须逐字复制 "
+                "trustedAssetSources 中与 app/application 语义匹配的一项。单业务必须使用 "
+                "hero；小时和分钟始终位于同一 Row。Action 只能是布局末尾的 PillAction，"
+                "actionId 只能使用本轮批准的 event.open.settings.parentControl；动作图标只能"
+                "从 trustedAssetSources 中与 timer/settings/parental-control 语义匹配的素材"
+                "选择，缺素材时省略。没有批准 contentActions 时必须使用无动作布局。"
+            )
+        if component.name == "DateOverview":
+            return (
+                common
+                + '; syntax=DateOverview({"variant":"compactDate|dateHero",'
+                '"role":"hero|support"}); '
+                "不得输出业务字段、样式、尺寸、图标、Action 或 Template。单业务 2x2/2x4 使用 "
+                "dateHero+hero；多业务 2x2 使用 compactDate+support 且日期位于首个业务 child；"
+                "多业务 2x4 使用 dateHero+hero 且位于左侧。服务端仅从可信 date/weekday "
+                "确定性展开。"
+            )
+        if component.name == "ScheduleOverview":
+            facts = extract_schedule_overview_facts(task_spec.dataModelSchema)
+            variants = ["nextEvent", "meetingCompact"]
+            if facts is not None and facts.location is not None:
+                variants.append("meetingExpanded")
+            if schedule_query_requests_focus(task_spec.userQuery) and approved_schedule_action_ids(
+                task_spec
+            ):
+                variants.append("focusContext")
+            return (
+                common
+                + "; effectiveVariants="
+                + json.dumps(variants, ensure_ascii=False)
+                + '; syntax=ScheduleOverview({"variant":"nextEvent|meetingCompact|'
+                'meetingExpanded|focusContext","role":"hero|support",'
+                '"sourceIcon?":"<trustedAssetSources item>",'
+                '"timeIcon?":"<trustedAssetSources item>",'
+                '"locationIcon?":"<trustedAssetSources item>"}); '
+                "不得输出 title/timeText/location、样式、尺寸、Action 或 Template；服务端只从"
+                "同一可信首项日程展开。meetingExpanded 仅在 location 存在时使用，否则服务端"
+                "确定性降级 meetingCompact。source/time/location 图标可省略；引用时必须逐字"
+                "复制 trustedAssetSources 中语义匹配的素材。Action 只能作为布局末尾 child，"
+                "actionId 只能来自本轮 approved contentActions，图标也必须语义匹配。"
+            )
+        if component.name == "ResourceUsageOverview":
+            facts = extract_resource_usage_overview_facts(task_spec.dataModelSchema)
+            if facts is None:
+                raise ValueError("ResourceUsageOverview has no complete trusted memory facts")
+            return (
+                common
+                + '; effectiveVariants=["memory"]; '
+                'syntax=ResourceUsageOverview({"variant":"memory",'
+                '"role":"hero|peer","icon?":"<trustedAssetSources item>",'
+                '"showTitle?":false}); '
+                "不得输出 usagePercent、availableMemText、totalMemText、freeMemText、state、"
+                "样式、尺寸或 Template；服务端仅从可信三字段确定性展开。icon 可省略；"
+                "引用时必须逐字复制 trustedAssetSources 中与 memory/resource 语义匹配的素材。"
+                "禁止 storage 变体和压力状态文案。单业务使用 hero 且不得关闭内部标题；"
+                "2x2 与 Battery 组合必须用 PeerPairLayout+peer，并对两个构造器都显式设置 "
+                "showTitle=false，由服务端在高级组件之外写独立总标题；2x4 与 Battery 组合时 "
+                "ResourceUsageOverview "
+                "必须是首个 hero，Battery 为 Support。清理 Action 只能使用本轮批准的 "
+                "event.clean.memory，并作为布局末尾 child；动作图标必须来自语义匹配素材，"
+                "缺素材时省略图标。"
+            )
+        if component.name == "BatteryOverview":
+            facts = extract_battery_overview_facts(task_spec.dataModelSchema)
+            if facts is None:
+                raise ValueError("BatteryOverview has no complete trusted phone battery facts")
+            return (
+                common
+                + "; effectiveVariants="
+                + json.dumps([facts.state], ensure_ascii=False)
+                + '; syntax=BatteryOverview({"variant":"normal|charging|low",'
+                '"role":"hero|support|peer",'
+                '"batteryIcon?":"<trustedAssetSources item>","showTitle?":false}); '
+                "不得输出 SOC、SOC 文本、电量等级、充电状态、续航/预计充满时间、健康度、"
+                "温度、电压、电流、充电器类型、样式、尺寸或 Template；服务端仅从可信四字段"
+                "确定性展开。batteryIcon 可省略，引用时必须逐字复制 trustedAssetSources 中"
+                "与 battery/power 语义匹配的素材。单业务用 hero 且不得关闭内部标题；与 "
+                "ResourceUsageOverview 的 2x2 对等组合必须对两个构造器都显式设置 "
+                "showTitle=false，由服务端在高级组件之外写独立总标题；手机+耳机多业务必须用 "
+                "PeerPairLayout+peer，两个业务区使用对等 Ring，且不得输出标题区来源图标。"
+                "2x2 省电动作必须是末尾 IconAction，并同时有批准事件与 power-saving 语义"
+                "素材；2x4 可用末尾 PillAction。没有批准 contentActions 时必须使用无动作布局。"
+            )
+        if component.name == "BluetoothDeviceOverview":
+            facts = extract_bluetooth_device_overview_facts(task_spec.dataModelSchema)
+            if facts is None:
+                raise ValueError("BluetoothDeviceOverview has no compatible trusted earphone facts")
+            return (
+                common
+                + '; effectiveVariants=["earbuds"]; '
+                'syntax=BluetoothDeviceOverview({"variant":"earbuds",'
+                '"role":"hero|support|peer",'
+                '"sourceIcon?":"<trustedAssetSources item>",'
+                '"leftEarIcon?":"<trustedAssetSources item>",'
+                '"rightEarIcon?":"<trustedAssetSources item>"}); '
+                "不得输出连接态、设备名、盒/左/右电量、充电状态、更新时间、播放态、曲目、进度、"
+                "样式、尺寸、业务图标 ID 或 Template；服务端只从可信投影确定性展开。sourceIcon "
+                "与左右耳图标均可省略；引用时必须逐字复制 trustedAssetSources 中与"
+                "耳机/audio/product "
+                "语义匹配的素材，不能自行生成路径。单业务使用 hero；2x2 有音乐事件时使用一个末尾 "
+                "PillAction，2x4 可用 ActionMatrixLayout + 最多两个末尾 ActionTile。"
+                "actionId 只能使用"
+                "本轮批准的 event.open.music.daily/favorite，动作图标必须分别匹配 music 或"
+                "favorite/heart 语义；没有批准 contentActions 时必须使用无动作布局。手机+耳机"
+                "组合不得带动作：2x2 使用 PeerPairLayout，2x4 使用 HeroSupportLayout；"
+                "BatteryOverview 必须在前且为 hero，本组件在后且为 support。"
+            )
+        return (
+            common
+            + '; syntax=WeatherOverview({"variant":"current|commute",'
+            '"role":"hero|support|peer","conditionIcon":"<trustedAssetSources item>"}); '
+            "conditionIcon 必须由本轮第二步模型显式选择，且只能逐字复制 "
+            "trustedAssetSources 中与天气状态匹配的一项；不得省略或自行生成路径。"
+            "不得输出其它业务字段、样式、尺寸或 Template，"
+            "服务端从可信五字段确定性展开。"
+        )
+    templates = [
+        item for item in component.local_template_ids if item in requested_template_ids
+    ]
+    return common + "; 可信局部Template=" + json.dumps(templates, ensure_ascii=False)
+
+
+def _task_spec_with_scope_actions(
+    task_spec: TaskSpec,
+    components: tuple[UxBusinessComponentCapability, ...],
+) -> TaskSpec:
+    component_ids = {item.name for item in components}
+    if "SleepOverview" in component_ids and not component_ids & {
+        "ActivityOverview",
+        "HeartRateOverview",
+        "WorkoutOverview",
+    }:
+        approved_ids = set(approved_sleep_action_ids(task_spec))
+        events = [item for item in task_spec.eventCandidates if item.id in approved_ids]
+        return task_spec.model_copy(update={"eventCandidates": events})
+    if component_ids & {"ActivityOverview", "HeartRateOverview", "WorkoutOverview"}:
+        approved_ids = (
+            set(approved_workout_action_ids(task_spec))
+            if "WorkoutOverview" in component_ids
+            else set()
+        )
+        events = [item for item in task_spec.eventCandidates if item.id in approved_ids]
+        return task_spec.model_copy(update={"eventCandidates": events})
+    if "AppUsageOverview" in component_ids:
+        approved_ids = set(approved_app_usage_action_ids(task_spec))
+        events = [item for item in task_spec.eventCandidates if item.id in approved_ids]
+        return task_spec.model_copy(update={"eventCandidates": events})
+    if "ResourceUsageOverview" in component_ids:
+        approved_ids = set(approved_memory_cleanup_action_ids(task_spec))
+        events = [item for item in task_spec.eventCandidates if item.id in approved_ids]
+        return task_spec.model_copy(update={"eventCandidates": events})
+    battery_owned = component_ids.issubset(
+        {"BatteryOverview", "BluetoothDeviceOverview"}
+    )
+    if component_ids == {"BatteryOverview", "BluetoothDeviceOverview"}:
+        return task_spec.model_copy(update={"eventCandidates": []})
+    if battery_owned and "BatteryOverview" in component_ids:
+        approved_ids = set(approved_battery_power_action_ids(task_spec))
+        events = [item for item in task_spec.eventCandidates if item.id in approved_ids]
+        return task_spec.model_copy(update={"eventCandidates": events})
+    if component_ids == {"BluetoothDeviceOverview"}:
+        approved_ids = set(approved_bluetooth_music_action_ids(task_spec))
+        events = [item for item in task_spec.eventCandidates if item.id in approved_ids]
+        return task_spec.model_copy(update={"eventCandidates": events})
+    schedule_owned = component_ids.issubset({"DateOverview", "ScheduleOverview"})
+    if not schedule_owned or "ScheduleOverview" not in component_ids:
+        return task_spec
+    approved_ids = set(approved_schedule_action_ids(task_spec))
+    events = [item for item in task_spec.eventCandidates if item.id in approved_ids]
+    return task_spec.model_copy(update={"eventCandidates": events})
 
 
 def _card_spec_capability_ids(card_spec: dict[str, Any]) -> tuple[str, ...] | None:

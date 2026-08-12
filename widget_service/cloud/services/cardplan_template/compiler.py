@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections import Counter
 from collections.abc import Iterator
@@ -12,7 +13,41 @@ from typing import Any, Literal
 from jsonschema import Draft202012Validator
 
 from models.generation import TaskSpec
+from services.advanced_component_pipeline.content_selectors import (
+    ActivityOverviewFacts,
+    AppUsageOverviewFacts,
+    BatteryOverviewFacts,
+    BluetoothDeviceOverviewFacts,
+    DateOverviewFacts,
+    ResourceUsageOverviewFacts,
+    ScheduleOverviewFacts,
+    SleepOverviewFacts,
+    WorkoutCountdownFacts,
+    WorkoutLatestFacts,
+    activity_overview_variants,
+    advanced_component_data_admission_is_relaxed,
+    approved_schedule_focus_action_ids,
+    extract_activity_overview_facts,
+    extract_app_usage_overview_facts,
+    extract_battery_overview_facts,
+    extract_bluetooth_device_overview_facts,
+    extract_date_overview_facts,
+    extract_heart_rate_overview_facts,
+    extract_resource_usage_overview_facts,
+    extract_schedule_overview_facts,
+    extract_sleep_overview_facts,
+    extract_weather_overview_facts,
+    extract_workout_countdown_facts,
+    extract_workout_latest_facts,
+    heart_rate_overview_is_eligible,
+    relaxed_activity_overview_variants,
+    relaxed_workout_overview_variants,
+    schedule_query_requests_focus,
+    sleep_overview_variants,
+    workout_overview_variants,
+)
 from services.advanced_component_pipeline.models import (
+    UX_DIRECT_BUSINESS_COMPONENT_IDS,
     UX_LAYOUT_COMPONENT_IDS,
     UxLayoutComponentCapability,
 )
@@ -35,7 +70,15 @@ from .registry import CardPlanRegistry
 _STANDARD_CONTAINERS = frozenset({"Row", "Column", "List", "Stack"})
 _CONTAINERS = _STANDARD_CONTAINERS | UX_LAYOUT_COMPONENT_IDS
 _UX_ACTION_COMPONENTS = frozenset({"PillAction", "IconAction", "ActionTile"})
+_UX_DIRECT_BUSINESS_COMPONENTS = UX_DIRECT_BUSINESS_COMPONENT_IDS
 _DANGEROUS_EVENT_KEYS = frozenset({"onClick", "call", "args", "action"})
+_SUNNY_WEATHER_ICON_COLOR = "#FFFFC300"
+_FONT_PRIMARY = "#E6000000"
+_FONT_SECONDARY = "#99000000"
+_ICON_SECONDARY = "#99000000"
+_TRACK_COLOR = "#1A000000"
+_NORMAL_DATA_COLOR = "#FF64BB5C"
+_WARNING_DATA_COLOR = "#FFF9A01E"
 _LAYOUT_ALIASES = {
     ("Column", "card"): "section",
     ("Column", "section-relaxed"): "section",
@@ -86,6 +129,12 @@ class _ExpansionState:
     expanded_components: int = 0
 
 
+@dataclass(frozen=True)
+class _CardTapAction:
+    action_id: str
+    handlers: tuple[dict[str, Any], ...]
+
+
 def compile_hybrid_card(
     source: str,
     *,
@@ -129,7 +178,7 @@ def compile_hybrid_card(
         (normalized_content,),
         composition.span,
     )
-    _validate_required_numbers(composition.children[0], contract)
+    _validate_required_numbers(composition.children[0], contract, task_spec)
     content_call = _strip_direct_card_chrome_from_call(
         composition.children[0],
         card_params,
@@ -148,6 +197,7 @@ def compile_hybrid_card(
         contract=contract,
         registry=registry,
         state=state,
+        task_spec=task_spec,
     )
     content = _lower_ux_layouts(
         content,
@@ -178,6 +228,7 @@ def compile_hybrid_card(
     root = _compile_card_shell(card_params, content, task_spec, contract, registry)
     text_role = registry.require_theme(contract.theme_profile_id).text_role
     root = _apply_theme_text_role(root, text_role)
+    root = _apply_theme_icon_role(root, text_role)
     card_action = card_params.get("action")
     if isinstance(card_action, dict):
         if card_action["id"] not in state.action_ids:
@@ -202,6 +253,7 @@ def compile_hybrid_card(
         content = _constrain_content_height(content, body_budget)
         root = _compile_card_shell(card_params, content, task_spec, contract, registry)
         root = _apply_theme_text_role(root, text_role)
+        root = _apply_theme_icon_role(root, text_role)
     effective = _serialize_node(root) + ";"
     a2ui = convert_terse_dsl_nested2_to_a2ui(
         effective,
@@ -252,7 +304,12 @@ def compile_ux_layout_card(
     bounded Action node. The service still owns root geometry, event binding,
     Theme lowering, validation, and the final standard A2UI conversion.
     """
+    source = _normalize_resource_cleanup_layout_source(source, contract)
     composition = parse_ux_layout_card(source)
+    composition = _normalize_empty_icon_actions(composition)
+    composition = _normalize_battery_power_action_icon(composition, contract)
+    composition = _normalize_resource_usage_optional_icon(composition, contract)
+    composition = _normalize_single_resource_usage_title(composition, contract)
     composition = _normalize_trusted_composite_text_calls(composition, contract)
     _validate_ux_layout_root(
         composition,
@@ -266,6 +323,7 @@ def compile_ux_layout_card(
         raise TerseDslNested2ConversionError("Hybrid raw component budget exceeded.")
     _reject_direct_events(composition)
     _validate_raw_components(composition, contract)
+    _validate_required_business_components(composition, contract)
     composition, provider_param_normalizations = _normalize_template_provider_params(
         composition,
         task_spec,
@@ -277,7 +335,7 @@ def compile_ux_layout_card(
         contract,
         registry,
     )
-    _validate_required_numbers(composition, contract)
+    _validate_required_numbers(composition, contract, task_spec)
     composition = _normalize_recommended_variant_order(composition, registry)
     state = _ExpansionState(
         template_ids=[],
@@ -292,6 +350,7 @@ def compile_ux_layout_card(
         contract=contract,
         registry=registry,
         state=state,
+        task_spec=task_spec,
     )
     _validate_required_template_groups(state, contract)
     embedded_action_count = sum(
@@ -309,12 +368,22 @@ def compile_ux_layout_card(
         raise TerseDslNested2ConversionError("UX Layout cannot repeat the same Action.")
     expanded = _append_missing_required_literals_to_ux_layout(expanded, contract)
     expanded = _inject_ux_business_title(expanded, business_title, contract)
+    card_tap_action = _weather_card_tap_action(expanded, contract)
     content = _lower_ux_layout_root(
         expanded,
         size=task_spec.size,
         contract=contract,
         registry=registry,
+        card_tap_action=card_tap_action,
     )
+    content = _inject_resource_battery_title(
+        content,
+        business_title,
+        contract,
+        registry,
+        size=task_spec.size,
+    )
+    content = _inject_phone_earphone_title(content, contract, registry)
     content = _deduplicate_ux_business_title_fragments(content, business_title)
     content = _lower_capsule_progress(content)
     content = _deduplicate_visible_text(content, task_spec)
@@ -322,9 +391,16 @@ def compile_ux_layout_card(
     body_budget = _ux_layout_body_budget(registry)
     if content_height > body_budget:
         content = _constrain_content_height(content, body_budget)
-    root = _compile_ux_layout_shell(content, contract, registry)
+    root = _compile_ux_layout_shell(
+        content,
+        contract,
+        registry,
+        card_tap_action=card_tap_action,
+    )
     text_role = registry.require_theme(contract.theme_profile_id).text_role
     root = _apply_theme_text_role(root, text_role)
+    root = _apply_theme_icon_role(root, text_role)
+    root = _strip_advanced_component_markers(root)
     count, depth = _shape(root)
     if count > contract.limits.max_expanded_components:
         raise TerseDslNested2ConversionError("Hybrid expanded component budget exceeded.")
@@ -343,6 +419,8 @@ def compile_ux_layout_card(
         raise TerseDslNested2ConversionError("UX Layout leaked into final A2UI.")
     if any(action_id in a2ui for action_id in _UX_ACTION_COMPONENTS):
         raise TerseDslNested2ConversionError("UX Action leaked into final A2UI.")
+    if any(component_id in a2ui for component_id in _UX_DIRECT_BUSINESS_COMPONENTS):
+        raise TerseDslNested2ConversionError("UX Business Component leaked into final A2UI.")
     return HybridCompilation(
         raw_output=source,
         effective_output=effective,
@@ -380,6 +458,148 @@ def _validate_required_template_groups(
             raise TerseDslNested2ConversionError(
                 f"UX business component requires one trusted Template from: {choices}"
             )
+
+
+def _validate_required_business_components(
+    root: ParsedCall,
+    contract: HybridBodyContract,
+) -> None:
+    counts = Counter(
+        call.name
+        for call in _walk_calls(root)
+        if call.kind == "component" and call.name in _UX_DIRECT_BUSINESS_COMPONENTS
+    )
+    allowed = set(contract.allowed_business_component_ids)
+    if set(counts) - allowed:
+        raise TerseDslNested2ConversionError(
+            "UX Business Component is outside the approved Advanced Scope."
+        )
+    for component_id in contract.required_business_component_ids:
+        if counts[component_id] != 1:
+            raise TerseDslNested2ConversionError(
+                f"UX Business Component must appear exactly once: {component_id}"
+            )
+
+
+def _normalize_resource_cleanup_layout_source(
+    source: str,
+    contract: HybridBodyContract,
+) -> str:
+    """Recover the unique approved root when the model places it after its content."""
+    if (
+        set(contract.allowed_business_component_ids) == {"ResourceUsageOverview"}
+        and set(contract.content_action_ids) == {"event.clean.memory"}
+        and "ResourceUsageOverview" in source
+        and "PillAction" in source
+        and not source.lstrip().startswith("HeroActionLayout")
+    ):
+        return 'HeroActionLayout(ResourceUsageOverview({"variant":"memory","role":"hero"}),' + (
+            'PillAction({"actionId":"event.clean.memory"}));'
+        )
+    return source
+
+
+def _normalize_empty_icon_actions(call: ParsedCall) -> ParsedCall:
+    children = tuple(_normalize_empty_icon_actions(child) for child in call.children)
+    normalized = ParsedCall(call.kind, call.name, call.values, children, call.span)
+    if call.name != "IconAction" or len(call.values) != 1:
+        return normalized
+    if not isinstance(call.values[0], dict):
+        return normalized
+    params = dict(call.values[0])
+    icon = params.get("icon")
+    if isinstance(icon, str) and icon.strip():
+        return normalized
+    params.pop("icon", None)
+    return ParsedCall(call.kind, "PillAction", (params,), children, call.span)
+
+
+def _normalize_battery_power_action_icon(
+    call: ParsedCall,
+    contract: HybridBodyContract,
+) -> ParsedCall:
+    """Repair an IconAction to the sole approved power-saving asset, if unambiguous."""
+    children = tuple(
+        _normalize_battery_power_action_icon(child, contract) for child in call.children
+    )
+    normalized = ParsedCall(call.kind, call.name, call.values, children, call.span)
+    if (
+        set(contract.allowed_business_component_ids) != {"BatteryOverview"}
+        or call.name != "IconAction"
+        or len(call.values) != 1
+        or not isinstance(call.values[0], dict)
+        or call.values[0].get("actionId") != "event.setPowerSavingMode"
+    ):
+        return normalized
+    approved = tuple(
+        source
+        for source in contract.allowed_asset_sources
+        if set(contract.asset_semantic_tags_by_source.get(source, ()))
+        & {"power-saving", "battery-saver", "saving", "leaf"}
+    )
+    if len(approved) != 1:
+        return normalized
+    params = dict(call.values[0])
+    if params.get("icon") == approved[0]:
+        return normalized
+    params["icon"] = approved[0]
+    return ParsedCall(call.kind, call.name, (params,), children, call.span)
+
+
+def _normalize_resource_usage_optional_icon(
+    call: ParsedCall,
+    contract: HybridBodyContract,
+) -> ParsedCall:
+    """Drop an unrelated optional resource icon without altering an Action icon."""
+    children = tuple(
+        _normalize_resource_usage_optional_icon(child, contract) for child in call.children
+    )
+    normalized = ParsedCall(call.kind, call.name, call.values, children, call.span)
+    if (
+        call.name != "ResourceUsageOverview"
+        or len(call.values) != 1
+        or not isinstance(call.values[0], dict)
+    ):
+        return normalized
+    params = dict(call.values[0])
+    source = params.get("icon")
+    if source is None:
+        return normalized
+    if not isinstance(source, str) or source not in contract.allowed_asset_sources:
+        return normalized
+    tags = set(contract.asset_semantic_tags_by_source.get(source, ()))
+    if tags & {"memory", "resource"}:
+        return normalized
+    params.pop("icon", None)
+    return ParsedCall(call.kind, call.name, (params,), children, call.span)
+
+
+def _normalize_single_resource_usage_title(
+    call: ParsedCall,
+    contract: HybridBodyContract,
+) -> ParsedCall:
+    """Restore the required internal title for a single resource business card."""
+    children = tuple(
+        _normalize_single_resource_usage_title(child, contract) for child in call.children
+    )
+    normalized = ParsedCall(call.kind, call.name, call.values, children, call.span)
+    if (
+        set(contract.required_business_component_ids) != {"ResourceUsageOverview"}
+        or call.name != "ResourceUsageOverview"
+        or len(call.values) != 1
+        or not isinstance(call.values[0], dict)
+        or call.values[0].get("showTitle") is not False
+    ):
+        return normalized
+    params = dict(call.values[0])
+    params.pop("showTitle", None)
+    return ParsedCall(call.kind, call.name, (params,), children, call.span)
+
+
+def _walk_calls(root: ParsedCall) -> Iterator[ParsedCall]:
+    yield root
+    for child in root.children:
+        yield from _walk_calls(child)
 
 
 def _normalize_trusted_composite_text_calls(
@@ -470,11 +690,95 @@ def _expand_call(
     contract: HybridBodyContract,
     registry: CardPlanRegistry,
     state: _ExpansionState,
+    task_spec: TaskSpec,
+    ux_layout_id: str | None = None,
 ) -> Nested2Node:
     if call.kind == "component":
         if call.name in _UX_ACTION_COMPONENTS:
             return _expand_ux_action_call(call, contract, state)
+        if call.name == "ActivityOverview":
+            return _expand_activity_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+            )
+        if call.name == "WorkoutOverview":
+            return _expand_workout_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+            )
+        if call.name == "HeartRateOverview":
+            return _expand_heart_rate_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+            )
+        if call.name == "SleepOverview":
+            return _expand_sleep_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+            )
+        if call.name == "DateOverview":
+            return _expand_date_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+            )
+        if call.name == "AppUsageOverview":
+            return _expand_app_usage_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+            )
+        if call.name == "BatteryOverview":
+            return _expand_battery_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+                layout_id=ux_layout_id,
+            )
+        if call.name == "BluetoothDeviceOverview":
+            return _expand_bluetooth_device_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+                layout_id=ux_layout_id,
+            )
+        if call.name == "WeatherOverview":
+            return _expand_weather_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+                layout_id=ux_layout_id,
+            )
+        if call.name == "ScheduleOverview":
+            return _expand_schedule_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                registry=registry,
+                layout_id=ux_layout_id,
+            )
+        if call.name == "ResourceUsageOverview":
+            return _expand_resource_usage_overview_call(
+                call,
+                task_spec=task_spec,
+                contract=contract,
+                layout_id=ux_layout_id,
+            )
         child_parent = "Column" if call.name in UX_LAYOUT_COMPONENT_IDS else call.name
+        child_layout_id = call.name if call.name in UX_LAYOUT_COMPONENT_IDS else ux_layout_id
         children = tuple(
             _expand_call(
                 child,
@@ -482,6 +786,8 @@ def _expand_call(
                 contract=contract,
                 registry=registry,
                 state=state,
+                task_spec=task_spec,
+                ux_layout_id=child_layout_id,
             )
             for child in call.children
         )
@@ -526,7 +832,10 @@ def _expand_call(
     )
     _validate_template_params(params, definition.asset_parameter_semantic_tags, contract)
     _validate_template_parameter_relations(params, variant.parameter_relations)
-    root = _instantiate_blueprint(variant.root, params)
+    if wire_id == "ux-bluetooth-overview@2" and ux_layout_id == "PeerPairLayout":
+        root = _expand_bluetooth_battery_peer(params, registry)
+    else:
+        root = _instantiate_blueprint(variant.root, params)
     root, action_ids = _bind_template_actions(root, contract)
     node_count, depth = _shape(root)
     if node_count > variant.expanded_node_budget or depth > variant.expanded_depth_budget:
@@ -569,10 +878,3244 @@ def _expand_ux_action_call(
         raise TerseDslNested2ConversionError(f"{call.name} icon is not approved.")
     if call.name == "IconAction" and not isinstance(icon, str):
         raise TerseDslNested2ConversionError("IconAction requires an approved icon.")
+    schedule_owned = set(contract.allowed_business_component_ids).issubset(
+        {"DateOverview", "ScheduleOverview"}
+    ) and "ScheduleOverview" in contract.allowed_business_component_ids
+    if schedule_owned and isinstance(icon, str):
+        expected_tags = _schedule_action_expected_tags(binding)
+        actual_tags = set(contract.asset_semantic_tags_by_source.get(icon, ()))
+        if not actual_tags & expected_tags:
+            raise TerseDslNested2ConversionError(
+                f"{call.name} icon does not match the approved schedule Action."
+            )
+    resource_usage_owned = "ResourceUsageOverview" in contract.allowed_business_component_ids
+    if resource_usage_owned:
+        if action_id != "event.clean.memory":
+            raise TerseDslNested2ConversionError(
+                f"{call.name} Action does not close the memory cleanup intent."
+            )
+        if isinstance(icon, str):
+            actual_tags = set(contract.asset_semantic_tags_by_source.get(icon, ()))
+            if not actual_tags & {"clean", "memory", "resource"}:
+                raise TerseDslNested2ConversionError(
+                    f"{call.name} icon does not match the memory cleanup Action."
+                )
+    app_usage_owned = "AppUsageOverview" in contract.allowed_business_component_ids
+    if app_usage_owned:
+        if call.name != "PillAction" or action_id != "event.open.settings.parentControl":
+            raise TerseDslNested2ConversionError(
+                f"{call.name} Action does not close the app usage control intent."
+            )
+        if isinstance(icon, str):
+            actual_tags = set(contract.asset_semantic_tags_by_source.get(icon, ()))
+            if not actual_tags & {"timer", "settings", "parental-control"}:
+                raise TerseDslNested2ConversionError(
+                    f"{call.name} icon does not match the app usage control Action."
+                )
+    battery_owned = set(contract.allowed_business_component_ids) == {"BatteryOverview"}
+    if battery_owned:
+        if isinstance(icon, str):
+            actual_tags = set(contract.asset_semantic_tags_by_source.get(icon, ()))
+            if not actual_tags & {"power-saving", "battery-saver", "saving", "leaf"}:
+                raise TerseDslNested2ConversionError(
+                    f"{call.name} icon does not match the power-saving Action."
+                )
+    bluetooth_owned = set(contract.allowed_business_component_ids) == {
+        "BluetoothDeviceOverview"
+    }
+    if bluetooth_owned:
+        if action_id not in {"event.open.music.daily", "event.open.music.favorite"}:
+            raise TerseDslNested2ConversionError(
+                f"{call.name} Action is not an approved Bluetooth music entry."
+            )
+        if isinstance(icon, str):
+            actual_tags = set(contract.asset_semantic_tags_by_source.get(icon, ()))
+            expected_tags = (
+                {"favorite", "heart"}
+                if action_id == "event.open.music.favorite"
+                else {"music", "audio"}
+            )
+            if not actual_tags & expected_tags:
+                raise TerseDslNested2ConversionError(
+                    f"{call.name} icon does not match the Bluetooth music Action."
+                )
+    workout_owned = "WorkoutOverview" in contract.allowed_business_component_ids
+    if workout_owned:
+        if action_id != "event.open.health.sport":
+            raise TerseDslNested2ConversionError(
+                f"{call.name} Action does not close the approved workout intent."
+            )
+        if isinstance(icon, str):
+            actual_tags = set(contract.asset_semantic_tags_by_source.get(icon, ()))
+            if not actual_tags & {"workout", "sport", "run"}:
+                raise TerseDslNested2ConversionError(
+                    f"{call.name} icon does not match workout semantics."
+                )
+    sleep_owned = "SleepOverview" in contract.allowed_business_component_ids
+    if sleep_owned:
+        if call.name != "PillAction" or action_id != "event.open.clock.alarm":
+            raise TerseDslNested2ConversionError(
+                f"{call.name} Action does not close the approved sleep reminder intent."
+            )
+        if isinstance(icon, str):
+            actual_tags = set(contract.asset_semantic_tags_by_source.get(icon, ()))
+            if not actual_tags & {"sleep", "moon", "alarm"}:
+                raise TerseDslNested2ConversionError(
+                    f"{call.name} icon does not match sleep reminder semantics."
+                )
     if action_id not in state.action_ids:
         state.action_ids.append(action_id)
     state.action_occurrences.append(action_id)
     return Nested2Node(call.name, (params,), ())
+
+
+def _schedule_action_expected_tags(binding: Any) -> set[str]:
+    searchable = " ".join(
+        (
+            binding.action_id,
+            binding.display_label,
+            binding.call,
+            json.dumps(binding.args, ensure_ascii=False, sort_keys=True),
+        )
+    ).casefold()
+    if any(term in searchable for term in ("focus", "dnd", "专注", "勿扰")):
+        return {"focus"}
+    return {"calendar", "schedule", "meeting"}
+
+
+def _expand_date_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError("DateOverview is not approved by Advanced Scope.")
+    facts = extract_date_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "DateOverview requires complete trusted date and weekday strings."
+        )
+    parameters = call.values[0]
+    variant = str(parameters["variant"])
+    theme = registry.require_theme(contract.theme_profile_id)
+    highlight_color = "#FFFF8066" if theme.text_role == "text-on-accent" else "#FFFF3B30"
+    neutral_color = "#BFFFFFFF" if theme.text_role == "text-on-accent" else "#99000000"
+    if variant == "compactDate":
+        return _compact_date_overview(facts, highlight_color, neutral_color)
+    return _hero_date_overview(facts, highlight_color, neutral_color, registry)
+
+
+def _compact_date_overview(
+    facts: DateOverviewFacts,
+    highlight_color: str,
+    neutral_color: str,
+) -> Nested2Node:
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "_advancedComponent": "DateOverview",
+                "width": "100%",
+                "height": 20,
+                "itemMargin": 6,
+                "justifyContent": "start",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _date_text(
+                facts.date,
+                "compact-title",
+                font_size=14,
+                font_weight=700,
+                font_color=highlight_color,
+            ),
+            _date_text(
+                facts.weekday,
+                "subtitle",
+                font_size=12,
+                font_weight=500,
+                font_color=neutral_color,
+            ),
+        ),
+    )
+
+
+def _hero_date_overview(
+    facts: DateOverviewFacts,
+    highlight_color: str,
+    neutral_color: str,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "DateOverview",
+                "width": "100%",
+                "height": "100%",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "center",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _date_text(
+                facts.date,
+                "title",
+                font_size=30,
+                font_weight=800,
+                font_color=highlight_color,
+                min_font_size=30,
+            ),
+            _date_text(
+                facts.weekday,
+                "body",
+                font_size=14,
+                font_weight=500,
+                font_color=neutral_color,
+            ),
+        ),
+    )
+
+
+def _date_text(
+    value: str,
+    design: str,
+    *,
+    font_size: int,
+    font_weight: int,
+    font_color: str,
+    min_font_size: int | None = None,
+) -> Nested2Node:
+    options: dict[str, Any] = {
+        "fontSize": font_size,
+        "fontWeight": font_weight,
+        "fontColor": font_color,
+        "maxLines": 1,
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0},
+    }
+    if min_font_size is not None:
+        options["minFontSize"] = min_font_size
+    return Nested2Node("Text", (value, design, options), ())
+
+
+def _expand_activity_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "ActivityOverview is not approved by Advanced Scope."
+        )
+    parameters = call.values[0]
+    variant = str(parameters["variant"])
+    variant_selector = (
+        relaxed_activity_overview_variants
+        if advanced_component_data_admission_is_relaxed()
+        else activity_overview_variants
+    )
+    allowed_variants = set(variant_selector(task_spec, {"GetHealthAndSportSummary"}))
+    if variant not in allowed_variants:
+        raise TerseDslNested2ConversionError(
+            "ActivityOverview variant is not backed by this query and trusted projection."
+        )
+    facts = extract_activity_overview_facts(task_spec.dataModelSchema)
+    if facts is None or (variant == "dailySummary" and not facts.has_daily_summary):
+        raise TerseDslNested2ConversionError(
+            "ActivityOverview requires trusted fields for the selected variant."
+        )
+    role = str(parameters["role"])
+    icons = {
+        name: parameters.get(name)
+        for name in ("stepsIcon", "caloriesIcon", "distanceIcon")
+    }
+    if role == "support":
+        return _activity_support_overview(facts, icons, registry)
+    return _activity_hero_overview(
+        facts,
+        icons,
+        registry,
+        wide=task_spec.size == "2x4",
+        include_summary=variant == "dailySummary",
+    )
+
+
+def _activity_hero_overview(
+    facts: ActivityOverviewFacts,
+    icons: dict[str, Any],
+    registry: CardPlanRegistry,
+    *,
+    wide: bool,
+    include_summary: bool,
+) -> Nested2Node:
+    header = _overview_header("今日活动", icons["stepsIcon"], registry)
+    metric = _overview_value_row(
+        str(facts.daily_steps),
+        "步",
+        accent="#FFFF7A45",
+        registry=registry,
+        hero=True,
+    )
+    primary = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "start",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (header, metric),
+    )
+    if not include_summary:
+        return _mark_advanced_component(primary, "ActivityOverview")
+    assert facts.calories_text is not None and facts.distance_text is not None
+    secondary = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["moduleGap"],
+                "justifyContent": "center",
+                "alignItems": "start",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _overview_fact_row(
+                facts.calories_text,
+                icons["caloriesIcon"],
+                registry,
+            ),
+            _overview_fact_row(
+                facts.distance_text,
+                icons["distanceIcon"],
+                registry,
+            ),
+        ),
+    )
+    if wide:
+        root = _weighted_row((primary, secondary), (58, 42), registry)
+    else:
+        root = Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "width": "matchParent",
+                    "height": "matchParent",
+                    "itemMargin": registry.ux_tokens["moduleGap"],
+                    "justifyContent": "spaceBetween",
+                    "alignItems": "start",
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            (header, metric, _inline_overview_facts(secondary.children, registry)),
+        )
+    return _mark_advanced_component(root, "ActivityOverview")
+
+
+def _activity_support_overview(
+    facts: ActivityOverviewFacts,
+    icons: dict[str, Any],
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    root = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _overview_header("今日步数", icons["stepsIcon"], registry, compact=True),
+            _overview_value_row(
+                str(facts.daily_steps),
+                "步",
+                accent="#FFFF7A45",
+                registry=registry,
+                hero=False,
+            ),
+        ),
+    )
+    return _mark_advanced_component(root, "ActivityOverview")
+
+
+def _expand_workout_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "WorkoutOverview is not approved by Advanced Scope."
+        )
+    parameters = call.values[0]
+    variant = str(parameters["variant"])
+    variant_selector = (
+        relaxed_workout_overview_variants
+        if advanced_component_data_admission_is_relaxed()
+        else workout_overview_variants
+    )
+    allowed_variants = set(
+        variant_selector(
+            task_spec,
+            {"GetHealthAndSportSummary", "GetCountdownDays"},
+        )
+    )
+    if variant not in allowed_variants:
+        raise TerseDslNested2ConversionError(
+            "WorkoutOverview variant is not backed by this query and trusted projection."
+        )
+    source_icon = parameters.get("sourceIcon")
+    calorie_icon = parameters.get("caloriesIcon")
+    if variant == "latest":
+        facts = extract_workout_latest_facts(task_spec.dataModelSchema)
+        if facts is None:
+            raise TerseDslNested2ConversionError(
+                "WorkoutOverview latest requires three trusted non-empty exercise fields."
+            )
+        return _workout_latest_overview(facts, source_icon, calorie_icon, registry)
+    facts = extract_workout_countdown_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "WorkoutOverview countdown requires a trusted non-negative integer day count."
+        )
+    return _workout_countdown_overview(facts, source_icon, registry)
+
+
+def _workout_latest_overview(
+    facts: WorkoutLatestFacts,
+    source_icon: Any,
+    calorie_icon: Any,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    root = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "start",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _overview_header("最近锻炼", source_icon, registry),
+            _overview_text(facts.exercise_type_name, "compact-title", 20, 700),
+            _overview_value_row(
+                facts.duration_text,
+                "",
+                accent="#FFFF7A45",
+                registry=registry,
+                hero=True,
+            ),
+            _overview_fact_row(facts.calorie_text, calorie_icon, registry),
+        ),
+    )
+    return _mark_advanced_component(root, "WorkoutOverview")
+
+
+def _workout_countdown_overview(
+    facts: WorkoutCountdownFacts,
+    source_icon: Any,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    root = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "start",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _overview_header("运动倒计时", source_icon, registry),
+            _overview_value_row(
+                str(facts.countdown_days),
+                "天",
+                accent="#FFFFFFFF",
+                registry=registry,
+                hero=True,
+            ),
+        ),
+    )
+    return _mark_advanced_component(root, "WorkoutOverview")
+
+
+def _expand_heart_rate_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "HeartRateOverview is not approved by Advanced Scope."
+        )
+    if not advanced_component_data_admission_is_relaxed() and not heart_rate_overview_is_eligible(
+        task_spec,
+        {"GetHealthAndSportSummary"},
+    ):
+        raise TerseDslNested2ConversionError(
+            "HeartRateOverview average is not backed by this query and trusted projection."
+        )
+    facts = extract_heart_rate_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "HeartRateOverview requires a trusted positive exercise average heart rate."
+        )
+    parameters = call.values[0]
+    role = str(parameters["role"])
+    source_icon = parameters.get("sourceIcon")
+    children: list[Nested2Node] = [
+        _overview_header(
+            "运动平均心率",
+            source_icon,
+            registry,
+            compact=role == "support",
+        ),
+        _overview_value_row(
+            str(facts.average_bpm),
+            "bpm",
+            accent="#FFE84057",
+            registry=registry,
+            hero=role == "hero",
+        ),
+    ]
+    if facts.updated_at is not None:
+        children.append(_overview_text(facts.updated_at, "subtitle", 10, 400))
+    root = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start" if role == "support" else "spaceBetween",
+                "alignItems": "start",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+    return _mark_advanced_component(root, "HeartRateOverview")
+
+
+def _expand_sleep_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "SleepOverview is not approved by Advanced Scope."
+        )
+    facts = extract_sleep_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "SleepOverview requires a losslessly renderable night duration."
+        )
+    parameters = call.values[0]
+    variant = str(parameters["variant"])
+    allowed_variants = set(
+        sleep_overview_variants(task_spec, {"GetHealthAndSportSummary"})
+    )
+    if variant not in allowed_variants:
+        raise TerseDslNested2ConversionError(
+            "SleepOverview variant is not backed by this query and trusted projection."
+        )
+    role = str(parameters["role"])
+    source_icon = parameters.get("sourceIcon")
+    multi_business = len(contract.allowed_business_component_ids) > 1
+    if multi_business:
+        source_icon = None
+    text_on_accent = (
+        registry.require_theme(contract.theme_profile_id).text_role == "text-on-accent"
+    )
+    if role == "support":
+        return _sleep_support_overview(
+            facts,
+            text_on_accent=text_on_accent,
+            registry=registry,
+        )
+    return _sleep_hero_overview(
+        facts,
+        source_icon,
+        wide=task_spec.size == "2x4",
+        text_on_accent=text_on_accent,
+        registry=registry,
+    )
+
+
+def _sleep_hero_overview(
+    facts: SleepOverviewFacts,
+    source_icon: Any,
+    *,
+    wide: bool,
+    text_on_accent: bool,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    primary_color = "#FFFFFFFF" if text_on_accent else "#E6000000"
+    secondary_color = "#99FFFFFF" if text_on_accent else "#99000000"
+    title = _sleep_title_row(
+        source_icon,
+        primary_color=primary_color,
+        registry=registry,
+    )
+    duration = _sleep_duration_row(
+        facts,
+        value_size=30,
+        unit_size=12,
+        primary_color=primary_color,
+        secondary_color=secondary_color,
+    )
+    status = (
+        _sleep_text(
+            facts.status,
+            "subtitle",
+            font_size=10,
+            font_weight=400,
+            font_color=secondary_color,
+        )
+        if facts.status is not None
+        else None
+    )
+    hero_children = (title, duration, status) if status is not None else (title, duration)
+    hero = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        hero_children,
+    )
+    if not wide:
+        return _mark_advanced_component(hero, "SleepOverview")
+    support = _sleep_schedule_support(
+        facts,
+        primary_color=primary_color,
+        secondary_color=secondary_color,
+    )
+    if support is None:
+        return _mark_advanced_component(hero, "SleepOverview")
+    root = _weighted_row((hero, support), (56, 44), registry)
+    return _mark_advanced_component(root, "SleepOverview")
+
+
+def _sleep_support_overview(
+    facts: SleepOverviewFacts,
+    *,
+    text_on_accent: bool,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    primary_color = "#FFFFFFFF" if text_on_accent else "#E6000000"
+    secondary_color = "#99FFFFFF" if text_on_accent else "#99000000"
+    root = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _sleep_text(
+                "睡眠",
+                "subtitle",
+                font_size=10,
+                font_weight=400,
+                font_color=secondary_color,
+            ),
+            _sleep_duration_row(
+                facts,
+                value_size=20,
+                unit_size=10,
+                primary_color=primary_color,
+                secondary_color=secondary_color,
+            ),
+        ),
+    )
+    return _mark_advanced_component(root, "SleepOverview")
+
+
+def _sleep_title_row(
+    source_icon: Any,
+    *,
+    primary_color: str,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    title = _merge_node_options(
+        _sleep_text(
+            "睡眠",
+            "compact-title",
+            font_size=12,
+            font_weight=400,
+            font_color=primary_color,
+        ),
+        {"layoutWeight": 1},
+    )
+    children = [title]
+    if isinstance(source_icon, str):
+        size = registry.ux_tokens["titleSourceIconSize"]
+        children.append(
+            Nested2Node(
+                "Image",
+                (
+                    source_icon,
+                    "icon",
+                    {
+                        "width": size,
+                        "height": size,
+                        "objectFit": "contain",
+                        "flexShrink": 0,
+                    },
+                ),
+                (),
+            )
+        )
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "height": 20,
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "top",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _sleep_duration_row(
+    facts: SleepOverviewFacts,
+    *,
+    value_size: int,
+    unit_size: int,
+    primary_color: str,
+    secondary_color: str,
+) -> Nested2Node:
+    parts = facts.duration
+    groups = [
+        _sleep_duration_group(
+            parts.primary_value,
+            parts.primary_unit,
+            value_size=value_size,
+            unit_size=unit_size,
+            primary_color=primary_color,
+            secondary_color=secondary_color,
+        )
+    ]
+    if parts.secondary_value is not None:
+        groups.append(
+            _sleep_duration_group(
+                parts.secondary_value,
+                parts.secondary_unit or "",
+                value_size=value_size,
+                unit_size=unit_size,
+                primary_color=primary_color,
+                secondary_color=secondary_color,
+            )
+        )
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": 2,
+                "justifyContent": "start",
+                "alignItems": "bottom",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(groups),
+    )
+
+
+def _sleep_duration_group(
+    value: str,
+    unit: str,
+    *,
+    value_size: int,
+    unit_size: int,
+    primary_color: str,
+    secondary_color: str,
+) -> Nested2Node:
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "itemMargin": 0,
+                "justifyContent": "start",
+                "alignItems": "bottom",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _sleep_text(
+                value,
+                "title",
+                font_size=value_size,
+                font_weight=700,
+                font_color=primary_color,
+            ),
+            _sleep_text(
+                unit,
+                "subtitle",
+                font_size=unit_size,
+                font_weight=400,
+                font_color=secondary_color,
+            ),
+        ),
+    )
+
+
+def _sleep_schedule_support(
+    facts: SleepOverviewFacts,
+    *,
+    primary_color: str,
+    secondary_color: str,
+) -> Nested2Node | None:
+    items: list[Nested2Node] = []
+    for label, value in (
+        ("入睡", facts.fall_asleep_time),
+        ("醒来", facts.wakeup_time),
+    ):
+        if value is None:
+            continue
+        items.append(
+            Nested2Node(
+                "Column",
+                (
+                    "compact",
+                    {
+                        "width": "matchParent",
+                        "itemMargin": 4,
+                        "alignItems": "start",
+                    },
+                ),
+                (
+                    _sleep_text(
+                        label,
+                        "subtitle",
+                        font_size=10,
+                        font_weight=400,
+                        font_color=secondary_color,
+                    ),
+                    _sleep_text(
+                        value,
+                        "body",
+                        font_size=14,
+                        font_weight=500,
+                        font_color=primary_color,
+                    ),
+                ),
+            )
+        )
+    if not items and facts.status is not None:
+        items.append(
+            _sleep_text(
+                facts.status,
+                "subtitle",
+                font_size=10,
+                font_weight=400,
+                font_color=secondary_color,
+            )
+        )
+    if not items:
+        return None
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "padding": 8,
+                "borderRadius": 8,
+                "backgroundColor": "#24FFFFFF",
+                "itemMargin": 8,
+                "justifyContent": "center",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(items),
+    )
+
+
+def _sleep_text(
+    value: str,
+    design: str,
+    *,
+    font_size: int,
+    font_weight: int,
+    font_color: str,
+) -> Nested2Node:
+    return Nested2Node(
+        "Text",
+        (
+            value,
+            design,
+            {
+                "fontSize": font_size,
+                "minFontSize": font_size,
+                "fontWeight": font_weight,
+                "fontColor": font_color,
+                "maxLines": 1,
+                "textOverflow": "ellipsis",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (),
+    )
+
+
+def _overview_header(
+    title: str,
+    icon: Any,
+    registry: CardPlanRegistry,
+    *,
+    compact: bool = False,
+) -> Nested2Node:
+    children: list[Nested2Node] = []
+    if isinstance(icon, str):
+        size = 16 if compact else registry.ux_tokens["businessIconSize"]
+        children.append(
+            Nested2Node(
+                "Image",
+                (
+                    icon,
+                    "icon",
+                    {
+                        "width": size,
+                        "height": size,
+                        "objectFit": "contain",
+                        "flexShrink": 0,
+                    },
+                ),
+                (),
+            )
+        )
+    children.append(_overview_text(title, "subtitle", 10 if compact else 12, 500))
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "top",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _overview_value_row(
+    value: str,
+    unit: str,
+    *,
+    accent: str,
+    registry: CardPlanRegistry,
+    hero: bool,
+) -> Nested2Node:
+    children = [
+        _overview_text(
+            value,
+            "title" if hero else "compact-title",
+            38 if hero else 20,
+            800 if hero else 700,
+            color=accent,
+            fill_width=False,
+        )
+    ]
+    if unit:
+        children.append(_overview_text(unit, "subtitle", 12, 500, fill_width=False))
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "bottom",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _overview_fact_row(
+    value: str,
+    icon: Any,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    children: list[Nested2Node] = []
+    if isinstance(icon, str):
+        children.append(
+            Nested2Node(
+                "Image",
+                (
+                    icon,
+                    "icon",
+                    {"width": 16, "height": 16, "objectFit": "contain", "flexShrink": 0},
+                ),
+                (),
+            )
+        )
+    children.append(_overview_text(value, "body", 12, 500))
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "top",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _inline_overview_facts(
+    children: tuple[Nested2Node, ...],
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": registry.ux_tokens["moduleGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "center",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(_with_flex_weight(child, 1, axis="horizontal") for child in children),
+    )
+
+
+def _overview_text(
+    value: str,
+    design: str,
+    font_size: int,
+    font_weight: int,
+    *,
+    color: str = "#E6000000",
+    fill_width: bool = True,
+) -> Nested2Node:
+    options: dict[str, Any] = {
+        "fontSize": font_size,
+        "fontWeight": font_weight,
+        "fontColor": color,
+        "maxLines": 1,
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0},
+    }
+    if fill_width:
+        options["width"] = "matchParent"
+    return Nested2Node(
+        "Text",
+        (
+            value,
+            design,
+            options,
+        ),
+        (),
+    )
+
+
+def _mark_advanced_component(node: Nested2Node, component_id: str) -> Nested2Node:
+    return _merge_node_options(node, {"_advancedComponent": component_id})
+
+
+def _expand_battery_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+    layout_id: str | None,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "BatteryOverview is not approved by Advanced Scope."
+        )
+    facts = extract_battery_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "BatteryOverview requires one coherent trusted four-field phone battery projection."
+        )
+    parameters = call.values[0]
+    if parameters.get("variant") != facts.state:
+        raise TerseDslNested2ConversionError(
+            "BatteryOverview variant does not match the trusted battery state."
+        )
+    battery_icon = parameters.get("batteryIcon")
+    if battery_icon is not None:
+        actual_tags = set(contract.asset_semantic_tags_by_source.get(str(battery_icon), ()))
+        if not actual_tags & {"battery", "power", "phone", "phone-device"}:
+            raise TerseDslNested2ConversionError(
+                "BatteryOverview batteryIcon does not match TaskSpec battery semantics."
+            )
+    role = str(parameters["role"])
+    show_title = parameters.get("showTitle", True)
+    paired_with_bluetooth = set(contract.allowed_business_component_ids) == {
+        "BatteryOverview",
+        "BluetoothDeviceOverview",
+    }
+    if paired_with_bluetooth:
+        return _battery_device_hero_overview(facts, battery_icon, registry)
+    paired_with_weather = set(contract.allowed_business_component_ids) == {
+        "WeatherOverview",
+        "BatteryOverview",
+    }
+    if paired_with_weather and task_spec.size == "2x2" and role == "support":
+        return _battery_weather_support_overview(facts, battery_icon, registry)
+    if role == "peer":
+        return _battery_peer_overview(
+            facts,
+            battery_icon,
+            registry,
+            show_title=show_title,
+        )
+    if task_spec.size == "2x4" and role == "hero":
+        return _battery_wide_overview(facts, battery_icon, registry)
+    ring_size = registry.ux_tokens["ringMinimumSize"] if role == "support" else None
+    del layout_id
+    return _battery_compact_overview(facts, battery_icon, registry, ring_size=ring_size)
+
+
+def _battery_weather_support_overview(
+    facts: BatteryOverviewFacts,
+    battery_icon: Any,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    summary_children: list[Nested2Node] = []
+    if isinstance(battery_icon, str):
+        summary_children.append(
+            Nested2Node(
+                "Image",
+                (
+                    battery_icon,
+                    "icon",
+                    {
+                        "width": 14,
+                        "height": 14,
+                        "objectFit": "contain",
+                        "flexShrink": 0,
+                    },
+                ),
+                (),
+            )
+        )
+    summary_children.extend(
+        (
+            _overview_text(
+                facts.level_text,
+                "compact-title",
+                14,
+                700,
+                fill_width=False,
+            ),
+            _overview_text(
+                facts.capacity_level,
+                "subtitle",
+                10,
+                400,
+                fill_width=False,
+            ),
+        )
+    )
+    summary = Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(summary_children),
+    )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "BatteryOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": 2,
+                "justifyContent": "center",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            summary,
+            _overview_text(
+                facts.charging_status,
+                "subtitle",
+                10,
+                400,
+                fill_width=False,
+            ),
+        ),
+    )
+
+
+def _battery_compact_overview(
+    facts: BatteryOverviewFacts,
+    battery_icon: Any,
+    registry: CardPlanRegistry,
+    *,
+    ring_size: int | None,
+) -> Nested2Node:
+    bottom_region = Nested2Node(
+        "Stack",
+        (
+            "overlay",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "layoutWeight": 1,
+                "alignContent": "bottomStart",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (_battery_ring(facts, battery_icon, registry, ring_size=ring_size),),
+    )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "BatteryOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _battery_text("设备电量", "subtitle", 12, 500),
+            _battery_text(
+                _battery_compact_description(facts),
+                "body",
+                12,
+                400,
+                max_lines=2,
+            ),
+            bottom_region,
+        ),
+    )
+
+
+def _battery_compact_description(facts: BatteryOverviewFacts) -> str:
+    return "，".join(
+        (
+            f"电量 {facts.level_text}",
+            facts.capacity_level,
+            facts.charging_status,
+        )
+    )
+
+
+def _battery_wide_overview(
+    facts: BatteryOverviewFacts,
+    battery_icon: Any,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    details = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "layoutWeight": 1,
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "center",
+                "alignItems": "start",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _battery_text(facts.level_text, "compact-title", 14, 700),
+            _battery_text(facts.capacity_level, "body", 14, 400),
+            _battery_text(facts.charging_status, "subtitle", 10, 400),
+        ),
+    )
+    status = Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "layoutWeight": 1,
+                "itemMargin": registry.ux_tokens["moduleGap"],
+                "justifyContent": "start",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (_battery_ring(facts, battery_icon, registry), details),
+    )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "BatteryOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (_battery_text("设备电量", "subtitle", 12, 500), status),
+    )
+
+
+def _battery_peer_overview(
+    facts: BatteryOverviewFacts,
+    battery_icon: Any,
+    registry: CardPlanRegistry,
+    *,
+    show_title: bool,
+) -> Nested2Node:
+    children: list[Nested2Node] = []
+    if show_title:
+        children.append(_battery_text("设备电量", "subtitle", 12, 500))
+    children.extend(
+        (
+            _battery_ring(facts, battery_icon, registry),
+            _battery_text(
+                facts.level_text,
+                "compact-title",
+                14,
+                700,
+                text_align="center",
+            ),
+            _battery_text(
+                facts.capacity_level,
+                "subtitle",
+                10,
+                400,
+                text_align="center",
+            ),
+            _battery_text(
+                facts.charging_status,
+                "subtitle",
+                10,
+                400,
+                text_align="center",
+            ),
+        )
+    )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "BatteryOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": 2,
+                "justifyContent": "center",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _battery_device_hero_overview(
+    facts: BatteryOverviewFacts,
+    battery_icon: Any,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "BatteryOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": 2,
+                "justifyContent": "center",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _battery_ring(facts, battery_icon, registry, ring_size=56),
+            _battery_text(facts.level_text, "compact-title", 16, 700),
+            _battery_text("手机", "subtitle", 10, 400),
+        ),
+    )
+
+
+def _battery_ring(
+    facts: BatteryOverviewFacts,
+    battery_icon: Any,
+    registry: CardPlanRegistry,
+    *,
+    ring_size: int | None = None,
+) -> Nested2Node:
+    size = ring_size or registry.ux_tokens["ringDefaultSize"]
+    ring_color = _WARNING_DATA_COLOR
+    children: list[Nested2Node] = [
+        Nested2Node(
+            "Progress",
+            (
+                {
+                    "value": facts.level_percent,
+                    "total": 100,
+                    "type": "ring",
+                    "color": ring_color,
+                    "backgroundColor": _TRACK_COLOR,
+                    "width": size,
+                    "height": size,
+                    "strokeWidth": 6,
+                },
+            ),
+            (),
+        )
+    ]
+    if isinstance(battery_icon, str):
+        icon_size = registry.ux_tokens["ringHeroIconSize"]
+        children.append(
+            Nested2Node(
+                "Image",
+                (
+                    battery_icon,
+                    "icon",
+                    {
+                        "width": icon_size,
+                        "height": icon_size,
+                        "objectFit": "contain",
+                        "fillColor": _ICON_SECONDARY,
+                    },
+                ),
+                (),
+            )
+        )
+    return Nested2Node(
+        "Stack",
+        (
+            "overlay",
+            {
+                "width": size,
+                "height": size,
+                "alignContent": "center",
+                "flexShrink": 0,
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _expand_bluetooth_battery_peer(
+    params: dict[str, Any],
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    """Use one aggregate earphone Ring beside BatteryOverview in PeerPairLayout."""
+    level = params["batteryLevel"]
+    ring_color = _WARNING_DATA_COLOR if float(level) <= 20 else _NORMAL_DATA_COLOR
+    size = registry.ux_tokens["ringDefaultSize"]
+    ring = Nested2Node(
+        "Stack",
+        (
+            "overlay",
+            {
+                "width": size,
+                "height": size,
+                "alignContent": "center",
+                "flexShrink": 0,
+            },
+        ),
+        (
+            Nested2Node(
+                "Progress",
+                (
+                    {
+                        "value": level,
+                        "total": 100,
+                        "type": "ring",
+                        "color": ring_color,
+                        "backgroundColor": _TRACK_COLOR,
+                        "width": size,
+                        "height": size,
+                        "strokeWidth": 6,
+                    },
+                ),
+                (),
+            ),
+        ),
+    )
+    level_number = float(level)
+    level_text = (
+        f"{int(level_number)}%" if level_number.is_integer() else f"{level_number:g}%"
+    )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": 2,
+                "justifyContent": "center",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            ring,
+            _battery_text(level_text, "compact-title", 14, 700),
+            _battery_text(str(params["earphoneName"]), "subtitle", 10, 400),
+        ),
+    )
+
+
+def _battery_text(
+    value: str,
+    design: str,
+    font_size: int,
+    font_weight: int,
+    *,
+    max_lines: int = 1,
+    text_align: str | None = None,
+) -> Nested2Node:
+    options: dict[str, Any] = {
+        "width": "matchParent",
+        "fontSize": font_size,
+        "fontWeight": font_weight,
+        "fontColor": "#E6000000" if font_size >= 12 else "#99000000",
+        "maxLines": max_lines,
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0},
+    }
+    if text_align is not None:
+        options["textAlign"] = text_align
+    return Nested2Node(
+        "Text",
+        (
+            value,
+            design,
+            options,
+        ),
+        (),
+    )
+
+
+def _expand_bluetooth_device_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+    layout_id: str | None,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "BluetoothDeviceOverview is not approved by Advanced Scope."
+        )
+    facts = extract_bluetooth_device_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "BluetoothDeviceOverview requires one compatible trusted earphone entity."
+        )
+    parameters = call.values[0]
+    if parameters.get("variant") != "earbuds":
+        raise TerseDslNested2ConversionError(
+            "BluetoothDeviceOverview currently supports the earbuds variant only."
+        )
+    for field in ("sourceIcon", "leftEarIcon", "rightEarIcon"):
+        source = parameters.get(field)
+        if source is None:
+            continue
+        tags = set(contract.asset_semantic_tags_by_source.get(str(source), ()))
+        if not tags & {"audio", "earphone", "product"}:
+            raise TerseDslNested2ConversionError(
+                f"BluetoothDeviceOverview {field} does not match earphone semantics."
+            )
+    paired_with_phone = set(contract.allowed_business_component_ids) == {
+        "BatteryOverview",
+        "BluetoothDeviceOverview",
+    }
+    del layout_id
+    if paired_with_phone:
+        return _bluetooth_device_support_overview(
+            facts,
+            parameters,
+            task_spec.size,
+            registry,
+        )
+    return _bluetooth_single_overview(facts, parameters, task_spec.size, registry)
+
+
+def _bluetooth_single_overview(
+    facts: BluetoothDeviceOverviewFacts,
+    parameters: dict[str, Any],
+    size: Literal["2x2", "2x4"],
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    header = _bluetooth_header(facts.earphone_name, parameters.get("sourceIcon"), registry)
+    if not facts.is_connected:
+        content = _bluetooth_text("未连接", "compact-title", 14, 500, align="start")
+    else:
+        content = _bluetooth_ear_metrics(
+            facts,
+            parameters,
+            ring_size=40,
+            icon_size=18,
+            arrangement="row",
+        )
+    children = [header, content]
+    if size == "2x4" and facts.case_battery_level is not None:
+        children.append(
+            _bluetooth_text(
+                "充电盒 " + _percent_text(facts.case_battery_level),
+                "subtitle",
+                11,
+                400,
+                align="start",
+            )
+        )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "BluetoothDeviceOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _bluetooth_device_support_overview(
+    facts: BluetoothDeviceOverviewFacts,
+    parameters: dict[str, Any],
+    size: Literal["2x2", "2x4"],
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    compact = size == "2x2"
+    if not facts.is_connected:
+        return Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "_advancedComponent": "BluetoothDeviceOverview",
+                    "width": "matchParent",
+                    "height": "matchParent",
+                    "justifyContent": "center",
+                    "alignItems": "center",
+                    "clip": True,
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            (_bluetooth_text("未连接", "subtitle", 11, 400, align="center"),),
+        )
+    metrics = _bluetooth_ear_metrics(
+        facts,
+        parameters,
+        ring_size=32 if compact else 40,
+        icon_size=14 if compact else 18,
+        arrangement="column" if compact else "row",
+    )
+    children: list[Nested2Node] = [metrics]
+    if not compact:
+        case_text = (
+            " · 充电盒 " + _percent_text(facts.case_battery_level)
+            if facts.case_battery_level is not None
+            else ""
+        )
+        children.insert(
+            0,
+            _bluetooth_text(
+                facts.earphone_name + case_text,
+                "subtitle",
+                11,
+                400,
+                align="start",
+            ),
+        )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "BluetoothDeviceOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "padding": 0 if compact else {"left": 8, "top": 6, "right": 8, "bottom": 6},
+                "borderRadius": 0 if compact else 8,
+                "backgroundColor": "#00000000" if compact else "#1A64BB5C",
+                "itemMargin": 2 if compact else registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "center" if compact else "start",
+                "alignItems": "center" if compact else "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _bluetooth_header(
+    title: str,
+    source_icon: Any,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    children: list[Nested2Node] = [
+        _bluetooth_text(title, "subtitle", 12, 400, align="start", flex=True)
+    ]
+    if isinstance(source_icon, str):
+        icon_size = registry.ux_tokens["titleSourceIconSize"]
+        children.append(
+            Nested2Node(
+                "Image",
+                (
+                    source_icon,
+                    "icon",
+                    {
+                        "width": icon_size,
+                        "height": icon_size,
+                        "borderRadius": 4,
+                        "objectFit": "contain",
+                        "fillColor": "#99000000",
+                        "flexShrink": 0,
+                    },
+                ),
+                (),
+            )
+        )
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "height": 20,
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "top",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _bluetooth_ear_metrics(
+    facts: BluetoothDeviceOverviewFacts,
+    parameters: dict[str, Any],
+    *,
+    ring_size: int,
+    icon_size: int,
+    arrangement: Literal["row", "column"],
+) -> Nested2Node:
+    parts = tuple(
+        (value, parameters.get(icon_field))
+        for value, icon_field in (
+            (facts.left_battery_level, "leftEarIcon"),
+            (facts.right_battery_level, "rightEarIcon"),
+        )
+        if value is not None
+    )
+    if not parts and facts.case_battery_level is not None:
+        parts = ((facts.case_battery_level, parameters.get("sourceIcon")),)
+    metrics = tuple(
+        _bluetooth_metric(value, icon, ring_size=ring_size, icon_size=icon_size)
+        for value, icon in parts
+    )
+    component = "Row" if arrangement == "row" else "Column"
+    return Nested2Node(
+        component,
+        (
+            "between" if component == "Row" else "compact",
+            {
+                "width": "matchParent",
+                "height": "matchParent" if component == "Column" else ring_size + 16,
+                "itemMargin": 8 if component == "Row" else 2,
+                "justifyContent": "center",
+                "alignItems": "center",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        metrics,
+    )
+
+
+def _bluetooth_metric(
+    value: int | float,
+    icon: Any,
+    *,
+    ring_size: int,
+    icon_size: int,
+) -> Nested2Node:
+    ring_color = _WARNING_DATA_COLOR if value <= 20 else _NORMAL_DATA_COLOR
+    ring_children: list[Nested2Node] = [
+        Nested2Node(
+            "Progress",
+            (
+                {
+                    "value": value,
+                    "total": 100,
+                    "type": "ring",
+                    "color": ring_color,
+                    "backgroundColor": _TRACK_COLOR,
+                    "width": ring_size,
+                    "height": ring_size,
+                    "strokeWidth": 6,
+                },
+            ),
+            (),
+        )
+    ]
+    if isinstance(icon, str):
+        ring_children.append(
+            Nested2Node(
+                "Image",
+                (
+                    icon,
+                    "icon",
+                    {
+                        "width": icon_size,
+                        "height": icon_size,
+                        "objectFit": "contain",
+                        "fillColor": _ICON_SECONDARY,
+                    },
+                ),
+                (),
+            )
+        )
+    ring = Nested2Node(
+        "Stack",
+        (
+            "overlay",
+            {
+                "width": ring_size,
+                "height": ring_size,
+                "alignContent": "center",
+                "flexShrink": 0,
+            },
+        ),
+        tuple(ring_children),
+    )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "layoutWeight": 1,
+                "itemMargin": 1,
+                "justifyContent": "center",
+                "alignItems": "center",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            ring,
+            _bluetooth_text(_percent_text(value), "subtitle", 12, 500, align="center"),
+        ),
+    )
+
+
+def _bluetooth_text(
+    value: str,
+    design: str,
+    font_size: int,
+    font_weight: int,
+    *,
+    align: Literal["start", "center"],
+    flex: bool = False,
+) -> Nested2Node:
+    options: dict[str, Any] = {
+        "width": "matchParent",
+        "fontSize": font_size,
+        "fontWeight": font_weight,
+        "fontColor": _FONT_PRIMARY if font_weight >= 500 else _FONT_SECONDARY,
+        "maxLines": 1,
+        "textAlign": align,
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0},
+    }
+    if flex:
+        options["layoutWeight"] = 1
+    return Nested2Node("Text", (value, design, options), ())
+
+
+def _percent_text(value: int | float) -> str:
+    number = float(value)
+    return f"{int(number)}%" if number.is_integer() else f"{number:g}%"
+
+
+def _expand_app_usage_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "AppUsageOverview is not approved by Advanced Scope."
+        )
+    facts = extract_app_usage_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "AppUsageOverview requires complete trusted single-app duration facts."
+        )
+    parameters = call.values[0]
+    app_icon = parameters.get("appIcon")
+    title = _app_usage_title_row(facts, app_icon, registry)
+    duration = _app_usage_duration_row(facts)
+    updated = _app_usage_text(
+        facts.updated_at,
+        "subtitle",
+        font_size=10,
+        font_weight=400,
+        font_color="#99000000",
+    )
+    if task_spec.size == "2x2":
+        hero = Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "layoutWeight": 1,
+                    "itemMargin": registry.ux_tokens["denseInnerGap"],
+                    "justifyContent": "center",
+                    "alignItems": "start",
+                    "clip": True,
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            (duration,),
+        )
+        return Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "_advancedComponent": "AppUsageOverview",
+                    "width": "matchParent",
+                    "height": "matchParent",
+                    "itemMargin": registry.ux_tokens["denseInnerGap"],
+                    "justifyContent": "spaceBetween",
+                    "alignItems": "start",
+                    "clip": True,
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            (title, hero, updated),
+        )
+    duration_region = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "layoutWeight": 1,
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "center",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (duration,),
+    )
+    hero = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "layoutWeight": 3,
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (title, duration_region),
+    )
+    support = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "layoutWeight": 2,
+                "padding": 8,
+                "borderRadius": 12,
+                "backgroundColor": "#0D000000",
+                "justifyContent": "center",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (updated,),
+    )
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "_advancedComponent": "AppUsageOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": registry.ux_tokens["moduleGap"],
+                "justifyContent": "center",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (hero, support),
+    )
+
+
+def _app_usage_title_row(
+    facts: AppUsageOverviewFacts,
+    app_icon: Any,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    title = _app_usage_text(
+        facts.app_name,
+        "compact-title",
+        font_size=12,
+        font_weight=600,
+        font_color="#E6000000",
+    )
+    children = [_merge_node_options(title, {"layoutWeight": 1})]
+    if isinstance(app_icon, str):
+        size = registry.ux_tokens["titleSourceIconSize"]
+        children.append(
+            Nested2Node(
+                "Image",
+                (
+                    app_icon,
+                    "icon",
+                    {
+                        "width": size,
+                        "height": size,
+                        "borderRadius": 4,
+                        "objectFit": "contain",
+                        "flexShrink": 0,
+                    },
+                ),
+                (),
+            )
+        )
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "height": 20,
+                "itemMargin": 4,
+                "justifyContent": "spaceBetween",
+                "alignItems": "top",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _app_usage_duration_row(facts: AppUsageOverviewFacts) -> Nested2Node:
+    parts = facts.duration
+    children = [
+        _app_usage_text(
+            parts.primary_value,
+            "title",
+            font_size=30,
+            font_weight=700,
+            font_color="#E6000000",
+        ),
+        _app_usage_text(
+            parts.primary_unit,
+            "subtitle",
+            font_size=12,
+            font_weight=400,
+            font_color="#99000000",
+        ),
+    ]
+    if parts.secondary_value is not None:
+        children.extend(
+            (
+                _app_usage_text(
+                    parts.secondary_value,
+                    "title",
+                    font_size=30,
+                    font_weight=700,
+                    font_color="#E6000000",
+                ),
+                _app_usage_text(
+                    parts.secondary_unit or "",
+                    "subtitle",
+                    font_size=12,
+                    font_weight=400,
+                    font_color="#99000000",
+                ),
+            )
+        )
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": 2,
+                "justifyContent": "start",
+                "alignItems": "bottom",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _app_usage_text(
+    value: str,
+    design: str,
+    *,
+    font_size: int,
+    font_weight: int,
+    font_color: str,
+) -> Nested2Node:
+    return Nested2Node(
+        "Text",
+        (
+            value,
+            design,
+            {
+                "fontSize": font_size,
+                "minFontSize": font_size,
+                "fontWeight": font_weight,
+                "fontColor": font_color,
+                "maxLines": 1,
+                "textOverflow": "ellipsis",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (),
+    )
+
+
+def _expand_resource_usage_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    layout_id: str | None,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "ResourceUsageOverview is not approved by Advanced Scope."
+        )
+    facts = extract_resource_usage_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "ResourceUsageOverview requires complete trusted memory usage facts."
+        )
+    parameters = call.values[0]
+    role = str(parameters["role"])
+    icon = parameters.get("icon")
+    show_title = parameters.get("showTitle", True)
+    compact_peer = task_spec.size == "2x2" and layout_id == "PeerPairLayout"
+    ring_size = 44 if compact_peer else 52
+    ring = _resource_usage_ring(
+        facts,
+        ring_size=ring_size,
+        icon=icon,
+        show_center_percent=not isinstance(icon, str),
+    )
+    if role == "peer":
+        children: list[Nested2Node] = []
+        if show_title:
+            children.append(
+                _resource_usage_text(
+                    "内存占用",
+                    "compact-title",
+                    font_size=12,
+                    font_weight=600,
+                )
+            )
+        children.append(ring)
+        if isinstance(icon, str):
+            children.append(
+                _resource_usage_percent_row(
+                    facts,
+                    font_size=14,
+                    width="matchParent",
+                    justify_content="center",
+                )
+            )
+        children.extend(
+            (
+                _resource_usage_text(
+                    facts.available_mem_text,
+                    "subtitle",
+                    font_size=10,
+                    font_weight=400,
+                    fill_width=True,
+                    text_align="center",
+                ),
+                _resource_usage_text(
+                    facts.total_mem_text,
+                    "subtitle",
+                    font_size=10,
+                    font_weight=400,
+                    fill_width=True,
+                    text_align="center",
+                ),
+            )
+        )
+        return Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "_advancedComponent": "ResourceUsageOverview",
+                    "width": "matchParent",
+                    "height": "matchParent",
+                    "itemMargin": 2,
+                    "justifyContent": "center",
+                    "alignItems": "center",
+                    "clip": True,
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            tuple(children),
+        )
+    details = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "layoutWeight": 1,
+                "itemMargin": 4,
+                "justifyContent": "center",
+                "alignItems": "start",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _resource_usage_text(
+                facts.available_mem_text,
+                "body",
+                font_size=14,
+                font_weight=500,
+            ),
+            _resource_usage_text(
+                facts.total_mem_text,
+                "subtitle",
+                font_size=10,
+                font_weight=400,
+            ),
+        ),
+    )
+    content = Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "layoutWeight": 1,
+                "itemMargin": 8,
+                "justifyContent": "start",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (ring, details),
+    )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "ResourceUsageOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": 8,
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _resource_usage_text(
+                "内存占用",
+                "compact-title",
+                font_size=12,
+                font_weight=600,
+            ),
+            content,
+        ),
+    )
+
+
+def _resource_usage_ring(
+    facts: ResourceUsageOverviewFacts,
+    *,
+    ring_size: int,
+    icon: Any,
+    show_center_percent: bool,
+) -> Nested2Node:
+    children: list[Nested2Node] = [
+        Nested2Node(
+            "Progress",
+            (
+                {
+                    "value": facts.usage_percent,
+                    "total": 100,
+                    "type": "ring",
+                    "width": ring_size,
+                    "height": ring_size,
+                    "strokeWidth": 6,
+                    "color": _NORMAL_DATA_COLOR,
+                    "backgroundColor": _TRACK_COLOR,
+                },
+            ),
+            (),
+        )
+    ]
+    if isinstance(icon, str):
+        children.append(
+            Nested2Node(
+                "Image",
+                (
+                    icon,
+                    "icon",
+                    {
+                        "width": 24,
+                        "height": 24,
+                        "objectFit": "contain",
+                        "fillColor": _ICON_SECONDARY,
+                    },
+                ),
+                (),
+            )
+        )
+    elif show_center_percent:
+        children.append(
+            _resource_usage_percent_row(
+                facts,
+                font_size=14,
+                width=ring_size,
+                justify_content="center",
+            )
+        )
+    return Nested2Node(
+        "Stack",
+        (
+            "overlay",
+            {
+                "width": ring_size,
+                "height": ring_size,
+                "alignContent": "center",
+                "flexShrink": 0,
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _resource_usage_percent_row(
+    facts: ResourceUsageOverviewFacts,
+    *,
+    font_size: int,
+    width: int | str | None = None,
+    justify_content: str = "start",
+) -> Nested2Node:
+    number = str(math.floor(float(facts.usage_percent) + 0.5))
+    options: dict[str, Any] = {
+        "itemMargin": 1,
+        "justifyContent": justify_content,
+        "alignItems": "bottom",
+        "constraintSize": {"minWidth": 0, "minHeight": 0},
+    }
+    if width is not None:
+        options["width"] = width
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            options,
+        ),
+        (
+            _resource_usage_text(
+                number,
+                "body",
+                font_size=font_size,
+                font_weight=600,
+            ),
+            _resource_usage_text("%", "subtitle", font_size=10, font_weight=400),
+        ),
+    )
+
+
+def _resource_usage_capacity_row(facts: ResourceUsageOverviewFacts) -> Nested2Node:
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": 2,
+                "justifyContent": "spaceBetween",
+                "alignItems": "center",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _resource_usage_text(
+                facts.available_mem_text,
+                "subtitle",
+                font_size=10,
+                font_weight=400,
+            ),
+            _resource_usage_text(
+                facts.total_mem_text,
+                "subtitle",
+                font_size=10,
+                font_weight=400,
+            ),
+        ),
+    )
+
+
+def _resource_usage_capacity_column(facts: ResourceUsageOverviewFacts) -> Nested2Node:
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "matchParent",
+                "itemMargin": 2,
+                "justifyContent": "center",
+                "alignItems": "center",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            _resource_usage_text(
+                facts.available_mem_text,
+                "subtitle",
+                font_size=10,
+                font_weight=400,
+            ),
+            _resource_usage_text(
+                facts.total_mem_text,
+                "subtitle",
+                font_size=10,
+                font_weight=400,
+            ),
+        ),
+    )
+
+
+def _resource_usage_text(
+    value: str,
+    design: str,
+    *,
+    font_size: int,
+    font_weight: int,
+    fill_width: bool = False,
+    text_align: str | None = None,
+) -> Nested2Node:
+    options: dict[str, Any] = {
+        "fontSize": font_size,
+        "minFontSize": font_size,
+        "fontWeight": font_weight,
+        "maxLines": 1,
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0},
+    }
+    if fill_width:
+        options["width"] = "matchParent"
+    if text_align is not None:
+        options["textAlign"] = text_align
+    return Nested2Node(
+        "Text",
+        (
+            value,
+            design,
+            options,
+        ),
+        (),
+    )
+
+
+def _expand_schedule_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+    layout_id: str | None,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            "ScheduleOverview is not approved by Advanced Scope."
+        )
+    facts = extract_schedule_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "ScheduleOverview requires one coherent trusted title and timeText."
+        )
+    parameters = call.values[0]
+    variant = str(parameters["variant"])
+    if variant == "meetingExpanded" and facts.location is None:
+        variant = "meetingCompact"
+    if variant == "focusContext":
+        approved = set(approved_schedule_focus_action_ids(task_spec))
+        focus_is_closed = schedule_query_requests_focus(task_spec.userQuery) and bool(
+            approved & set(contract.content_action_ids)
+        )
+        if not focus_is_closed:
+            raise TerseDslNested2ConversionError(
+                "ScheduleOverview focusContext requires an approved focus Action."
+            )
+    parameters = _normalize_schedule_optional_asset_params(parameters, facts, contract)
+    _validate_schedule_asset_params(parameters, facts, contract)
+    del layout_id
+    role = str(parameters["role"])
+    is_2x2_support = task_spec.size == "2x2" and role == "support"
+    font_sizes = (14, 12, 10) if is_2x2_support else (20, 14, 10)
+    if task_spec.size == "2x4" and role == "support":
+        font_sizes = (16, 14, 10)
+    show_location = facts.location is not None and (
+        role == "hero"
+        or task_spec.size == "2x4"
+        or "DateOverview" in contract.allowed_business_component_ids
+    )
+    return _schedule_overview_tree(
+        facts,
+        variant=variant,
+        font_sizes=font_sizes,
+        show_location=show_location,
+        source_icon=parameters.get("sourceIcon"),
+        time_icon=parameters.get("timeIcon"),
+        location_icon=parameters.get("locationIcon"),
+        text_on_accent=(
+            registry.require_theme(contract.theme_profile_id).text_role == "text-on-accent"
+        ),
+        registry=registry,
+    )
+
+
+def _validate_schedule_asset_params(
+    parameters: dict[str, Any],
+    facts: ScheduleOverviewFacts,
+    contract: HybridBodyContract,
+) -> None:
+    requirements = {
+        "sourceIcon": {"calendar", "schedule"},
+        "timeIcon": {"time"},
+        "locationIcon": {"location"},
+    }
+    for field, expected_tags in requirements.items():
+        source = parameters.get(field)
+        if source is None:
+            continue
+        actual_tags = set(contract.asset_semantic_tags_by_source.get(str(source), ()))
+        if not actual_tags & expected_tags:
+            raise TerseDslNested2ConversionError(
+                f"ScheduleOverview {field} does not match TaskSpec asset semantics."
+            )
+    if parameters.get("locationIcon") is not None and facts.location is None:
+        raise TerseDslNested2ConversionError(
+            "ScheduleOverview locationIcon requires a trusted location."
+        )
+
+
+def _normalize_schedule_optional_asset_params(
+    parameters: dict[str, Any],
+    facts: ScheduleOverviewFacts,
+    contract: HybridBodyContract,
+) -> dict[str, Any]:
+    """Drop optional detail icons when the model reuses an unrelated approved asset."""
+    normalized = dict(parameters)
+    for field, expected_tags in (
+        ("timeIcon", {"time"}),
+        ("locationIcon", {"location"}),
+    ):
+        source = normalized.get(field)
+        if source is None:
+            continue
+        actual_tags = set(contract.asset_semantic_tags_by_source.get(str(source), ()))
+        if not actual_tags & expected_tags:
+            normalized.pop(field, None)
+    if facts.location is None:
+        normalized.pop("locationIcon", None)
+    return normalized
+
+
+def _schedule_overview_tree(
+    facts: ScheduleOverviewFacts,
+    *,
+    variant: str,
+    font_sizes: tuple[int, int, int],
+    show_location: bool,
+    source_icon: Any,
+    time_icon: Any,
+    location_icon: Any,
+    text_on_accent: bool,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    primary_color = "#FFFFFFFF" if text_on_accent else "#E6000000"
+    secondary_color = "#BFFFFFFF" if text_on_accent else "#99000000"
+    metadata_color = "#99FFFFFF" if text_on_accent else "#66000000"
+    accent_color = "#FFFF8066" if text_on_accent else "#FFFF3B30"
+    rail_color = "#52FFFFFF" if text_on_accent else "#1F000000"
+    text_column_children = [
+        _schedule_text(
+            facts.title,
+            "title",
+            font_size=font_sizes[0],
+            font_weight=700,
+            font_color=primary_color,
+        ),
+        _schedule_metadata(
+            facts.time_text,
+            time_icon,
+            font_size=font_sizes[1],
+            font_color=secondary_color,
+        ),
+    ]
+    if show_location and facts.location is not None:
+        text_column_children.append(
+            _schedule_metadata(
+                facts.location,
+                location_icon,
+                font_size=font_sizes[2],
+                font_color=metadata_color,
+            )
+        )
+    text_column = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": "100%",
+                "height": "100%",
+                "layoutWeight": 1,
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(text_column_children),
+    )
+    body = Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "100%",
+                "height": "100%",
+                "layoutWeight": 1,
+                "itemMargin": registry.ux_tokens["moduleGap"],
+                "justifyContent": "start",
+                "alignItems": "center",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (_schedule_rail(accent_color, rail_color), text_column),
+    )
+    children: list[Nested2Node] = []
+    if variant == "nextEvent" or isinstance(source_icon, str):
+        children.append(
+            _schedule_header(source_icon, primary_color, registry)
+        )
+    else:
+        return _merge_node_options(body, {"_advancedComponent": "ScheduleOverview"})
+    children.append(body)
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "ScheduleOverview",
+                "width": "100%",
+                "height": "100%",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _schedule_header(
+    source_icon: Any,
+    primary_color: str,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    label = _schedule_text(
+        "下一个日程",
+        "subtitle",
+        font_size=12,
+        font_weight=400,
+        font_color=primary_color,
+    )
+    children: list[Nested2Node] = [
+        _merge_node_options(label, {"layoutWeight": 1})
+    ]
+    if isinstance(source_icon, str):
+        size = registry.ux_tokens["titleSourceIconSize"]
+        children.append(
+            Nested2Node(
+                "Image",
+                (
+                    source_icon,
+                    "icon",
+                    {"width": size, "height": size, "objectFit": "contain"},
+                ),
+                (),
+            )
+        )
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "100%",
+                "height": 20,
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "top",
+                "clip": True,
+            },
+        ),
+        tuple(children),
+    )
+
+
+def _schedule_rail(accent_color: str, rail_color: str) -> Nested2Node:
+    invisible_fill = Nested2Node(
+        "Divider",
+        ({"width": 0, "height": 0, "strokeWidth": 0, "color": "#00FFFFFF"},),
+        (),
+    )
+    dot = Nested2Node(
+        "Stack",
+        (
+            "overlay",
+            {
+                "width": 8,
+                "height": 8,
+                "borderRadius": 4,
+                "borderWidth": 2,
+                "borderColor": accent_color,
+                "backgroundColor": "#00FFFFFF",
+                "alignContent": "center",
+                "flexShrink": 0,
+            },
+        ),
+        (invisible_fill,),
+    )
+    divider = Nested2Node(
+        "Divider",
+        (
+            {
+                "width": 1,
+                "height": "100%",
+                "layoutWeight": 1,
+                "strokeWidth": 1,
+                "vertical": True,
+                "color": rail_color,
+            },
+        ),
+        (),
+    )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "width": 8,
+                "height": "100%",
+                "itemMargin": 2,
+                "justifyContent": "start",
+                "alignItems": "center",
+                "flexShrink": 0,
+                "clip": True,
+            },
+        ),
+        (dot, divider),
+    )
+
+
+def _schedule_metadata(
+    value: str,
+    icon: Any,
+    *,
+    font_size: int,
+    font_color: str,
+) -> Nested2Node:
+    text = _schedule_text(
+        value,
+        "subtitle",
+        font_size=font_size,
+        font_weight=400,
+        font_color=font_color,
+    )
+    if not isinstance(icon, str):
+        return text
+    image = Nested2Node(
+        "Image",
+        (icon, "icon", {"width": 12, "height": 12, "objectFit": "contain"}),
+        (),
+    )
+    return Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "100%",
+                "itemMargin": 4,
+                "justifyContent": "start",
+                "alignItems": "top",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (image, _merge_node_options(text, {"layoutWeight": 1})),
+    )
+
+
+def _schedule_text(
+    value: str,
+    design: str,
+    *,
+    font_size: int,
+    font_weight: int,
+    font_color: str,
+) -> Nested2Node:
+    return Nested2Node(
+        "Text",
+        (
+            value,
+            design,
+            {
+                "width": "100%",
+                "fontSize": font_size,
+                "minFontSize": font_size,
+                "fontWeight": font_weight,
+                "fontColor": font_color,
+                "maxLines": 1,
+                "textOverflow": "ellipsis",
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (),
+    )
+
+
+def _expand_weather_overview_call(
+    call: ParsedCall,
+    *,
+    task_spec: TaskSpec,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+    layout_id: str | None,
+) -> Nested2Node:
+    if call.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError("WeatherOverview is not approved by Advanced Scope.")
+    facts = extract_weather_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        raise TerseDslNested2ConversionError(
+            "WeatherOverview requires five complete trusted string facts."
+        )
+    parameters = call.values[0]
+    role = str(parameters["role"])
+    compact = role != "hero" or (
+        task_spec.size == "2x2"
+        and layout_id in {"HeroSupportLayout", "HeroSupportActionLayout"}
+    )
+    if compact:
+        icon_size = 24
+    elif task_spec.size == "2x2":
+        icon_size = 32
+    else:
+        icon_size = registry.ux_tokens["weatherIconCompactSize"]
+    temperature_size = 30 if role in {"support", "peer"} else 38
+    if task_spec.size == "2x2" and compact:
+        temperature_size = 32
+    primary_size = 12 if compact else 14
+    range_size = 10 if compact else 12
+    condition_icon = str(parameters["conditionIcon"])
+    condition_icon_options: dict[str, Any] = {
+        "width": icon_size,
+        "height": icon_size,
+        "objectFit": "contain",
+        "flexShrink": 0,
+    }
+    if _weather_icon_is_sun(condition_icon, contract):
+        condition_icon_options["fillColor"] = _SUNNY_WEATHER_ICON_COLOR
+    else:
+        icon_tags = set(contract.asset_semantic_tags_by_source.get(condition_icon, ()))
+        if _weather_icon_is_multicolor(condition_icon):
+            condition_icon_options["_preserveOriginalColor"] = True
+        elif icon_tags & {"water", "rain", "drop", "cloud", "storm", "snow"}:
+            condition_icon_options["fillColor"] = "#FFFFFFFF"
+        else:
+            condition_icon_options["_preserveOriginalColor"] = True
+    title = Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "height": icon_size,
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "spaceBetween",
+                "alignItems": "top",
+                "clip": True,
+            },
+        ),
+        (
+            _weather_text(
+                facts.city,
+                "compact-title",
+                font_size=12,
+                font_weight=600,
+                layout_weight=1,
+            ),
+            Nested2Node(
+                "Image",
+                (
+                    condition_icon,
+                    "icon",
+                    condition_icon_options,
+                ),
+                (),
+            ),
+        ),
+    )
+    primary = Nested2Node(
+        "Row",
+        (
+            "between",
+            {
+                "width": "matchParent",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "center",
+            },
+        ),
+        (
+            _weather_text(facts.condition, "body", font_size=primary_size, font_weight=500),
+            _weather_text(facts.air_quality, "body", font_size=primary_size, font_weight=500),
+        ),
+    )
+    if task_spec.size == "2x2" and layout_id == "SingleFocusLayout" and role == "hero":
+        temperature = _weather_text(
+            facts.temperature,
+            "title",
+            font_size=temperature_size,
+            font_weight=800,
+            min_font_size=temperature_size,
+        )
+        range_text = _weather_text(
+            facts.temperature_range,
+            "subtitle",
+            font_size=range_size,
+            font_weight=400,
+        )
+        bottom = Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "width": "matchParent",
+                    "itemMargin": 2,
+                    "alignItems": "start",
+                },
+            ),
+            (primary, range_text),
+        )
+        return Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "_advancedComponent": "WeatherOverview",
+                    "width": "matchParent",
+                    "height": "matchParent",
+                    "itemMargin": 2,
+                    "justifyContent": "spaceBetween",
+                    "alignItems": "start",
+                    "clip": True,
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            (title, temperature, bottom),
+        )
+    if task_spec.size == "2x4" and layout_id == "SingleFocusLayout" and role == "hero":
+        top = Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "width": "matchParent",
+                    "itemMargin": registry.ux_tokens["sectionGap"],
+                    "alignItems": "start",
+                },
+            ),
+            (
+                title,
+                _weather_text(
+                    facts.temperature,
+                    "title",
+                    font_size=temperature_size,
+                    font_weight=800,
+                    min_font_size=temperature_size,
+                ),
+            ),
+        )
+        wide_primary = Nested2Node(
+            "Row",
+            (
+                "between",
+                {
+                    "itemMargin": registry.ux_tokens["denseInnerGap"],
+                    "justifyContent": "start",
+                    "alignItems": "center",
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            primary.children,
+        )
+        bottom = Nested2Node(
+            "Row",
+            (
+                "between",
+                {
+                    "width": "matchParent",
+                    "itemMargin": registry.ux_tokens["moduleGap"],
+                    "justifyContent": "spaceBetween",
+                    "alignItems": "end",
+                },
+            ),
+            (
+                wide_primary,
+                _weather_text(
+                    facts.temperature_range,
+                    "subtitle",
+                    font_size=range_size,
+                    font_weight=400,
+                ),
+            ),
+        )
+        return Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "_advancedComponent": "WeatherOverview",
+                    "width": "matchParent",
+                    "height": "matchParent",
+                    "justifyContent": "spaceBetween",
+                    "alignItems": "start",
+                    "clip": True,
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            (top, bottom),
+        )
+    return Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "_advancedComponent": "WeatherOverview",
+                "width": "matchParent",
+                "height": "matchParent",
+                "itemMargin": 2 if compact else registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+                "constraintSize": {"minWidth": 0, "minHeight": 0},
+            },
+        ),
+        (
+            title,
+            _weather_text(
+                facts.temperature,
+                "title",
+                font_size=temperature_size,
+                font_weight=800,
+                min_font_size=temperature_size,
+            ),
+            primary,
+            _weather_text(
+                facts.temperature_range,
+                "subtitle",
+                font_size=range_size,
+                font_weight=400,
+            ),
+        ),
+    )
+
+
+def _weather_icon_is_sun(
+    condition_icon: str,
+    contract: HybridBodyContract,
+) -> bool:
+    icon_tags = set(contract.asset_semantic_tags_by_source.get(condition_icon, ()))
+    return bool(icon_tags & {"sun", "sunny"})
+
+
+def _weather_icon_is_multicolor(condition_icon: str) -> bool:
+    """Recognize the bundled full-color weather artwork family.
+
+    These SVGs contain several gradients but may still carry a cloud scene tag.
+    Applying a monochrome fill to them turns the rendered artwork into a solid
+    rectangle on device.
+    """
+    filename = condition_icon.rsplit("/", 1)[-1].casefold()
+    return filename.startswith("icon_weather") or filename.startswith("weather_icon")
+
+
+def _weather_text(
+    value: str,
+    design: str,
+    *,
+    font_size: int,
+    font_weight: int,
+    min_font_size: int | None = None,
+    layout_weight: int | None = None,
+) -> Nested2Node:
+    options: dict[str, Any] = {
+        "fontSize": font_size,
+        "fontWeight": font_weight,
+        "maxLines": 1,
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0},
+    }
+    if min_font_size is not None:
+        options["minFontSize"] = min_font_size
+    if layout_weight is not None:
+        options["layoutWeight"] = layout_weight
+    return Nested2Node("Text", (value, design, options), ())
 
 
 def _validate_template_params(
@@ -833,7 +4376,8 @@ def _compile_card_shell(
             }
         )
     if theme.root_component == "Stack" and "alignContent" in root_options:
-        root_options["alignItems"] = root_options.pop("alignContent")
+        alignment = root_options.pop("alignContent")
+        root_options["alignItems"] = _column_align_items(alignment)
     root_options.pop("width", None)
     root_options.pop("height", None)
     root_options["_id"] = "root"
@@ -930,6 +4474,8 @@ def _compile_ux_layout_shell(
     content: Nested2Node,
     contract: HybridBodyContract,
     registry: CardPlanRegistry,
+    *,
+    card_tap_action: _CardTapAction | None = None,
 ) -> Nested2Node:
     theme = registry.require_theme(contract.theme_profile_id)
     root_options = _normalize_theme_styles(theme.root_styles)
@@ -941,9 +4487,12 @@ def _compile_ux_layout_shell(
         }
     )
     if "alignContent" in root_options:
-        root_options["alignItems"] = root_options.pop("alignContent")
+        alignment = root_options.pop("alignContent")
+        root_options["alignItems"] = _column_align_items(alignment)
     root_options.pop("width", None)
     root_options.pop("height", None)
+    if card_tap_action is not None:
+        root_options["onClick"] = list(card_tap_action.handlers)
     root_options["_id"] = "root"
     return Nested2Node("Column", ("card", root_options), (content,))
 
@@ -1177,14 +4726,28 @@ def _reclaim_optional_chrome_for_content(
     return normalized
 
 
-def _apply_theme_text_role(node: Nested2Node, text_role: str) -> Nested2Node:
+def _apply_theme_text_role(
+    node: Nested2Node,
+    text_role: str,
+    preserve_original: bool = False,
+) -> Nested2Node:
     """Apply theme foreground semantics to standard Text without overriding alerts."""
-    children = tuple(_apply_theme_text_role(child, text_role) for child in node.children)
-    if node.component_type != "Text" or text_role != "text-on-accent":
+    preserve_here = preserve_original or (
+        node.component_type == "Stack"
+        and any(
+            isinstance(value, dict) and bool(value.get("onClick")) for value in node.values
+        )
+    )
+    children = tuple(
+        _apply_theme_text_role(child, text_role, preserve_here) for child in node.children
+    )
+    if (
+        node.component_type != "Text"
+        or text_role != "text-on-accent"
+        or preserve_here
+    ):
         return Nested2Node(node.component_type, node.values, children)
     values = list(node.values)
-    if any(isinstance(value, dict) and "fontColor" in value for value in values[1:]):
-        return Nested2Node(node.component_type, tuple(values), children)
     design = values[1] if len(values) > 1 and isinstance(values[1], str) else None
     if design in {"warning", "success"}:
         return Nested2Node(node.component_type, tuple(values), children)
@@ -1194,6 +4757,31 @@ def _apply_theme_text_role(node: Nested2Node, text_role: str) -> Nested2Node:
         values[-1] = options
     else:
         values.append({"fontColor": "#FFFFFFFF"})
+    return Nested2Node(node.component_type, tuple(values), children)
+
+
+def _apply_theme_icon_role(
+    node: Nested2Node,
+    text_role: str,
+    preserve_original: bool = False,
+) -> Nested2Node:
+    """Tint monochrome title/content icons on strong gradients while preserving artwork."""
+    preserve_here = preserve_original or any(
+        isinstance(value, dict) and value.get("_preserveOriginalColor") is True
+        for value in node.values
+    )
+    children = tuple(
+        _apply_theme_icon_role(child, text_role, preserve_here) for child in node.children
+    )
+    if node.component_type != "Image" or text_role != "text-on-accent" or preserve_here:
+        return Nested2Node(node.component_type, node.values, children)
+    values = list(node.values)
+    if values and isinstance(values[-1], dict):
+        options = dict(values[-1])
+        options.setdefault("fillColor", "#FFFFFFFF")
+        values[-1] = options
+    else:
+        values.append({"fillColor": "#FFFFFFFF"})
     return Nested2Node(node.component_type, tuple(values), children)
 
 
@@ -1266,6 +4854,9 @@ def _validate_raw_components(node: ParsedCall, contract: HybridBodyContract) -> 
     if node.name in _UX_ACTION_COMPONENTS:
         _validate_raw_ux_action(node, contract)
         return
+    if node.name in _UX_DIRECT_BUSINESS_COMPONENTS:
+        _validate_raw_ux_business_component(node, contract)
+        return
     if node.name in _CONTAINERS and not node.children:
         raise TerseDslNested2ConversionError(
             f"Raw container must contain at least one child: {node.name}"
@@ -1292,6 +4883,206 @@ def _validate_raw_components(node: ParsedCall, contract: HybridBodyContract) -> 
                     raise TerseDslNested2ConversionError(f"Raw number is not trusted: {item}")
     for child in node.children:
         _validate_raw_components(child, contract)
+
+
+def _validate_raw_ux_business_component(
+    node: ParsedCall,
+    contract: HybridBodyContract,
+) -> None:
+    if node.name not in contract.allowed_business_component_ids:
+        raise TerseDslNested2ConversionError(
+            f"UX Business Component is not approved: {node.name}"
+        )
+    if node.children or len(node.values) != 1 or not isinstance(node.values[0], dict):
+        raise TerseDslNested2ConversionError(
+            f"{node.name} must be one leaf configuration call."
+        )
+    parameters = node.values[0]
+    required_fields = {"variant", "role"}
+    optional_fields: set[str] = set()
+    if node.name == "WeatherOverview":
+        required_fields.add("conditionIcon")
+    elif node.name == "ActivityOverview":
+        optional_fields = {"stepsIcon", "caloriesIcon", "distanceIcon"}
+    elif node.name == "WorkoutOverview":
+        optional_fields = {"sourceIcon", "caloriesIcon"}
+    elif node.name == "HeartRateOverview":
+        optional_fields = {"sourceIcon"}
+    elif node.name == "SleepOverview":
+        optional_fields = {"sourceIcon"}
+    elif node.name == "BatteryOverview":
+        optional_fields = {"batteryIcon", "showTitle"}
+    elif node.name == "BluetoothDeviceOverview":
+        optional_fields = {"sourceIcon", "leftEarIcon", "rightEarIcon"}
+    elif node.name == "ScheduleOverview":
+        optional_fields = {"sourceIcon", "timeIcon", "locationIcon"}
+    elif node.name == "ResourceUsageOverview":
+        optional_fields = {"icon", "showTitle"}
+    elif node.name == "AppUsageOverview":
+        optional_fields = {"appIcon"}
+    if not required_fields.issubset(parameters) or set(parameters) - (
+        required_fields | optional_fields
+    ):
+        raise TerseDslNested2ConversionError(
+            f"{node.name} configuration fields are invalid."
+        )
+    variants = {
+        "ActivityOverview": {"steps", "dailySummary"},
+        "BatteryOverview": {"normal", "charging", "low"},
+        "BluetoothDeviceOverview": {"earbuds"},
+        "DateOverview": {"compactDate", "dateHero"},
+        "HeartRateOverview": {"average"},
+        "SleepOverview": {"duration", "insufficient", "schedule"},
+        "ScheduleOverview": {
+            "nextEvent",
+            "meetingCompact",
+            "meetingExpanded",
+            "focusContext",
+        },
+        "ResourceUsageOverview": {"memory"},
+        "AppUsageOverview": {"singleApp"},
+        "WeatherOverview": {"current", "commute"},
+        "WorkoutOverview": {"latest", "countdown"},
+    }[node.name]
+    roles = {
+        "ActivityOverview": {"hero", "support"},
+        "BatteryOverview": {"hero", "support", "peer"},
+        "BluetoothDeviceOverview": {"hero", "support", "peer"},
+        "DateOverview": {"hero", "support"},
+        "HeartRateOverview": {"hero", "support"},
+        "SleepOverview": {"hero", "support"},
+        "ScheduleOverview": {"hero", "support"},
+        "ResourceUsageOverview": {"hero", "peer"},
+        "AppUsageOverview": {"hero"},
+        "WeatherOverview": {"hero", "support", "peer"},
+        "WorkoutOverview": {"hero"},
+    }[node.name]
+    if parameters["variant"] not in variants:
+        raise TerseDslNested2ConversionError(f"{node.name} variant is not supported.")
+    if parameters["role"] not in roles:
+        raise TerseDslNested2ConversionError(f"{node.name} role is not supported.")
+    show_title = parameters.get("showTitle")
+    if show_title is not None and not isinstance(show_title, bool):
+        raise TerseDslNested2ConversionError(
+            f"{node.name} showTitle must be a Boolean."
+        )
+    if node.name == "WeatherOverview":
+        condition_icon = parameters["conditionIcon"]
+        if (
+            not isinstance(condition_icon, str)
+            or condition_icon not in contract.allowed_asset_sources
+        ):
+            raise TerseDslNested2ConversionError(
+                "WeatherOverview conditionIcon is not an approved second-step asset input."
+            )
+    if node.name == "ActivityOverview":
+        _validate_optional_semantic_assets(
+            node.name,
+            parameters,
+            {
+                "stepsIcon": {"activity", "steps", "sport"},
+                "caloriesIcon": {"calories", "energy"},
+                "distanceIcon": {"distance", "route"},
+            },
+            contract,
+        )
+    if node.name == "WorkoutOverview":
+        _validate_optional_semantic_assets(
+            node.name,
+            parameters,
+            {
+                "sourceIcon": {"workout", "sport", "run"},
+                "caloriesIcon": {"calories", "energy"},
+            },
+            contract,
+        )
+    if node.name == "HeartRateOverview":
+        _validate_optional_semantic_assets(
+            node.name,
+            parameters,
+            {"sourceIcon": {"heart", "heart-rate", "pulse"}},
+            contract,
+        )
+    if node.name == "SleepOverview":
+        _validate_optional_semantic_assets(
+            node.name,
+            parameters,
+            {"sourceIcon": {"sleep", "moon", "alarm"}},
+            contract,
+        )
+    if node.name == "ScheduleOverview":
+        for field in optional_fields:
+            source = parameters.get(field)
+            if source is not None and (
+                not isinstance(source, str) or source not in contract.allowed_asset_sources
+            ):
+                raise TerseDslNested2ConversionError(
+                    f"ScheduleOverview {field} is not an approved TaskSpec asset."
+                )
+    if node.name == "BatteryOverview":
+        source = parameters.get("batteryIcon")
+        if source is not None and (
+            not isinstance(source, str) or source not in contract.allowed_asset_sources
+        ):
+            raise TerseDslNested2ConversionError(
+                "BatteryOverview batteryIcon is not an approved TaskSpec asset."
+            )
+    if node.name == "BluetoothDeviceOverview":
+        _validate_optional_semantic_assets(
+            node.name,
+            parameters,
+            {
+                "sourceIcon": {"audio", "earphone", "product"},
+                "leftEarIcon": {"audio", "earphone", "product"},
+                "rightEarIcon": {"audio", "earphone", "product"},
+            },
+            contract,
+        )
+    if node.name == "ResourceUsageOverview":
+        source = parameters.get("icon")
+        if source is not None:
+            if not isinstance(source, str) or source not in contract.allowed_asset_sources:
+                raise TerseDslNested2ConversionError(
+                    "ResourceUsageOverview icon is not an approved TaskSpec asset."
+                )
+            tags = set(contract.asset_semantic_tags_by_source.get(source, ()))
+            if not tags & {"memory", "resource"}:
+                raise TerseDslNested2ConversionError(
+                    "ResourceUsageOverview icon does not match memory/resource semantics."
+                )
+    if node.name == "AppUsageOverview":
+        source = parameters.get("appIcon")
+        if source is not None:
+            if not isinstance(source, str) or source not in contract.allowed_asset_sources:
+                raise TerseDslNested2ConversionError(
+                    "AppUsageOverview appIcon is not an approved TaskSpec asset."
+                )
+            tags = set(contract.asset_semantic_tags_by_source.get(source, ()))
+            if not tags & {"app", "application"}:
+                raise TerseDslNested2ConversionError(
+                    "AppUsageOverview appIcon does not match app semantics."
+                )
+
+
+def _validate_optional_semantic_assets(
+    component_id: str,
+    parameters: dict[str, Any],
+    fields: dict[str, set[str]],
+    contract: HybridBodyContract,
+) -> None:
+    for field, expected_tags in fields.items():
+        source = parameters.get(field)
+        if source is None:
+            continue
+        if not isinstance(source, str) or source not in contract.allowed_asset_sources:
+            raise TerseDslNested2ConversionError(
+                f"{component_id} {field} is not an approved TaskSpec asset."
+            )
+        actual_tags = set(contract.asset_semantic_tags_by_source.get(source, ()))
+        if not actual_tags & expected_tags:
+            raise TerseDslNested2ConversionError(
+                f"{component_id} {field} does not match its business semantics."
+            )
 
 
 def _validate_raw_ux_action(node: ParsedCall, contract: HybridBodyContract) -> None:
@@ -1355,6 +5146,50 @@ def _validate_ux_layout_root(
         )
     if embedded_actions:
         _validate_ux_layout_action_slot(node, layout, size, action_children)
+    _validate_ux_business_component_placement(
+        node.name,
+        content_children,
+        size=size,
+        contract=contract,
+    )
+    if action_children and len(content_children) == 1:
+        only_child = content_children[0]
+        if only_child.name == "DateOverview":
+            raise TerseDslNested2ConversionError(
+                "Single-business DateOverview cannot consume an Action."
+            )
+    direct_names = {
+        child.name
+        for child in content_children
+        if child.kind == "component"
+    }
+    battery_owned = "BatteryOverview" in direct_names and not direct_names & {
+        "ResourceUsageOverview",
+        "AppUsageOverview",
+    }
+    if battery_owned and size == "2x2" and any(
+        child.name != "IconAction" for child in action_children
+    ):
+        raise TerseDslNested2ConversionError(
+            "BatteryOverview 2x2 only accepts an IconAction."
+        )
+    bluetooth_owned = direct_names == {"BluetoothDeviceOverview"}
+    if bluetooth_owned and size == "2x2" and any(
+        child.name != "PillAction" for child in action_children
+    ):
+        raise TerseDslNested2ConversionError(
+            "BluetoothDeviceOverview 2x2 only accepts one PillAction."
+        )
+    if bluetooth_owned and size == "2x4" and node.name == "ActionMatrixLayout":
+        if any(child.name != "ActionTile" for child in action_children):
+            raise TerseDslNested2ConversionError(
+                "BluetoothDeviceOverview ActionMatrixLayout requires ActionTile entries."
+            )
+    phone_earphone = direct_names == {"BatteryOverview", "BluetoothDeviceOverview"}
+    if phone_earphone and action_children:
+        raise TerseDslNested2ConversionError(
+            "Phone and earphone overview does not accept media or power Actions."
+        )
 
     def reject_nested_layout(current: ParsedCall) -> None:
         for child in current.children:
@@ -1363,6 +5198,693 @@ def _validate_ux_layout_root(
             reject_nested_layout(child)
 
     reject_nested_layout(node)
+
+
+def _validate_ux_business_component_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+    contract: HybridBodyContract,
+) -> None:
+    _validate_activity_overview_placement(
+        layout_id,
+        content,
+        size=size,
+        contract=contract,
+    )
+    _validate_workout_overview_placement(layout_id, content)
+    _validate_heart_rate_overview_placement(layout_id, content, contract=contract)
+    _validate_sleep_overview_placement(
+        layout_id,
+        content,
+        size=size,
+        contract=contract,
+    )
+    _validate_weather_overview_placement(layout_id, content, size=size)
+    _validate_date_overview_placement(layout_id, content, size=size)
+    _validate_schedule_overview_placement(layout_id, content, size=size)
+    _validate_battery_overview_placement(layout_id, content, size=size)
+    _validate_bluetooth_device_overview_placement(layout_id, content, size=size)
+    _validate_resource_usage_overview_placement(layout_id, content, size=size)
+    _validate_app_usage_overview_placement(layout_id, content, size=size)
+
+
+def _validate_activity_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+    contract: HybridBodyContract,
+) -> None:
+    indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "ActivityOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "ActivityOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "ActivityOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError("ActivityOverview must appear exactly once.")
+    index = indexes[0]
+    role = content[index].values[0].get("role")
+    business_ids = set(contract.allowed_business_component_ids)
+    if business_ids == {"ActivityOverview"} and len(content) == 1:
+        if layout_id != "SingleFocusLayout" or index != 0 or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "Single ActivityOverview requires one leading hero in SingleFocusLayout."
+            )
+        return
+    if (
+        business_ids == {"ActivityOverview"}
+        and len(content) == 2
+        and content[1].kind == "template"
+    ):
+        if layout_id != "HeroSupportLayout" or index != 0 or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "ActivityOverview must lead its approved Sleep support composition."
+            )
+        return
+    if business_ids == {"ActivityOverview", "WorkoutOverview"}:
+        if layout_id not in {"HeroSupportLayout", "HeroSupportActionLayout"}:
+            raise TerseDslNested2ConversionError(
+                "Workout plus ActivityOverview requires a HeroSupport layout."
+            )
+        if index != 1 or role != "support":
+            raise TerseDslNested2ConversionError(
+                "ActivityOverview must be the support after WorkoutOverview."
+            )
+        return
+    if business_ids == {"ActivityOverview", "SleepOverview"}:
+        allowed_layouts = {"HeroSupportLayout"}
+        if size == "2x4":
+            allowed_layouts.add("SequentialSummaryLayout")
+        expected_role = "hero" if index == 0 else "support"
+        if layout_id not in allowed_layouts or role != expected_role:
+            raise TerseDslNested2ConversionError(
+                "ActivityOverview role must match its Sleep composition position."
+            )
+        if size == "2x2" and index != 0:
+            raise TerseDslNested2ConversionError(
+                "ActivityOverview must lead SleepOverview on 2x2."
+            )
+        return
+    if business_ids == {"ActivityOverview", "HeartRateOverview"}:
+        if layout_id != "HeroSupportLayout" or index != 0 or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "ActivityOverview must lead its approved health support composition."
+            )
+        return
+    raise TerseDslNested2ConversionError(
+        "ActivityOverview multi-business composition is not approved."
+    )
+
+
+def _validate_workout_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+) -> None:
+    indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "WorkoutOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "WorkoutOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "WorkoutOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError("WorkoutOverview must appear exactly once.")
+    index = indexes[0]
+    role = content[index].values[0].get("role")
+    if index != 0 or role != "hero":
+        raise TerseDslNested2ConversionError(
+            "WorkoutOverview must be the leading hero business."
+        )
+    if len(content) == 1:
+        if layout_id not in {"SingleFocusLayout", "HeroActionLayout"}:
+            raise TerseDslNested2ConversionError(
+                "Single WorkoutOverview requires SingleFocus or HeroAction layout."
+            )
+        return
+    if len(content) != 2 or content[1].name != "ActivityOverview":
+        raise TerseDslNested2ConversionError(
+            "WorkoutOverview only supports ActivityOverview as its companion."
+        )
+    if layout_id not in {"HeroSupportLayout", "HeroSupportActionLayout"}:
+        raise TerseDslNested2ConversionError(
+            "Workout plus ActivityOverview requires a HeroSupport layout."
+        )
+
+
+def _validate_heart_rate_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    contract: HybridBodyContract,
+) -> None:
+    indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "HeartRateOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "HeartRateOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "HeartRateOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError("HeartRateOverview must appear exactly once.")
+    index = indexes[0]
+    role = content[index].values[0].get("role")
+    business_ids = set(contract.allowed_business_component_ids)
+    if business_ids == {"HeartRateOverview"}:
+        if layout_id != "SingleFocusLayout" or index != 0 or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "Single HeartRateOverview requires one leading hero."
+            )
+        return
+    if business_ids != {"ActivityOverview", "HeartRateOverview"}:
+        raise TerseDslNested2ConversionError(
+            "HeartRateOverview is only an approved support for ActivityOverview."
+        )
+    if layout_id != "HeroSupportLayout" or index != 1 or role != "support":
+        raise TerseDslNested2ConversionError(
+            "HeartRateOverview must be the fixed support after ActivityOverview."
+        )
+
+
+def _validate_sleep_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+    contract: HybridBodyContract,
+) -> None:
+    indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "SleepOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "SleepOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "SleepOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError("SleepOverview must appear exactly once.")
+    index = indexes[0]
+    parameters = content[index].values[0]
+    role = parameters.get("role")
+    variant = parameters.get("variant")
+    business_ids = set(contract.allowed_business_component_ids)
+    if business_ids == {"SleepOverview"} and len(content) == 1:
+        if layout_id not in {"SingleFocusLayout", "HeroActionLayout"}:
+            raise TerseDslNested2ConversionError(
+                "Single SleepOverview requires SingleFocus or HeroAction layout."
+            )
+        if index != 0 or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "Single SleepOverview must be the leading hero business."
+            )
+        if size == "2x2" and variant == "schedule":
+            raise TerseDslNested2ConversionError(
+                "SleepOverview schedule is only available on 2x4."
+            )
+        return
+    allowed_layouts = {"HeroSupportLayout"}
+    if size == "2x4":
+        allowed_layouts.add("SequentialSummaryLayout")
+    expected_role = "hero" if index == 0 else "support"
+    if layout_id not in allowed_layouts or role != expected_role:
+        raise TerseDslNested2ConversionError(
+            "SleepOverview role must match its Activity composition position."
+        )
+    if size == "2x2" and index != 1:
+        raise TerseDslNested2ConversionError(
+            "SleepOverview must be the compact support after ActivityOverview on 2x2."
+        )
+
+
+def _validate_weather_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+) -> None:
+    weather_indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "WeatherOverview"
+    )
+    if not weather_indexes:
+        if any(
+            call.name == "WeatherOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "WeatherOverview must be a direct layout child."
+            )
+        return
+    if len(weather_indexes) != 1:
+        raise TerseDslNested2ConversionError("WeatherOverview must appear exactly once.")
+    weather_index = weather_indexes[0]
+    weather = content[weather_index]
+    if weather.kind != "component" or not weather.values or not isinstance(weather.values[0], dict):
+        raise TerseDslNested2ConversionError("WeatherOverview must be a direct layout child.")
+    role = weather.values[0].get("role")
+    if layout_id == "WeatherNowForecastLayout":
+        raise TerseDslNested2ConversionError(
+            "WeatherNowForecastLayout requires a forecast business component."
+        )
+    if size == "2x2":
+        if weather_index != 0 or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "WeatherOverview must be the leading hero business on 2x2."
+            )
+        if len(content) > 1 and layout_id not in {
+            "HeroSupportLayout",
+            "HeroSupportActionLayout",
+        }:
+            raise TerseDslNested2ConversionError(
+                "WeatherOverview multi-business 2x2 requires a HeroSupport layout."
+            )
+        return
+    expected_role = "hero"
+    if layout_id in {"HeroSupportLayout", "HeroSupportActionLayout"} and weather_index == 1:
+        expected_role = "support"
+    elif layout_id == "EqualItemsLayout":
+        expected_role = "peer"
+    if role != expected_role:
+        raise TerseDslNested2ConversionError(
+            f"WeatherOverview role does not match {layout_id}: expected {expected_role}."
+        )
+
+
+def _validate_date_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+) -> None:
+    date_indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "DateOverview"
+    )
+    if not date_indexes:
+        if any(
+            call.name == "DateOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "DateOverview must be a direct layout child."
+            )
+        return
+    if len(date_indexes) != 1:
+        raise TerseDslNested2ConversionError("DateOverview must appear exactly once.")
+    date_index = date_indexes[0]
+    date = content[date_index]
+    if date.kind != "component" or not date.values or not isinstance(date.values[0], dict):
+        raise TerseDslNested2ConversionError("DateOverview must be a direct layout child.")
+    variant = date.values[0].get("variant")
+    role = date.values[0].get("role")
+    if len(content) == 1:
+        if layout_id != "SingleFocusLayout" or (variant, role) != ("dateHero", "hero"):
+            raise TerseDslNested2ConversionError(
+                "Single-business DateOverview requires SingleFocus dateHero+hero."
+            )
+        return
+    if layout_id not in {"HeroSupportLayout", "HeroSupportActionLayout"}:
+        raise TerseDslNested2ConversionError(
+            "Multi-business DateOverview requires a HeroSupport layout."
+        )
+    if date_index != 0:
+        raise TerseDslNested2ConversionError(
+            "DateOverview must be the leading date context in multi-business layouts."
+        )
+    expected = ("compactDate", "support") if size == "2x2" else ("dateHero", "hero")
+    if (variant, role) != expected:
+        raise TerseDslNested2ConversionError(
+            "DateOverview variant and role do not match the card size and composition."
+        )
+
+
+def _validate_schedule_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+) -> None:
+    indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "ScheduleOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "ScheduleOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "ScheduleOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError("ScheduleOverview must appear exactly once.")
+    index = indexes[0]
+    schedule = content[index]
+    if not schedule.values or not isinstance(schedule.values[0], dict):
+        raise TerseDslNested2ConversionError(
+            "ScheduleOverview must be a direct layout child."
+        )
+    variant = schedule.values[0].get("variant")
+    role = schedule.values[0].get("role")
+    if len(content) == 1:
+        if layout_id not in {"SingleFocusLayout", "HeroActionLayout"} or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "Single-business ScheduleOverview requires a hero SingleFocus/HeroAction layout."
+            )
+        if size == "2x4" and variant == "nextEvent":
+            raise TerseDslNested2ConversionError(
+                "Single-business 2x4 ScheduleOverview requires a meeting variant."
+            )
+        return
+    if layout_id not in {"HeroSupportLayout", "HeroSupportActionLayout"}:
+        raise TerseDslNested2ConversionError(
+            "ScheduleOverview support requires a HeroSupport layout."
+        )
+    if "DateOverview" in {item.name for item in content}:
+        if role != "support":
+            raise TerseDslNested2ConversionError(
+                "Date + Schedule requires ScheduleOverview to use the support role."
+            )
+        if index != 1:
+            raise TerseDslNested2ConversionError(
+                "DateOverview + ScheduleOverview requires date first and schedule second."
+            )
+        expected = {"meetingCompact"} if size == "2x2" else {
+            "meetingCompact",
+            "meetingExpanded",
+        }
+        if variant not in expected:
+            raise TerseDslNested2ConversionError(
+                "Date + Schedule variant does not match the target size."
+            )
+        return
+    if role == "support":
+        expected = {"meetingCompact"} if size == "2x2" else {
+            "meetingCompact",
+            "meetingExpanded",
+        }
+        if variant not in expected:
+            raise TerseDslNested2ConversionError(
+                "ScheduleOverview support variant does not match the target size."
+            )
+    elif role != "hero":
+        raise TerseDslNested2ConversionError(
+            "Multi-business ScheduleOverview requires a hero or support role."
+        )
+
+
+def _validate_battery_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+) -> None:
+    indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "BatteryOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "BatteryOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "BatteryOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError("BatteryOverview must appear exactly once.")
+    index = indexes[0]
+    battery = content[index]
+    if not battery.values or not isinstance(battery.values[0], dict):
+        raise TerseDslNested2ConversionError(
+            "BatteryOverview must be a direct layout child."
+        )
+    role = battery.values[0].get("role")
+    show_title = battery.values[0].get("showTitle", True)
+    if not isinstance(show_title, bool):
+        raise TerseDslNested2ConversionError(
+            "BatteryOverview showTitle must be a Boolean."
+        )
+    if len(content) == 1:
+        if layout_id not in {"SingleFocusLayout", "HeroActionLayout"} or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "Single-business BatteryOverview requires a hero "
+                "SingleFocus/HeroAction layout."
+            )
+        if show_title is not True:
+            raise TerseDslNested2ConversionError(
+                "Single-business BatteryOverview must keep its internal title."
+            )
+        return
+    names = {child.name for child in content}
+    if "BluetoothDeviceOverview" in names:
+        expected_layout = "PeerPairLayout" if size == "2x2" else "HeroSupportLayout"
+        if layout_id != expected_layout or index != 0 or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "Phone + earphone composition requires BatteryOverview hero first in the "
+                f"{expected_layout}."
+            )
+        return
+    if "ResourceUsageOverview" in names:
+        if size == "2x2":
+            if layout_id != "PeerPairLayout" or role != "peer" or show_title is not False:
+                raise TerseDslNested2ConversionError(
+                    "Battery + resource usage on 2x2 requires "
+                    "PeerPairLayout+peer+showTitle=false."
+                )
+            return
+        if layout_id not in {"HeroSupportLayout", "HeroSupportActionLayout"}:
+            raise TerseDslNested2ConversionError(
+                "Battery + resource usage on 2x4 requires a HeroSupport layout."
+            )
+        if index != 1 or role != "support":
+            raise TerseDslNested2ConversionError(
+                "Battery must be the support business after resource usage on 2x4."
+            )
+        return
+    if "WeatherOverview" in names:
+        if layout_id not in {"HeroSupportLayout", "HeroSupportActionLayout"}:
+            raise TerseDslNested2ConversionError(
+                "Weather + Battery requires a HeroSupport layout."
+            )
+        if index != 1 or role != "support":
+            raise TerseDslNested2ConversionError(
+                "Battery must be the support business after WeatherOverview."
+            )
+        return
+    if len(content) > 2 and layout_id == "EqualItemsLayout" and role == "peer":
+        return
+    if layout_id != "PeerPairLayout" or role != "peer":
+        raise TerseDslNested2ConversionError(
+            "BatteryOverview multi-business phone/device composition requires "
+            "PeerPairLayout+peer."
+        )
+
+
+def _validate_bluetooth_device_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+) -> None:
+    indexes = tuple(
+        index
+        for index, child in enumerate(content)
+        if child.name == "BluetoothDeviceOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "BluetoothDeviceOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "BluetoothDeviceOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError(
+            "BluetoothDeviceOverview must appear exactly once."
+        )
+    index = indexes[0]
+    overview = content[index]
+    if not overview.values or not isinstance(overview.values[0], dict):
+        raise TerseDslNested2ConversionError(
+            "BluetoothDeviceOverview must be a direct layout child."
+        )
+    role = overview.values[0].get("role")
+    if len(content) == 1:
+        allowed_layouts = {"SingleFocusLayout", "HeroActionLayout", "ActionMatrixLayout"}
+        if layout_id not in allowed_layouts or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "Single-business BluetoothDeviceOverview requires a hero single/action layout."
+            )
+        return
+    names = {child.name for child in content}
+    if names != {"BatteryOverview", "BluetoothDeviceOverview"}:
+        raise TerseDslNested2ConversionError(
+            "BluetoothDeviceOverview multi-business currently supports phone battery only."
+        )
+    expected_layout = "PeerPairLayout" if size == "2x2" else "HeroSupportLayout"
+    if layout_id != expected_layout or index != 1 or role != "support":
+        raise TerseDslNested2ConversionError(
+            "Phone + earphone composition requires BluetoothDeviceOverview support second in "
+            f"the {expected_layout}."
+        )
+
+
+def _validate_resource_usage_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+) -> None:
+    indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "ResourceUsageOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "ResourceUsageOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "ResourceUsageOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError(
+            "ResourceUsageOverview must appear exactly once."
+        )
+    index = indexes[0]
+    resource = content[index]
+    if not resource.values or not isinstance(resource.values[0], dict):
+        raise TerseDslNested2ConversionError(
+            "ResourceUsageOverview must be a direct layout child."
+        )
+    variant = resource.values[0].get("variant")
+    role = resource.values[0].get("role")
+    show_title = resource.values[0].get("showTitle", True)
+    if not isinstance(show_title, bool):
+        raise TerseDslNested2ConversionError(
+            "ResourceUsageOverview showTitle must be a Boolean."
+        )
+    if variant != "memory":
+        raise TerseDslNested2ConversionError(
+            "ResourceUsageOverview only enables the memory variant."
+        )
+    if len(content) == 1:
+        if layout_id not in {"SingleFocusLayout", "HeroActionLayout"} or role != "hero":
+            raise TerseDslNested2ConversionError(
+                "Single-business ResourceUsageOverview requires a hero "
+                "SingleFocus/HeroAction layout."
+            )
+        if show_title is not True:
+            raise TerseDslNested2ConversionError(
+                "Single-business ResourceUsageOverview must keep its internal title."
+            )
+        return
+    if {child.name for child in content} != {
+        "BatteryOverview",
+        "ResourceUsageOverview",
+    }:
+        raise TerseDslNested2ConversionError(
+            "Multi-business ResourceUsageOverview currently supports BatteryOverview only."
+        )
+    if size == "2x2":
+        if layout_id != "PeerPairLayout" or role != "peer" or show_title is not False:
+            raise TerseDslNested2ConversionError(
+                "Multi-business 2x2 ResourceUsageOverview requires "
+                "PeerPairLayout+peer+showTitle=false."
+            )
+        return
+    if layout_id not in {"HeroSupportLayout", "HeroSupportActionLayout"}:
+        raise TerseDslNested2ConversionError(
+            "Multi-business 2x4 ResourceUsageOverview requires a HeroSupport layout."
+        )
+    if index != 0 or role != "hero":
+        raise TerseDslNested2ConversionError(
+            "Multi-business 2x4 ResourceUsageOverview must be the leading hero."
+        )
+
+
+def _validate_app_usage_overview_placement(
+    layout_id: str,
+    content: tuple[ParsedCall, ...],
+    *,
+    size: Literal["2x2", "2x4"],
+) -> None:
+    indexes = tuple(
+        index for index, child in enumerate(content) if child.name == "AppUsageOverview"
+    )
+    if not indexes:
+        if any(
+            call.name == "AppUsageOverview"
+            for child in content
+            for call in _walk_calls(child)
+        ):
+            raise TerseDslNested2ConversionError(
+                "AppUsageOverview must be a direct layout child."
+            )
+        return
+    if len(indexes) != 1:
+        raise TerseDslNested2ConversionError("AppUsageOverview must appear exactly once.")
+    index = indexes[0]
+    app_usage = content[index]
+    if not app_usage.values or not isinstance(app_usage.values[0], dict):
+        raise TerseDslNested2ConversionError(
+            "AppUsageOverview must be a direct layout child."
+        )
+    if app_usage.values[0].get("variant") != "singleApp":
+        raise TerseDslNested2ConversionError(
+            "AppUsageOverview only enables the singleApp variant."
+        )
+    if len(content) == 1:
+        if layout_id not in {"SingleFocusLayout", "HeroActionLayout"}:
+            raise TerseDslNested2ConversionError(
+                "Single-business AppUsageOverview requires SingleFocus/HeroAction layout."
+            )
+        return
+    if {item.name for item in content} != {"AppUsageOverview", "SystemModeOverview"}:
+        raise TerseDslNested2ConversionError(
+            "Multi-business AppUsageOverview only supports trusted SystemModeOverview."
+        )
+    if layout_id not in {"HeroSupportLayout", "HeroSupportActionLayout"}:
+        raise TerseDslNested2ConversionError(
+            "AppUsageOverview + SystemModeOverview requires a HeroSupport layout."
+        )
+    if index != 0:
+        raise TerseDslNested2ConversionError(
+            "AppUsageOverview must be the leading hero in multi-business layouts."
+        )
 
 
 def _validate_ux_layout_action_slot(
@@ -1489,12 +6011,47 @@ def _split_ux_layout_children(
     return content, actions
 
 
+def _weather_card_tap_action(
+    node: Nested2Node,
+    contract: HybridBodyContract,
+) -> _CardTapAction | None:
+    """Lower the dedicated weather-details action to the CardFrame click target."""
+    content, actions = _split_ux_layout_children(node)
+    if len(actions) != 1 or not any(_is_weather_region(item) for item in content):
+        return None
+    params = actions[0].values[0] if actions[0].values else None
+    action_id = params.get("actionId") if isinstance(params, dict) else None
+    if action_id != "event.open.weather":
+        return None
+    binding = next(
+        (item for item in contract.action_bindings if item.action_id == action_id),
+        None,
+    )
+    if binding is None:
+        return None
+    return _CardTapAction(
+        action_id=action_id,
+        handlers=({"call": binding.call, "args": binding.args},),
+    )
+
+
+def _matches_card_tap_action(node: Nested2Node, card_tap_action: _CardTapAction | None) -> bool:
+    if card_tap_action is None or not node.values:
+        return False
+    params = node.values[0]
+    if not isinstance(params, dict):
+        return False
+    return params.get("actionId") == card_tap_action.action_id
+
+
 def _inject_ux_business_title(
     node: Nested2Node,
     title: str | None,
     contract: HybridBodyContract,
 ) -> Nested2Node:
     """Project the trusted CardSpec title into the business region when useful."""
+    if contract.required_business_component_ids:
+        return node
     if not isinstance(title, str) or not title.strip() or title not in contract.trusted_literals:
         return node
     normalized_title = _semantic_text_fragment(title)
@@ -1533,6 +6090,77 @@ def _inject_ux_business_title(
     else:
         first = Nested2Node("Column", ("compact",), (title_node, first))
     return Nested2Node(node.component_type, node.values, (first, *content[1:], *actions))
+
+
+def _inject_phone_earphone_title(
+    node: Nested2Node,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+) -> Nested2Node:
+    if set(contract.allowed_business_component_ids) != {
+        "BatteryOverview",
+        "BluetoothDeviceOverview",
+    }:
+        return node
+    title = _bluetooth_text("设备电量", "subtitle", 12, 400, align="start")
+    body = _with_flex_weight(node, 1, axis="vertical")
+    return Nested2Node(
+        "Column",
+        (
+            "section",
+            {
+                "width": "100%",
+                "height": "100%",
+                "itemMargin": registry.ux_tokens["moduleGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+            },
+        ),
+        (title, body),
+    )
+
+
+def _inject_resource_battery_title(
+    node: Nested2Node,
+    title: str | None,
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+    *,
+    size: Literal["2x2", "2x4"],
+) -> Nested2Node:
+    """Place one trusted title above the titleless 2x2 peer chart group."""
+    if size != "2x2" or set(contract.allowed_business_component_ids) != {
+        "BatteryOverview",
+        "ResourceUsageOverview",
+    }:
+        return node
+    if not isinstance(title, str) or not title.strip() or title not in contract.trusted_literals:
+        raise TerseDslNested2ConversionError(
+            "Resource and battery 2x2 peer composition requires one trusted outer title."
+        )
+    title_node = _resource_usage_text(
+        title,
+        "compact-title",
+        font_size=12,
+        font_weight=600,
+    )
+    body = _with_flex_weight(node, 1, axis="vertical")
+    return Nested2Node(
+        "Column",
+        (
+            "section",
+            {
+                "width": "100%",
+                "height": "100%",
+                "itemMargin": registry.ux_tokens["denseInnerGap"],
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+            },
+        ),
+        (title_node, body),
+    )
 
 
 def _deduplicate_ux_business_title_fragments(
@@ -1574,6 +6202,7 @@ def _lower_ux_layout_root(
     size: Literal["2x2", "2x4"],
     contract: HybridBodyContract,
     registry: CardPlanRegistry,
+    card_tap_action: _CardTapAction | None = None,
 ) -> Nested2Node:
     if node.component_type not in UX_LAYOUT_COMPONENT_IDS:
         raise TerseDslNested2ConversionError("UX Mixed root is not a Layout Component.")
@@ -1589,6 +6218,11 @@ def _lower_ux_layout_root(
         )
         for child in content
     )
+    visible_actions = tuple(
+        child
+        for child in actions
+        if not _matches_card_tap_action(child, card_tap_action)
+    )
     lowered_actions = tuple(
         _lower_ux_action(
             child,
@@ -1600,15 +6234,15 @@ def _lower_ux_layout_root(
                 "vertical" if node.component_type == "ActionMatrixLayout" else "horizontal"
             ),
         )
-        for child in actions
+        for child in visible_actions
     )
     if (
         size == "2x2"
         and node.component_type == "WeatherNowForecastLayout"
-        and len(actions) == 1
-        and actions[0].component_type == "PillAction"
-        and isinstance(actions[0].values[0], dict)
-        and isinstance(actions[0].values[0].get("icon"), str)
+        and len(visible_actions) == 1
+        and visible_actions[0].component_type == "PillAction"
+        and isinstance(visible_actions[0].values[0], dict)
+        and isinstance(visible_actions[0].values[0].get("icon"), str)
     ):
         # The UX contract reserves the bottom-right weather control for the
         # compact icon treatment. Normalizing here keeps the event binding and
@@ -1616,7 +6250,7 @@ def _lower_ux_layout_root(
         # consuming one third of a 2x2 weather card.
         lowered_actions = (
             _lower_ux_action(
-                Nested2Node("IconAction", actions[0].values, ()),
+                Nested2Node("IconAction", visible_actions[0].values, ()),
                 size=size,
                 contract=contract,
                 registry=registry,
@@ -1630,7 +6264,7 @@ def _lower_ux_layout_root(
         <= layout.max_children_by_size[size]
     ):
         raise TerseDslNested2ConversionError("UX Layout content budget changed during expansion.")
-    return _lower_registered_ux_layout(
+    lowered = _lower_registered_ux_layout(
         node.component_type,
         lowered_content,
         lowered_actions,
@@ -1639,6 +6273,9 @@ def _lower_ux_layout_root(
         contract=contract,
         registry=registry,
     )
+    if any(_is_weather_region(item) for item in lowered_content):
+        return _normalize_weather_fill_parent_dimensions(lowered)
+    return lowered
 
 
 def _lower_registered_ux_layout(
@@ -1756,6 +6393,21 @@ def _lower_hero_support_layout(
     support_surface_color: str,
     registry: CardPlanRegistry,
 ) -> Nested2Node:
+    if size == "2x2" and _is_date_region(content[0]):
+        date_context = _merge_node_options(content[0], {"height": 20, "clip": True})
+        schedule = _with_flex_weight(content[1], 1, axis="vertical")
+        return Nested2Node(
+            "Column",
+            (
+                "section",
+                {
+                    "width": "100%",
+                    "height": "100%",
+                    "itemMargin": registry.ux_tokens["moduleGap"],
+                },
+            ),
+            (date_context, schedule),
+        )
     default_ratio = "balanced" if size == "2x4" else "heroWide"
     ratio = configuration.get("ratio", default_ratio)
     direction = configuration.get("direction", "auto")
@@ -1766,7 +6418,13 @@ def _lower_hero_support_layout(
         "heroWide": (56, 44),
         "supportWide": (44, 56),
     }[ratio]
+    if size == "2x2" and _is_weather_region(content[0]):
+        weights = (76, 24)
+    if size == "2x4" and _is_resource_usage_region(content[0]):
+        weights = (56, 44)
     support = content[1]
+    if size == "2x4" and _is_resource_usage_region(content[0]):
+        support = _normalize_ring_geometry(support, ring_size=44)
     if size == "2x4" and _is_textual_region(support):
         support = _support_panel(support, support_surface_color, registry)
     regions = (content[0], support)
@@ -1785,7 +6443,30 @@ def _lower_hero_support_action_layout(
     registry: CardPlanRegistry,
 ) -> Nested2Node:
     if size == "2x2":
-        if _compact_support_overflows(content[0], content[1], actions[0], registry):
+        if _is_date_region(content[0]):
+            date_context = _merge_node_options(content[0], {"height": 20, "clip": True})
+            schedule = _with_flex_weight(content[1], 1, axis="vertical")
+            base = Nested2Node(
+                "Column",
+                (
+                    "section",
+                    {
+                        "width": "100%",
+                        "height": "100%",
+                        "itemMargin": registry.ux_tokens["moduleGap"],
+                    },
+                ),
+                (date_context, schedule),
+            )
+            return _place_optional_layout_action(
+                base,
+                actions,
+                size=size,
+                registry=registry,
+            )
+        if not _is_advanced_component_region(content[1]) and _compact_support_overflows(
+            content[0], content[1], actions[0], registry
+        ):
             required = set(contract.required_literals)
             support_literals = {
                 str(item.values[0])
@@ -1804,7 +6485,13 @@ def _lower_hero_support_action_layout(
                 registry=registry,
             )
         hero = _with_flex_weight(content[0], 1, axis="vertical")
-        support = _merge_node_options(content[1], {"height": 36, "clip": True})
+        support_height = 28 if _is_weather_region(content[0]) else 36
+        if _is_weather_region(content[0]) and _is_battery_region(content[1]):
+            support_height = 36
+        support = _merge_node_options(
+            content[1],
+            {"height": support_height, "clip": True},
+        )
         base = Nested2Node(
             "Column",
             (
@@ -1821,6 +6508,8 @@ def _lower_hero_support_action_layout(
     ratio = configuration.get("heroRatio", "wide")
     weights = (56, 44) if ratio == "wide" else (50, 50)
     support = content[1]
+    if _is_resource_usage_region(content[0]):
+        support = _normalize_ring_geometry(support, ring_size=44)
     if _is_textual_region(support):
         support = _support_panel(support, support_surface_color, registry)
     support = _with_flex_weight(support, 1, axis="vertical")
@@ -1849,7 +6538,8 @@ def _compact_support_overflows(
     support_line_count = sum(item.component_type == "Text" for item in _walk_nodes(support))
     if support_line_count > 2:
         return True
-    support_height = min(_estimate_height(support), registry.ux_tokens["pillActionHeight"])
+    support_limit = 28 if _is_weather_region(hero) else registry.ux_tokens["pillActionHeight"]
+    support_height = min(_estimate_height(support), support_limit)
     if _is_icon_action_node(action, registry):
         action_height = 0
         gap_count = 1
@@ -1872,8 +6562,17 @@ def _lower_peer_pair_layout(
     size: Literal["2x2", "2x4"],
     registry: CardPlanRegistry,
 ) -> Nested2Node:
+    compact_resource_pair = size == "2x2" and any(
+        _is_resource_usage_region(item) for item in content
+    )
+    if compact_resource_pair:
+        content = tuple(_normalize_ring_geometry(item, ring_size=44) for item in content)
     orientation = configuration.get("orientation", "auto")
-    if actions and size == "2x2":
+    if compact_resource_pair:
+        # Resource and battery peers each need their full compact metric height.
+        # A model-requested row stack clips the capacity lines in a 160 vp card.
+        orientation = "columns"
+    elif actions and size == "2x2":
         orientation = "columns"
     elif orientation == "auto":
         orientation = "columns" if size == "2x4" else _auto_peer_orientation(content)
@@ -2289,6 +6988,126 @@ def _contains_visual_region(node: Nested2Node) -> bool:
     return any(item.component_type in {"Image", "Progress"} for item in _walk_nodes(node))
 
 
+def _is_weather_region(node: Nested2Node) -> bool:
+    return any(
+        any(
+            isinstance(value, dict)
+            and value.get("_advancedComponent") == "WeatherOverview"
+            for value in item.values
+        )
+        for item in _walk_nodes(node)
+    )
+
+
+def _is_advanced_component_region(node: Nested2Node) -> bool:
+    return any(
+        any(
+            isinstance(value, dict) and isinstance(value.get("_advancedComponent"), str)
+            for value in item.values
+        )
+        for item in _walk_nodes(node)
+    )
+
+
+def _is_resource_usage_region(node: Nested2Node) -> bool:
+    return any(
+        any(
+            isinstance(value, dict)
+            and value.get("_advancedComponent") == "ResourceUsageOverview"
+            for value in item.values
+        )
+        for item in _walk_nodes(node)
+    )
+
+
+def _is_battery_region(node: Nested2Node) -> bool:
+    return any(
+        any(
+            isinstance(value, dict)
+            and value.get("_advancedComponent") == "BatteryOverview"
+            for value in item.values
+        )
+        for item in _walk_nodes(node)
+    )
+
+
+def _normalize_ring_geometry(node: Nested2Node, *, ring_size: int) -> Nested2Node:
+    children = tuple(
+        _normalize_ring_geometry(child, ring_size=ring_size) for child in node.children
+    )
+    values = list(node.values)
+    options_index = next(
+        (index for index, value in enumerate(values) if isinstance(value, dict)),
+        None,
+    )
+    options = dict(values[options_index]) if options_index is not None else {}
+    is_ring_progress = node.component_type == "Progress" and options.get("type") == "ring"
+    contains_direct_ring = node.component_type == "Stack" and any(
+        child.component_type == "Progress"
+        and any(
+            isinstance(value, dict) and value.get("type") == "ring"
+            for value in child.values
+        )
+        for child in children
+    )
+    if is_ring_progress:
+        options.update({"width": ring_size, "height": ring_size, "strokeWidth": 6})
+    elif contains_direct_ring:
+        options.update({"width": ring_size, "height": ring_size})
+    else:
+        return Nested2Node(node.component_type, node.values, children)
+    if options_index is None:
+        values.append(options)
+    else:
+        values[options_index] = options
+    return Nested2Node(node.component_type, tuple(values), children)
+
+
+def _normalize_weather_fill_parent_dimensions(node: Nested2Node) -> Nested2Node:
+    """Use the renderer's fill-parent token instead of percentage-like literals."""
+    children = tuple(_normalize_weather_fill_parent_dimensions(child) for child in node.children)
+    if node.component_type not in _STANDARD_CONTAINERS:
+        return Nested2Node(node.component_type, node.values, children)
+    values: list[Any] = []
+    for value in node.values:
+        if not isinstance(value, dict):
+            values.append(value)
+            continue
+        options = dict(value)
+        for dimension in ("width", "height"):
+            if options.get(dimension) == "100%":
+                options[dimension] = "matchParent"
+        values.append(options)
+    return Nested2Node(node.component_type, tuple(values), children)
+
+
+def _is_date_region(node: Nested2Node) -> bool:
+    return any(
+        any(
+            isinstance(value, dict)
+            and value.get("_advancedComponent") == "DateOverview"
+            for value in item.values
+        )
+        for item in _walk_nodes(node)
+    )
+
+
+def _strip_advanced_component_markers(node: Nested2Node) -> Nested2Node:
+    children = tuple(_strip_advanced_component_markers(child) for child in node.children)
+    values: list[Any] = []
+    for value in node.values:
+        if isinstance(value, dict) and (
+            "_advancedComponent" in value or "_preserveOriginalColor" in value
+        ):
+            cleaned = dict(value)
+            cleaned.pop("_advancedComponent", None)
+            cleaned.pop("_preserveOriginalColor", None)
+            values.append(cleaned)
+        else:
+            values.append(value)
+    return Nested2Node(node.component_type, tuple(values), children)
+
+
 def _is_textual_region(node: Nested2Node) -> bool:
     return not _contains_visual_region(node)
 
@@ -2458,13 +7277,21 @@ def _overlay_icon_action(
     registry: CardPlanRegistry,
 ) -> Nested2Node:
     reserved = registry.ux_tokens["iconActionSize"] + registry.ux_tokens["moduleGap"]
-    reserved_content = _merge_node_options(
-        content,
-        {
-            "padding": {"right": reserved, "bottom": reserved},
-            "clip": True,
-        },
-    )
+    if _is_weather_region(content):
+        reserved_content = _reserve_weather_icon_action_corner(content, reserved)
+    elif _is_battery_region(content):
+        # BatteryOverview owns the bottom-left Ring while IconAction owns the
+        # bottom-right corner. They are disjoint fixed anchors, so padding the
+        # whole business region would incorrectly lift the Ring upward.
+        reserved_content = content
+    else:
+        reserved_content = _merge_node_options(
+            content,
+            {
+                "padding": {"right": reserved, "bottom": reserved},
+                "clip": True,
+            },
+        )
     content_layer = Nested2Node(
         "Stack",
         (
@@ -2494,6 +7321,51 @@ def _overlay_icon_action(
         ("overlay", {"width": "100%", "height": "100%"}),
         (content_layer, action_layer),
     )
+
+
+def _reserve_weather_icon_action_corner(node: Nested2Node, reserved: int) -> Nested2Node:
+    """Reserve only the weather region that can overlap the bottom-right action."""
+    children = tuple(
+        _reserve_weather_icon_action_corner(child, reserved) for child in node.children
+    )
+    current = Nested2Node(node.component_type, node.values, children)
+    options = next((value for value in current.values if isinstance(value, dict)), {})
+    is_weather_root = options.get("_advancedComponent") == "WeatherOverview"
+    is_layered_weather_root = current.component_type in {"Stack", "Column"}
+    if is_weather_root and is_layered_weather_root and len(current.children) >= 3:
+        weather_children = list(current.children)
+        weather_children[-1] = _merge_node_options(
+            weather_children[-1],
+            {
+                "padding": {
+                    "left": 0,
+                    "top": 0,
+                    "right": reserved,
+                    "bottom": 0,
+                }
+            },
+        )
+        return Nested2Node(current.component_type, current.values, tuple(weather_children))
+    weather_leads_multi_region = (
+        current.component_type == "Column"
+        and len(current.children) >= 2
+        and _is_weather_region(current.children[0])
+    )
+    if weather_leads_multi_region:
+        region_children = list(current.children)
+        region_children[-1] = _merge_node_options(
+            region_children[-1],
+            {
+                "padding": {
+                    "left": 0,
+                    "top": 0,
+                    "right": reserved,
+                    "bottom": 0,
+                }
+            },
+        )
+        return Nested2Node(current.component_type, current.values, tuple(region_children))
+    return current
 
 
 def _lower_ux_action(
@@ -2961,6 +7833,7 @@ def _canonical_number(number: int | float) -> str:
 def _validate_required_numbers(
     content: ParsedCall,
     contract: HybridBodyContract,
+    task_spec: TaskSpec,
 ) -> None:
     required = Counter(contract.required_numbers)
     if not required:
@@ -2984,6 +7857,38 @@ def _validate_required_numbers(
                     progress_value, bool
                 ):
                     actual[progress_value] += 1
+        elif call.name == "ResourceUsageOverview":
+            facts = extract_resource_usage_overview_facts(task_spec.dataModelSchema)
+            if facts is not None:
+                actual[facts.usage_percent] += 1
+        elif call.name == "BatteryOverview":
+            facts = extract_battery_overview_facts(task_spec.dataModelSchema)
+            if facts is not None:
+                actual[facts.level_percent] += 1
+        elif call.name == "BluetoothDeviceOverview":
+            facts = extract_bluetooth_device_overview_facts(task_spec.dataModelSchema)
+            if facts is not None:
+                actual.update(
+                    value
+                    for value in (
+                        facts.left_battery_level,
+                        facts.right_battery_level,
+                        facts.case_battery_level,
+                    )
+                    if value is not None
+                )
+        elif call.name == "ActivityOverview":
+            facts = extract_activity_overview_facts(task_spec.dataModelSchema)
+            if facts is not None:
+                actual[facts.daily_steps] += 1
+        elif call.name == "WorkoutOverview":
+            facts = extract_workout_countdown_facts(task_spec.dataModelSchema)
+            if facts is not None:
+                actual[facts.countdown_days] += 1
+        elif call.name == "HeartRateOverview":
+            facts = extract_heart_rate_overview_facts(task_spec.dataModelSchema)
+            if facts is not None:
+                actual[facts.average_bpm] += 1
         for child in call.children:
             visit(child)
 
@@ -3168,6 +8073,19 @@ def _normalize_theme_styles(styles: dict[str, Any]) -> dict[str, Any]:
         else:
             normalized[key] = value
     return normalized
+
+
+def _column_align_items(value: Any) -> Any:
+    """Map a Stack two-dimensional alignment to Column's horizontal axis."""
+    if not isinstance(value, str):
+        return value
+    if value.endswith("Start"):
+        return "start"
+    if value.endswith("End"):
+        return "end"
+    if value in {"top", "center", "bottom"}:
+        return "center"
+    return value
 
 
 def _serialize_node(node: Nested2Node) -> str:

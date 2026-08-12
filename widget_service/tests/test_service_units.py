@@ -418,6 +418,9 @@ def test_anyio_thread_pool_uses_configured_capacity(monkeypatch):
     assert Settings(_env_file=None).model_failure_retry_jitter_ratio == 0.2
     assert Settings(_env_file=None).model_prompt_log_preview_chars == 30
     assert Settings(_env_file=None).validation_failure_max_repair_attempts == 1
+    assert Settings(
+        _env_file=None
+    ).enable_advanced_component_data_admission_bypass_for_batch is False
     settings = get_settings()
     monkeypatch.setattr(settings, "anyio_thread_pool_tokens", 80)
 
@@ -2071,6 +2074,44 @@ def test_task_spec_builder_uses_bounded_preview_data_without_logging_it():
     assert "current" not in weather
 
 
+def test_task_spec_builder_batch_projection_includes_complete_capability_schema():
+    registry = CapabilityRegistry(version=REGISTRY_VERSION_6)
+    capability = registry.get_data_capability("ViewWeather")
+    assert capability is not None
+    binding = CandidateDataBinding(
+        capabilityId="ViewWeather",
+        arguments={"districtName": "深圳"},
+        writeResultTo="/data/weather",
+        candidateOutputFields=["/current/temperatureText", "/current/condition"],
+    )
+
+    regular = TaskSpecBuilder().build(
+        user_query="深圳天气",
+        size="2x2",
+        effective_bindings=[binding],
+        effective_data_capabilities=[capability],
+        event_candidates=[],
+        asset_candidates=[],
+    )
+    batch = TaskSpecBuilder().build(
+        user_query="深圳天气",
+        size="2x2",
+        effective_bindings=[binding],
+        effective_data_capabilities=[capability],
+        event_candidates=[],
+        asset_candidates=[],
+        include_all_output_fields=True,
+    )
+
+    assert "airQuality" not in regular.dataModelSchema["data"]["weather"]["current"]
+    assert batch.dataModelSchema["data"]["weather"]["current"]["airQuality"][
+        "sampleValue"
+    ] == "优"
+    assert batch.dataModelSchema["data"]["weather"]["location"]["districtName"][
+        "sampleValue"
+    ] == "深圳"
+
+
 @pytest.mark.parametrize(
     "preview",
     [
@@ -2169,6 +2210,49 @@ def test_task_spec_builder_projects_valid_object_and_array_fields():
     }
     assert task_spec.assetCandidates[0]["id"] == "asset.drop_1"
     assert task_spec.assetCandidates[0]["sceneTags"] == ["weather", "humidity"]
+
+
+def test_task_spec_builder_uses_requested_weather_district_instead_of_schema_sample():
+    capability = DataCapability(
+        id="ViewWeather",
+        description="天气",
+        defaultWriteResultTo="/data/weather",
+        inputSchema={},
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "object",
+                    "properties": {
+                        "districtName": {
+                            "type": "string",
+                            "description": "天气查询区县",
+                            "sampleValue": "青浦区",
+                        }
+                    },
+                }
+            },
+        },
+        dependencies=Dependencies(),
+    )
+    binding = CandidateDataBinding(
+        capabilityId="ViewWeather",
+        arguments={"districtName": "上海"},
+        writeResultTo="/data/weather",
+        candidateOutputFields=["/location/districtName"],
+    )
+
+    task_spec = TaskSpecBuilder().build(
+        user_query="上海天气",
+        size="2x2",
+        effective_bindings=[binding],
+        effective_data_capabilities=[capability],
+        event_candidates=[],
+        asset_candidates=[],
+    )
+
+    district = task_spec.dataModelSchema["data"]["weather"]["location"]["districtName"]
+    assert district["sampleValue"] == "上海"
 
 
 @pytest.mark.parametrize(
@@ -2532,6 +2616,51 @@ async def test_a2ui_model_client_real_mode_forwards_messages(monkeypatch):
     monkeypatch.setattr(client, "convert_dsl", lambda value: value)
 
     assert await client.generate(messages) == "forwarded"
+    assert client.model_step_records == [
+        {
+            "sequence": 1,
+            "phase": "initial",
+            "status": "success",
+                "durationMs": client.model_step_records[0]["durationMs"],
+                "rawOutput": "forwarded",
+                "inputMessages": messages,
+            }
+        ]
+
+
+@pytest.mark.asyncio
+async def test_a2ui_model_client_records_structured_step_raw_output():
+    class FakeTransport:
+        @staticmethod
+        def generate(_messages):
+            return '{"scopeVersion":"advanced-scope-brief/1"}'
+
+    client = A2UIModelClient(use_mock=False, transport=FakeTransport())
+
+    parsed = await client.generate_json([], phase="advanced-component-scope")
+
+    assert parsed["scopeVersion"] == "advanced-scope-brief/1"
+    assert client.model_step_records[0]["phase"] == "advanced-component-scope"
+    assert client.model_step_records[0]["rawOutput"] == (
+        '{"scopeVersion":"advanced-scope-brief/1"}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_a2ui_model_client_records_step_inputs_only_for_batch_mode(monkeypatch):
+    messages = [{"role": "user", "content": "batch prompt"}]
+
+    class FakeTransport:
+        @staticmethod
+        def generate(_messages):
+            return "ok"
+
+    monkeypatch.setattr(get_settings(), "enable_widget_batch_recording", True)
+    client = A2UIModelClient(use_mock=False, transport=FakeTransport())
+
+    await client.generate(messages, phase="advanced-mixed-body")
+
+    assert client.model_step_records[0]["inputMessages"] == messages
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import secrets
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from anyio import to_thread
 
@@ -34,7 +35,13 @@ from custom.model_runtime import ModelExecutionRuntime
 from models.artifact import ArtifactMeta, GenerationPlan, WidgetArtifact
 from models.generation import DEFAULT_WIDGET_SIZE, EventAction, ModelRequestContext
 from services.advanced_component_pipeline import AdvancedComponentPipeline
-from services.advanced_component_pipeline.pipeline import safe_generation_error_metadata
+from services.advanced_component_pipeline.content_selectors import (
+    advanced_component_batch_data_admission,
+)
+from services.advanced_component_pipeline.pipeline import (
+    safe_generation_error_metadata,
+    weather_field_coverage,
+)
 from services.artifact_store import ArtifactStore
 from services.capability_registry import CapabilityRegistry
 from services.card_spec_builder import CardSpecBuilder
@@ -527,6 +534,11 @@ class WidgetGenerationService:
             request.description,
         )
         # TaskSpec 是给 A2UI 模型的输入，包含用户目标、有效能力、事件和素材。
+        batch_data_admission = bool(
+            request._widget_batch_request
+            and settings.enable_widget_batch_recording
+            and settings.enable_advanced_component_data_admission_bypass_for_batch
+        )
         task_spec = TaskSpecBuilder().build(
             request.userQuery,
             request.size,
@@ -534,6 +546,7 @@ class WidgetGenerationService:
             effective_data_capabilities,
             effective_events,
             asset_candidates,
+            include_all_output_fields=batch_data_admission,
         )
         logger.info(
             f"{_MODULE} card_and_task_spec_built data_binding_count={len(effective_bindings)} "
@@ -575,6 +588,7 @@ class WidgetGenerationService:
             operation_name=policy.operation,
         )
         advanced_output = None
+        trusted_internal_asset_sources: tuple[str, ...] = ()
         advanced_generation_fallback_used = False
         strict_hybrid_mode = False
         if policy.processor_kind == DslProcessorKind.TERSE_NESTED2 and generation_mode == "create":
@@ -582,11 +596,15 @@ class WidgetGenerationService:
                 self._authorize_hybrid_bypass(request)
             strict_hybrid_mode = True
             try:
-                advanced_output = await AdvancedComponentPipeline().generate_mixed(
-                    task_spec,
-                    model_client,
-                    card_spec.model_dump(mode="json", exclude_none=True),
-                    allow_offline_fallback=False,
+                with advanced_component_batch_data_admission(batch_data_admission):
+                    advanced_output = await AdvancedComponentPipeline().generate_mixed(
+                        task_spec,
+                        model_client,
+                        card_spec.model_dump(mode="json", exclude_none=True),
+                        allow_offline_fallback=False,
+                    )
+                trusted_internal_asset_sources = (
+                    advanced_output.trusted_internal_asset_sources
                 )
             except DeepSeekCallBudgetExceeded:
                 raise
@@ -614,6 +632,23 @@ class WidgetGenerationService:
                         "asset": [item.id for item in asset_candidates],
                     },
                     generationFallbackUsed=False,
+                    modelSteps=model_client.model_step_records,
+                    batchDiagnostics={
+                        "failureStage": (
+                            str(model_client.model_step_records[-1].get("phase", ""))
+                            if model_client.model_step_records
+                            else "advanced-component-scope"
+                        ),
+                        "validationErrorCode": error_code,
+                        "errorOrigin": error_origin,
+                        "exceptionType": type(exc).__name__,
+                        "exceptionMessage": str(exc),
+                        "weatherFieldCoverage": weather_field_coverage(
+                            task_spec.userQuery,
+                            task_spec,
+                            "",
+                        ),
+                    },
                 )
         advanced_source_dsl = advanced_output.source_dsl if advanced_output is not None else ""
         if advanced_output is not None:
@@ -806,6 +841,7 @@ class WidgetGenerationService:
                 source_artifact_digest=(
                     source_load_result.artifact_digest if source_load_result else None
                 ),
+                trusted_internal_asset_sources=trusted_internal_asset_sources,
             )
             artifact_validator = ArtifactValidator()
             validation_errors = artifact_validator.validate(artifact, protocol_profile)
@@ -877,6 +913,12 @@ class WidgetGenerationService:
                 removedCapabilities=removed,
                 errorCode=ErrorCode.A2UI_GENERATION_FAILED.value,
                 effectiveCapabilities=effective_capabilities,
+                modelSteps=model_client.model_step_records,
+                batchDiagnostics={
+                    "failureStage": model_call_phase,
+                    "exceptionType": type(exc).__name__,
+                    "exceptionMessage": str(exc),
+                },
             )
             self._log_generation_summary(
                 request,
@@ -932,6 +974,11 @@ class WidgetGenerationService:
                 message="卡片生成过程中校验失败，请稍后再试。",
                 removedCapabilities=removed,
                 errorCode=ErrorCode.VALIDATION_FAILED.value,
+                modelSteps=model_client.model_step_records,
+                batchDiagnostics={
+                    "failureStage": failure_category,
+                    "validationErrors": errors,
+                },
             )
             latency_by_stage["total"] = self._elapsed_ms(generation_started_at)
             self._log_generation_summary(
@@ -980,6 +1027,7 @@ class WidgetGenerationService:
             source_artifact_digest=(
                 source_load_result.artifact_digest if source_load_result else None
             ),
+            trusted_internal_asset_sources=trusted_internal_asset_sources,
         )
         # ArtifactStore 当前是本地 mock/OBS TODO 入口，返回端侧可下载 URL 和摘要。
         logger.info(
@@ -1004,6 +1052,23 @@ class WidgetGenerationService:
             f"artifact_url={artifact_save_result.artifactUrl} "
             f"removed_count={len(removed)} error_code={response_plan.errorCode}"
         )
+        batch_diagnostics: dict[str, Any] = {
+            "modelStepCount": len(model_client.model_step_records),
+            "qualityRepairCount": retry_result.retryCount,
+        }
+        if advanced_output is not None:
+            batch_diagnostics.update(
+                {
+                    "weatherFieldCoverage": advanced_output.invocation.get(
+                        "weatherFieldCoverage",
+                        {},
+                    ),
+                    "advancedPipelineEvidence": advanced_output.invocation.get(
+                        "batchEvidence",
+                        {},
+                    ),
+                }
+            )
         response = GenerateWidgetCardResponse(
             status=response_plan.status,
             artifactUrl=artifact_save_result.artifactUrl,
@@ -1024,6 +1089,8 @@ class WidgetGenerationService:
                 advanced_generation_fallback_used
                 or (advanced_output.fallback_used if advanced_output is not None else False)
             ),
+            modelSteps=model_client.model_step_records,
+            batchDiagnostics=batch_diagnostics,
         )
         latency_by_stage["total"] = self._elapsed_ms(generation_started_at)
         self._log_generation_summary(
@@ -1490,6 +1557,7 @@ class WidgetGenerationService:
         artifact_id: str | None = None,
         generation_mode: str = "create",
         source_artifact_digest: str | None = None,
+        trusted_internal_asset_sources: tuple[str, ...] = (),
     ) -> WidgetArtifact:
         """组装完整 artifact。
 
@@ -1508,6 +1576,7 @@ class WidgetGenerationService:
         - artifact_id：本轮不可变产物 UUID。
         - generation_mode：create 或 edit。
         - source_artifact_digest：编辑来源摘要；首次生成为空。
+        - trusted_internal_asset_sources：混合模板实际使用的服务内置可信资源路径。
         出参：完整 WidgetArtifact。
         """
         # artifact 是端侧下载后的唯一交付物，里面同时包含 DSL、CardSpec、TaskSpec 和能力裁决结果。
@@ -1531,8 +1600,11 @@ class WidgetGenerationService:
                 "event": [
                     item.model_dump(mode="json", exclude_none=True) for item in event_candidates
                 ],
-                # asset 只暴露素材 ID，端侧从资源包或素材注册表解析具体文件。
-                "asset": [item.id for item in asset_candidates],
+                # 请求素材暴露 ID；混合模板内置素材仅暴露实际引用的可信路径。
+                "asset": [
+                    *[item.id for item in asset_candidates],
+                    *trusted_internal_asset_sources,
+                ],
             },
             removedCapabilities=removed,
             generationPlan=GenerationPlan(

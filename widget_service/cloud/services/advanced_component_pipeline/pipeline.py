@@ -22,7 +22,12 @@ from .argument_mapper import map_arguments_offline, map_arguments_with_llm
 from .compiler import build_component_output
 from .component_selector import select_component
 from .composition import build_advanced_composition_plan
-from .content_selectors import apply_content_selectors, project_content_component_facts
+from .content_selectors import (
+    advanced_component_data_admission_is_relaxed,
+    apply_content_selectors,
+    extract_weather_overview_facts,
+    project_content_component_facts,
+)
 from .data_shape import extract_data_shape
 from .models import AdvancedPipelineOutput, SelectionConstraints
 from .scope_planner import (
@@ -39,6 +44,20 @@ from .ux_mixed_prompt import (
 )
 
 _MODULE = "[Advanced Component Pipeline]"
+
+_WEATHER_REQUEST_FIELD_TERMS: dict[str, tuple[str, ...]] = {
+    "city": ("city", "location", "district", "城市", "地点", "地区"),
+    "temperature": ("temperature", "当前温度", "气温"),
+    "condition": ("condition", "weather", "天气", "天气状况"),
+    "airQuality": ("air quality", "空气质量"),
+    "temperatureRange": ("temperature range", "high low", "高低温", "温度范围"),
+    "feelsLike": ("feels like", "体感温度"),
+    "humidity": ("humidity", "湿度"),
+    "wind": ("wind", "风力", "风速", "风向"),
+    "uvIndex": ("uv index", "ultraviolet", "紫外线"),
+    "alert": ("weather alert", "weather warning", "天气预警", "预警", "预警信息", "极端天气"),
+    "rainProbability": ("rain probability", "precipitation probability", "降雨概率", "降水概率"),
+}
 
 _SAFE_CONTRACT_ERROR_PREFIXES: tuple[tuple[str, str], ...] = (
     ("CardPlan syntax error", "DSL_SYNTAX_INVALID"),
@@ -128,6 +147,54 @@ def _safe_raw_contract_shape(
     return len(template_ids), required_group_hit_count, numeric_literal_count
 
 
+def weather_field_coverage(
+    query: str,
+    task_spec: TaskSpec,
+    compiled_a2ui: str,
+) -> dict[str, Any]:
+    """Report semantic field names only; never copy business values into metrics."""
+    normalized = query.casefold()
+    requested_names = {
+        field_name
+        for field_name, terms in _WEATHER_REQUEST_FIELD_TERMS.items()
+        if any(term in normalized for term in terms)
+    }
+    if any(term in normalized for term in ("weather", "temperature", "天气", "温度")):
+        requested_names.update(
+            {"city", "temperature", "condition", "airQuality", "temperatureRange"}
+        )
+    requested = [
+        field_name for field_name in _WEATHER_REQUEST_FIELD_TERMS if field_name in requested_names
+    ]
+    facts = extract_weather_overview_facts(task_spec.dataModelSchema)
+    if facts is None:
+        return {
+            "requested": requested,
+            "renderable": [],
+            "visible": [],
+            "requestedCount": len(requested),
+            "renderableCount": 0,
+            "visibleCount": 0,
+        }
+    values = {
+        "city": facts.city,
+        "temperature": facts.temperature,
+        "condition": facts.condition,
+        "airQuality": facts.air_quality,
+        "temperatureRange": facts.temperature_range,
+    }
+    renderable = list(values)
+    visible = [field_name for field_name, value in values.items() if value in compiled_a2ui]
+    return {
+        "requested": requested,
+        "renderable": renderable,
+        "visible": visible,
+        "requestedCount": len(requested),
+        "renderableCount": len(renderable),
+        "visibleCount": len(visible),
+    }
+
+
 class AdvancedComponentPipeline:
     """模型负责语义规划和参数映射，服务端负责选择与模板编译。"""
 
@@ -141,6 +208,7 @@ class AdvancedComponentPipeline:
     ) -> AdvancedPipelineOutput:
         """第五接口新入口；从第一层请求起完全旁路旧整卡选择与参数映射。"""
         registry = get_cardplan_registry()
+        data_admission_bypass = advanced_component_data_admission_is_relaxed()
         if card_spec is None:
             card_spec = {
                 "suggestSize": task_spec.size,
@@ -160,7 +228,8 @@ class AdvancedComponentPipeline:
         ) -> dict[str, Any]:
             logger.info(
                 f"{_MODULE} scope_prompt_built phase={phase} message_count={len(prompt)} "
-                f"prompt_chars={sum(len(item['content']) for item in prompt)}"
+                f"prompt_chars={sum(len(item['content']) for item in prompt)} "
+                f"data_admission_bypass={str(data_admission_bypass).lower()}"
             )
             response = await model_client.generate_json(prompt, phase=phase)
             logger.info(
@@ -229,6 +298,7 @@ class AdvancedComponentPipeline:
                     raw_output,
                     size=task_spec.size,
                     registry=registry,
+                    allowed_layout_ids=projection.allowed_layout_ids,
                 )
                 compilation = compile_ux_layout_card(
                     framed_output,
@@ -297,6 +367,32 @@ class AdvancedComponentPipeline:
             f"validation_repair_count={validation_repair_count} "
             "whole_card_scoring_bypassed=true fallback_used=false"
         )
+        requested_asset_sources = {
+            source
+            for item in task_spec.assetCandidates
+            if isinstance(item, dict)
+            for source in (item.get("src"),)
+            if isinstance(source, str)
+        }
+        trusted_internal_asset_sources = tuple(
+            source
+            for source in projection.contract.allowed_asset_sources
+            if source not in requested_asset_sources and source in compilation.a2ui
+        )
+        weather_coverage: dict[str, Any] = {}
+        if "WeatherOverview" in scope.advanced_component_ids:
+            weather_coverage = weather_field_coverage(
+                task_spec.userQuery,
+                mixed_task_spec,
+                compilation.a2ui,
+            )
+        batch_evidence: dict[str, Any] = {}
+        if get_settings().enable_widget_batch_recording:
+            batch_evidence = {
+                "temporaryDataAdmissionBypass": data_admission_bypass,
+                "projectedTaskSpec": mixed_task_spec.model_dump(mode="json"),
+                "precompileDsl": framed_output,
+            }
         return AdvancedPipelineOutput(
             component_id="ux-advanced-component-mixed",
             style_id=projection.theme_id,
@@ -305,6 +401,7 @@ class AdvancedComponentPipeline:
             ui_brief=scope,
             invocation={
                 "advancedScope": scope.model_dump(by_alias=True),
+                "temporaryDataAdmissionBypass": data_admission_bypass,
                 "allowedLayoutIds": projection.allowed_layout_ids,
                 "requestedTemplateIds": projection.requested_template_ids,
                 "layoutChildrenFramed": layout_children_framed,
@@ -318,6 +415,8 @@ class AdvancedComponentPipeline:
                 "templateRelationNumberNormalizationCount": (
                     compilation.stats.template_relation_number_normalization_count
                 ),
+                "weatherFieldCoverage": weather_coverage,
+                "batchEvidence": batch_evidence,
             },
             planner_mode=planner_mode,
             mapper_mode="llm",
@@ -333,6 +432,7 @@ class AdvancedComponentPipeline:
             template_used_ids=list(compilation.stats.template_used_ids),
             expanded_component_count=compilation.stats.expanded_component_count,
             advanced_composition=None,
+            trusted_internal_asset_sources=trusted_internal_asset_sources,
         )
 
     async def generate(

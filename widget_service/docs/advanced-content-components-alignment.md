@@ -63,22 +63,31 @@
 ### 3.2 DateOverview
 
 - UX 变体：`compactDate/dateHero/calendarContext`。
-- 正式输入：没有独立 Date provider；只允许从 `GetCalendarEvents.events[].startDate` 和可信服务时钟派生。
-- Selector：输出 date、dayOfMonth、weekday；无法可靠计算农历时不提供 `lunarText`。
-- 排版：2×2 默认 compact；2×4 才允许约 30fp 日期 Hero。会议即将开始时，会议时间优先于日期 Hero。
-- 当前差距：现有映射复用 calendar/context Template，没有独立日期契约，容易把 Card 标题误当日期组件。
-- 实现决策：新增专用日期 Template；Calendar 输入不可用时 Date 不进入候选。
+- 正式输入：没有独立 Date provider；只允许从 `GetCalendarEvents.events[].startDate` 派生。完整日期只接受
+  `YYYY-MM-DD` / `YYYY/MM/DD`；`MM-DD` 只有在同一 Calendar 输出的 `updatedAt` 含合法四位年份时可用。
+- Selector：只输出非空且格式合法的 `date`、`weekday`；不输出 month、year、农历、相对日期或节日。
+- 第一层准入：必须有 GetCalendarEvents、可解析的首个事件日期和事件/日程日期意图；2×4 日程组合可把日期
+  作为上下文。系统当前日期、月/年/农历/相对日期请求，以及 2×2 未明确请求日期的纯日程请求均不候选。
+- 排版：单业务 2×2/2×4 使用 30fp 日期、14fp 星期；多业务 2×2 使用 14fp 日期、12fp 星期的顶部
+  紧凑行；多业务 2×4 左侧日期 Hero、右侧日程、底部动作。会议临近时会议时间优先于日期主视觉。
+- 实现决策：DateOverview 是受限直接 TerseDSL 节点，只接收 variant/role；可信编译器从 Selector 事实展开，
+  不依赖 JSON Template。缺失、空值、类型错误或格式非法时在第一层前关闭候选，并在模型返回后再次拒绝。
 
 ### 3.3 ScheduleOverview
 
-- UX 变体：`nextEvent/meetingCompact/meetingExpanded/agendaList/countdown/focusContext`。
-- 正式输入：`GetCalendarEvents.events[]`，含 title、dtStart/dtEnd、startDate、location、countdownDays 和一键服务字段。
-- Selector：生成 timeText、upcoming/startingSoon/ongoing/ended、countdownText；只有
-  `isServiceValid=1` 且 link 非空时 `canJoin=true`。
-- 排版：2×2 标题+时间 mustShow，列表最多 2 项；地点/会议号降级。2×4 列表最多 3 项。
-- 动作：加入会议与专注模式必须按 primaryGoal 二选一，均由布局承载。
-- 当前差距：`ux-calendar-content@1`、`ux-meeting-metadata@1` 使用 9/10fp 和 fixture 化字段名。
-- 实现决策：新增基于 events[] 的 strict Template 和 Selector，旧 @1 保留。
+- 当前变体：`nextEvent/meetingCompact/meetingExpanded`；`focusContext` 仅在批准专注 Action 存在时启用，
+  `agendaList/countdown` 保持禁用。
+- 正式输入：只消费 `GetCalendarEvents` 同一个可信首项事件的非空 string `title/dtStart`；非空 string
+  `dtEnd` 可拼接 `timeText`，非空 `eventLocation` 为可选 location。不得投影实时状态、分钟倒计时、
+  会议号、备注、邀请人、一键服务字段或多条 agenda。
+- 第一层准入：provider、首项事实、用户摘要意图和 2x2/2x4 尺寸必须同时成立；明确地点需要 location，
+  明确入会/查看/专注需要语义闭环的 TaskSpec 事件候选。模型返回后复用同一确定性校验。
+- 排版：会议正文使用 8vp 红橙空心圆点与只覆盖正文的 1vp Divider；Hero 为 20/14/10fp，2x2 Support
+  为 14/12/10fp，2x4 Support 为 16/14/10fp。meetingExpanded 缺 location 时降为 meetingCompact。
+- 动作与素材：业务组件不持有 Action；布局从批准事件候选注入。来源/时间/地点/Action 图标只能从本轮
+  assetCandidates 按语义标签选择，缺失则省略可选图标。
+- 实现决策：ScheduleOverview 是受限直接 TerseDSL 节点，可信编译器确定性展开为标准 Terse/A2UI；
+  `ux-schedule-overview` JSON 视图树已移除。
 
 ### 3.4 TaskOverview
 
@@ -108,21 +117,30 @@
 
 ### 3.7 BatteryOverview
 
-- UX 变体：`normal/charging/low/runtime/multiBattery`；删除非设计变体 `resourceUsage`。
-- 正式输入：`GetPhoneBatteryInfo` 的 batterySOC、batterySOCText、充电/容量/健康状态和 updatedAt。
-- Selector：`batterySOC=0` 必须可见；由可信阈值和 capacity 描述得到 normal/low/critical；未知剩余时长不生成。
-- 排版：2×2 low 使用标题+提示、44/52vp Ring 和布局动作；2×4 左 Hero、右提示/动作。
+- UX 变体：当前只启用 `normal/charging/low`；`runtime/multiBattery/resourceUsage` 均不属于本组件。
+- 正式输入：`GetPhoneBatteryInfo` 同一数据树中的 batterySOC、batterySOCText、
+  batteryCapacityLevelDesc、chargingStatusDesc 四字段；SOC 数值与百分比文本必须一致，0% 合法。
+- Selector：两项描述必须为非空字符串；只请求健康度、温度、电压、电流、充电器类型、续航、预计充满
+  时间或外设电量时禁选。投影不保留其它字段。
+- 排版：2×2 单业务为标题—建议—52vp Ring—可选 IconAction；2×4 为左 Ring 右文本；手机+耳机通过
+  BluetoothDeviceOverview 组成 PeerPairLayout 的两个对等 Ring。
 - 当前差距：`ux-battery-status@1` 字号 8/17fp 且依赖 tipLine1/2/3 这种 fixture 字段。
-- 实现决策：新增 Battery strict Template 和真实字段 mapper；多部件电量优先交给 Bluetooth 组件。
+- 实现决策：使用受限 `BatteryOverview({variant, role, batteryIcon?})` 直接 TerseDSL 构造，由可信编译器
+  展开；旧 JSON Template 不进入新选择链。所有图标来自 TaskSpec 素材，省电动作必须有批准事件闭环。
 
 ### 3.8 AppUsageOverview
 
-- UX 变体：`singleApp/dailyLimit/overLimit/topApps`。
-- 正式输入：`GetAppUsageDuration.appUsage` 目前只有 appName 和 durationText。
-- Selector：可以确定性解析 usedSeconds 时才生成双值时长；limit、usageRatio、overLimit 必须由新增真实字段计算。
-- 排版：2×2 使用 30fp 双值和 12fp 单位；超限时必须直接给出超出量；背景禁止多色模糊光斑。
+- UX 变体：Registry 声明 `singleApp/dailyLimit/overLimit/topApps`，当前 capability 只启用 `singleApp`。
+- 正式输入：同一 `GetAppUsageDuration` 数据树中的非空 string `appUsage.appName`、
+  `appUsage.durationText` 和同级 `updatedAt`；用户必须明确指定该应用和当日时长意图。
+- Selector：只无损解析小时/分钟，`0分钟` 合法；纯秒或含秒禁选。投影只保留三项原始事实与确定性
+  数值/单位片段。总量、多应用、排行、限额、超限、剩余、比例/进度、趋势/历史、分类汇总全部禁选。
+- 排版：2×2/2×4 使用同行 30fp 数值与 12fp 单位、12fp 标题、10fp 更新时间；没有可信总量时禁止
+  Progress。2×4 使用 Hero+Support，2×2 使用单 Hero。
 - 当前差距：新 Golden fixture 的 safeValue/warningValue/total/overtime 不属于正式 Schema。
-- 实现决策：现阶段只开放 `singleApp`；`dailyLimit/overLimit/topApps` 在 Schema 扩展前全部 provider gate。
+- 实现决策：`AppUsageOverview({variant, role, appIcon?})` 由可信编译器直接展开，不依赖 JSON Template；
+  管控动作只接受用户请求且正式注册的 `event.open.settings.parentControl`，否则使用无动作布局。应用与动作
+  图标只从 TaskSpec 素材选择。SystemMode 没有可信状态能力时禁止组合和占位。
 
 ### 3.9 ActivityOverview
 
@@ -154,11 +172,17 @@
 ### 3.12 SleepOverview
 
 - UX 变体：`duration/insufficient/schedule/stages`。
-- 正式输入：健康能力含 sleepStatus、night/deep/nap 时长、入睡/起床时间和 sleepScore。
-- Selector：确定性解析 sleepMinutes，依据可信 sleepStatus/目标判断 insufficient；无阶段数据时不生成 stages。
-- 排版：2×2 双值 30fp、单位 12fp，标题+时长+可选短进度；提醒动作由布局持有。
-- 当前差距：`ux-sleep-metric@1` 有 12/34fp，且依赖 hours/minutes fixture 字段。
-- 实现决策：新增 Sleep strict Template 和 duration parser；`stages` 在 Schema 补齐前关闭。
+- 正式输入：`GetHealthAndSportSummary` 的 `nightSleepDurationText`；可信 `sleepStatus`、严格 `HH:mm`
+  入睡/醒来时刻为分别可选的元数据。
+- Selector：总时长必须可按小时/分钟无损解析并由服务端归一化，`0分钟` 有效；`insufficient` 只认明确
+  不足状态，不按时长推断；`schedule` 仅在 2×4 且两个时刻完整时开放。
+- 排版：2×2 双值 30fp/12fp，数值与各自单位 0vp、两组 2vp并底部对齐；2×4 为时长 Hero + 8vp
+  圆角的入睡/醒来 Support。无目标/阶段数据时不生成 Ring、Progress、时间轴或阶段条。
+- 当前差距：得分、深睡/浅睡/REM、午睡、目标完成率、趋势与建议虽可能存在于 Provider Schema，但未进入
+  当前 Sleep 投影；批量效果测试阶段只要总时长准入成立，相关请求可进入候选并降级为 `duration`，不展示或
+  补造这些额外指标。状态或作息字段缺失时也只降级，不再整体拒绝。
+- 实现决策：使用 `SleepOverview({variant, role, sourceIcon?})` 直接 TerseDSL 构造和确定性 lowering；新链路
+  不请求 `ux-sleep-overview@2`，最终 A2UI 不保留高级节点。提醒只使用本轮批准的闹钟 Action。
 
 ### 3.13 LocationOverview
 
@@ -200,11 +224,17 @@
 
 - 设计原因：`GetSystemMemInfo` 和新“内存清理”案例存在真实需求，但 16 个原始组件没有资源使用语义。
 - 禁止方案：不得继续把 `resourceUsage` 塞入 BatteryOverview；内存百分比不是电量。
-- 建议契约：`kind=memory|storage`、`usagePercent`、used/available/total 文本、state、updatedAt。
-- 正式输入：当前 `GetSystemMemInfo` 只支持 memory，包含 total/free/available 和 usagePercent；没有 storage 使用率。
-- 排版：2×2 一个 44/52vp 主 Ring+容量说明；若与 Battery 组合，使用 PeerPair，但只能各自显示真实指标。
+- 正式输入：当前只允许 `memory`，必须从同一 `GetSystemMemInfo` 数据树取得 0..100 的有限 number
+  `usagePercent`（0% 合法）及两个可信非空 string `availableMemText/totalMemText`；三项任一不合法即禁选。
+- 投影边界：只保留上述三项。`freeMemText` 不可展示；不得生成 used/state/updatedAt，也不得据百分比推断
+  内存不足、正常或告警。
+- 意图门禁：存储/磁盘、缓存、进程明细、CPU/GPU、swap、趋势、历史曲线以及 freeMemText-only 请求禁选；
+  Registry 中的 `storage` 仅为未启用声明。
+- 排版：单业务使用 52vp 主 Ring；2×2 与 Battery 使用 PeerPair 的两个 44vp 等权 Ring；2×4 使用
+  56:44 的内存 Hero + 电量 Support。Ring 描边 6vp，中心素材 24vp，根圆角 20vp、安全边距 12vp。
 - 新 Golden 中的 storageValue=87 和 memoryValue=72 超出当前 Schema，不能作为生产数据来源。
-- 实现决策：先实现 memory 变体；storage 和双环清理卡等待 storage provider。清理动作属于布局并需要真实事件能力。
+- 实现决策：使用 `ResourceUsageOverview({variant:"memory", role:"hero|peer", icon?})` 直接 TerseDSL 构造，
+  不新增或依赖 JSON Template。清理动作只接受批准的 `event.clean.memory`；没有事件即回退无动作布局。
 
 ## 4. Provider Gate 汇总
 
@@ -226,7 +256,7 @@
 | SystemMode | 无 | 无自动候选 | 全部等待 provider |
 | Bluetooth | GetEarphoneInfo | earbuds | singleDevice 尚无独立模板；mediaControl 缺媒体来源 |
 | Settings | 无 | 无自动候选 | 全部等待 provider |
-| ResourceUsage | GetSystemMemInfo | memory | storage 缺 provider |
+| ResourceUsage | GetSystemMemInfo | memory（严格三字段） | storage 及非内存明细/趋势请求禁选 |
 
 ## 5. 新 UX Golden 的契约边界
 
@@ -258,12 +288,13 @@ Golden 数据写死 Selector、组件次数或 Template 次数。
 | 内容组件 | 新 Template | 生产 Scope |
 |---|---|---|
 | Weather | `ux-weather-overview@2` | ViewWeather 开放 |
-| Date | `ux-date-overview@2` | GetCalendarEvents 开放 |
-| Schedule | `ux-schedule-overview@2` | GetCalendarEvents 开放 |
+| Date | 直接 TerseDSL（旧 `ux-date-overview@2` 仅兼容保留） | GetCalendarEvents 严格日期准入后开放 |
+| Schedule | 直接 TerseDSL（无 Schedule JSON 视图树） | GetCalendarEvents 严格首项准入后开放 |
 | Task | `ux-task-overview@2` | 无 provider，关闭 |
 | Memo | `ux-memo-preview@2` | 无 provider，关闭 |
 | Call | `ux-call-overview@2` | 无 provider，关闭；号码必须含脱敏字符 |
 | Battery | `ux-battery-overview@2` | GetPhoneBatteryInfo 开放 |
+| ResourceUsage | 直接 TerseDSL（不使用 Resource JSON Template） | GetSystemMemInfo 严格三字段后开放 memory |
 | AppUsage | `ux-app-usage-overview@2` | 只开放 singleApp |
 | Activity | `ux-activity-overview@2` | Health 开放 steps/dailySummary |
 | Workout | `ux-workout-overview@2` | Health latest、CountdownDays countdown |
@@ -287,7 +318,8 @@ A2UI 不含 Template。
 更新时间、服务链接和其他传输元数据不再自动进入 `mustKeep`。这一步是可信 Python Selector，不增加 LLM 调用，
 也不修改原始 TaskSpec。
 
-基于 `UX设计/2X2卡片案例` 的 9 个场景，确定性编译结果如下：
+以下 9 场景表是 Schedule 直接 TerseDSL 迁移前的历史基线，旧 Template 标识不代表当前注册表仍保留对应
+JSON 视图树：
 
 | 场景 | 正式契约 | 使用的新内容 Template | ready | Golden 语义 | 空间裁剪 |
 |---|---|---|---:|---:|---:|
@@ -307,7 +339,8 @@ fallback 冒充生产成功。本轮为纯确定性验证，真实模型调用�
 
 ## 9. DeepSeek V4 Flash 真实生成结果
 
-真实评估使用 `deepseek-v4-flash`、llmclient 直连，显式 `thinking=false`，不启用模型 fallback。首次全量运行
+以下真实评估是同一迁移前历史结果。评估使用 `deepseek-v4-flash`、llmclient 直连，显式
+`thinking=false`，不启用模型 fallback。首次全量运行
 发现 2×2 的 Weather+Location、Schedule+Date 重复 Scope 会诱导模型选择无法容纳全部 mustKeep 的
 `HeroSupportActionLayout`。服务端随后增加通用 Scope 归一化：Weather 已拥有 city 时不再重复选择 Location；
 Schedule+Date 在用户未明确询问日期时由 Schedule 原子拥有，明确询问日期时仍保留 Date。该规则不读取

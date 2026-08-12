@@ -1,4 +1,4 @@
-"""家庭关怀天气模板。"""
+"""双时长指标与主操作模板。"""
 
 from .plugin import PLUGIN
 

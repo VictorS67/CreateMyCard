@@ -381,16 +381,38 @@ class UIBrief(BaseModel):
     scenario: Literal[
         "family-care",
         "race-countdown",
+        "countdown",
         "sleep-summary",
         "usage-control",
         "low-power",
         "upcoming-event",
         "ongoing-event",
         "resource-monitoring",
+        "memory-cleanup",
+        "bad-weather-commute",
         "status-summary",
         "schedule-detail",
         "general",
     ] = "general"
+    layout_archetype: Literal[
+        "auto",
+        "hero-metric-action",
+        "hero-metric-icon-action",
+        "dual-ring-primary-action",
+        "hero-countdown",
+        "dual-duration-action",
+        "usage-summary-action",
+        "status-ring-action",
+        "upcoming-event-action",
+        "timeline-event-action",
+    ] = Field(
+        default="auto",
+        alias="layoutArchetype",
+        description=(
+            "纯视觉结构选择，不表达业务名称：单主指标、带双图标的单主指标、"
+            "双环指标、倒计时、双时长、使用摘要、状态环、未来事项或时间线事项。"
+        ),
+    )
     status_semantics: list[
         Literal["do-not-disturb", "low-power", "warning", "active", "sleep-quality"]
     ] = Field(default_factory=list, alias="statusSemantics")
@@ -407,6 +429,8 @@ class UIBrief(BaseModel):
             "event-count",
             "location-detail",
             "metric",
+            "memory-usage",
+            "storage-usage",
             "percentage",
             "status",
         ]
@@ -423,6 +447,8 @@ class UIBrief(BaseModel):
             "join-meeting",
             "open-details",
             "primary-action",
+            "clean-memory",
+            "hail-taxi",
         ]
     ] = Field(default_factory=list, alias="actionSemantics")
     primary_information: list[str] = Field(alias="primaryInformation", min_length=1)
@@ -456,6 +482,59 @@ class UIBrief(BaseModel):
             raise ValueError("must not be empty")
         return value.strip()
 
+    @field_validator("status_semantics", mode="before")
+    @classmethod
+    def known_status_semantics(cls, values: Any) -> Any:
+        allowed = {"do-not-disturb", "low-power", "warning", "active", "sleep-quality"}
+        return (
+            [value for value in values if value in allowed] if isinstance(values, list) else values
+        )
+
+    @field_validator("content_semantics", mode="before")
+    @classmethod
+    def known_content_semantics(cls, values: Any) -> Any:
+        allowed = {
+            "location",
+            "temperature",
+            "countdown",
+            "duration",
+            "app-usage",
+            "battery-level",
+            "event-title",
+            "time-range",
+            "event-count",
+            "location-detail",
+            "metric",
+            "memory-usage",
+            "storage-usage",
+            "percentage",
+            "status",
+        }
+        return (
+            [value for value in values if value in allowed] if isinstance(values, list) else values
+        )
+
+    @field_validator("action_semantics", mode="before")
+    @classmethod
+    def known_action_semantics(cls, values: Any) -> Any:
+        allowed = {
+            "call-contact",
+            "open-event",
+            "remind-sleep",
+            "manage-usage",
+            "enable-power-saving",
+            "open-dnd-settings",
+            "enable-focus",
+            "join-meeting",
+            "open-details",
+            "primary-action",
+            "clean-memory",
+            "hail-taxi",
+        }
+        return (
+            [value for value in values if value in allowed] if isinstance(values, list) else values
+        )
+
     @field_validator("local_template_ids")
     @classmethod
     def versioned_template_ids(cls, values: list[str]) -> list[str]:
@@ -474,6 +553,7 @@ class SelectionConstraints(BaseModel):
 class ComponentSpec(BaseModel):
     component_id: str
     description: str
+    slots: list[str] = Field(default_factory=list)
     supported_sizes: list[str]
     required_signals: dict[str, float] = Field(default_factory=dict)
     preferred_signals: dict[str, float] = Field(default_factory=dict)
@@ -489,6 +569,7 @@ class ComponentSpec(BaseModel):
     action_semantics: list[str] = Field(default_factory=list)
     temporalities: list[str] = Field(default_factory=list)
     min_semantic_score: float = 0.0
+    layout_archetypes: list[str] = Field(default_factory=list)
 
 
 class CandidateScore(BaseModel):

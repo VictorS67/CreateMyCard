@@ -20,8 +20,9 @@ class Invocation(BaseModel):
 
 
 SPEC = ComponentSpec(
-    component_id="sleep-coach",
-    description="紫色睡眠时长双指标与早睡提醒。",
+    component_id="dual-duration-action",
+    description="两个时长数字和一个主要操作。",
+    slots=["状态摘要", "两个并列的时长或数值指标", "一个主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["health"],
@@ -29,6 +30,7 @@ SPEC = ComponentSpec(
     status_semantics=["sleep-quality"],
     content_semantics=["duration", "status"],
     action_semantics=["remind-sleep", "open-details"],
+    layout_archetypes=["dual-duration-action"],
     temporalities=["now", "historical"],
     min_semantic_score=8.0,
     min_fields=2,

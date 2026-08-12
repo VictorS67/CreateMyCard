@@ -22,8 +22,9 @@ class Invocation(BaseModel):
 
 
 SPEC = ComponentSpec(
-    component_id="current-meeting",
-    description="日期、会议详情和加入会议动作。",
+    component_id="timeline-event-action",
+    description="日期、事项详情、时间地点和主要操作。",
+    slots=["日期", "事项标题", "开始和结束时间", "地点详情", "一个主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["schedule"],
@@ -31,6 +32,7 @@ SPEC = ComponentSpec(
     status_semantics=["active"],
     content_semantics=["event-title", "time-range", "location-detail"],
     action_semantics=["join-meeting"],
+    layout_archetypes=["timeline-event-action"],
     temporalities=["now"],
     min_semantic_score=8.0,
     min_fields=5,

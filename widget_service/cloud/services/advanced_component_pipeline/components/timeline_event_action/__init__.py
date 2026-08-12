@@ -1,4 +1,4 @@
-"""睡眠监测模板。"""
+"""时间线事项与主操作模板。"""
 
 from .plugin import PLUGIN
 

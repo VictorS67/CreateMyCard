@@ -1,4 +1,4 @@
-"""亲人关怀：天气主指标、状态摘要和快捷关怀动作。"""
+"""单个大号主指标、状态摘要和快捷操作。"""
 
 from pydantic import BaseModel, Field
 
@@ -16,23 +16,28 @@ class Invocation(BaseModel):
     temperature: BindingRef = Field(description="当前温度的大号主指标绑定。")
     condition: BindingRef = Field(description="当前天气状态文本绑定。")
     range_text: BindingRef = Field(description="今日最高/最低温度范围文本绑定。")
-    location_icon: str = Field(description="必须填写 assetCandidates 中的定位或天气资源 id。")
+    location_icon: str | None = Field(
+        default=None,
+        description="可选的定位或天气资源 id；没有素材时仅显示地点文本。",
+    )
     action: ActionRef = Field(description="关怀动作，event_id 必须来自 eventCandidates。")
 
 
 SPEC = ComponentSpec(
-    component_id="family-care",
-    description="蓝色天气主指标卡，展示地点、温度、天气状态并提供亲人关怀动作。",
+    component_id="hero-metric-action",
+    description="单个大号主指标、状态摘要和可选语义操作。",
+    slots=["顶部短文本", "一个大号主指标", "两条状态摘要", "一个快捷操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["weather"],
-    scenarios=["family-care"],
+    scenarios=["family-care", "status-summary"],
     content_semantics=["location", "temperature", "status"],
-    action_semantics=["call-contact"],
+    action_semantics=["call-contact", "open-details"],
+    layout_archetypes=["hero-metric-action"],
     temporalities=["now"],
     min_semantic_score=8.0,
     min_fields=3,
-    min_assets=1,
+    min_assets=0,
     min_actions=1,
 )
 
@@ -40,9 +45,12 @@ SPEC = ComponentSpec(
 def build_rows(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec):
     root = root_props(tokens)
     root.update({"padding": 12, "itemMargin": 6, "justifyContent": "spaceBetween"})
-    return [
+    header_children = ["location"]
+    if invocation.location_icon is not None:
+        header_children.append("location-icon")
+    rows = [
         ["root", "Column", root, ["header", "temperature", "condition", "footer"]],
-        ["header", "Row", {"alignItems": "center"}, ["location", "location-icon"]],
+        ["header", "Row", {"alignItems": "center"}, header_children],
         [
             "location",
             "Text",
@@ -51,16 +59,6 @@ def build_rows(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
                 "fontSize": 14,
                 "fontColor": tokens["primary"],
                 "layoutWeight": 1,
-            },
-        ],
-        [
-            "location-icon",
-            "Image",
-            {
-                "src": asset_src(invocation.location_icon, task_spec),
-                "width": 18,
-                "height": 18,
-                "objectFit": "contain",
             },
         ],
         [
@@ -107,6 +105,20 @@ def build_rows(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
             },
         ],
     ]
+    if invocation.location_icon is not None:
+        rows.append(
+            [
+                "location-icon",
+                "Image",
+                {
+                    "src": asset_src(invocation.location_icon, task_spec),
+                    "width": 18,
+                    "height": 18,
+                    "objectFit": "contain",
+                },
+            ]
+        )
+    return rows
 
 
 def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: TaskSpec) -> str:
@@ -119,13 +131,16 @@ def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
         temperature=ref(field_by_terms(data_shape, "temperaturetext", "温度", numeric=None)),
         condition=ref(field_by_terms(data_shape, "condition", "天气", numeric=False)),
         range_text=ref(field_by_terms(data_shape, "range", "最高", numeric=False)),
-        location_icon=first_asset_id(task_spec, "location", "天气"),
+        location_icon=(
+            first_asset_id(task_spec, "location", "天气") if task_spec.assetCandidates else None
+        ),
         action=first_action(task_spec, "关怀"),
     )
 
 
 def validate(invocation: Invocation, task_spec: TaskSpec) -> None:
-    asset_src(invocation.location_icon, task_spec)
+    if invocation.location_icon is not None:
+        asset_src(invocation.location_icon, task_spec)
 
 
 PLUGIN = register_component(

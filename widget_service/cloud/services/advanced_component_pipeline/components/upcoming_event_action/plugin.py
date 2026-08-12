@@ -20,8 +20,9 @@ class Invocation(BaseModel):
 
 
 SPEC = ComponentSpec(
-    component_id="focus-mode",
-    description="下一个会议摘要和专注模式动作。",
+    component_id="upcoming-event-action",
+    description="下一个事项、时间范围和主要操作。",
+    slots=["下一个事项标题", "开始和结束时间", "提醒摘要", "一个主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["schedule", "productivity"],
@@ -29,6 +30,7 @@ SPEC = ComponentSpec(
     status_semantics=["do-not-disturb", "active"],
     content_semantics=["event-title", "time-range", "event-count"],
     action_semantics=["open-dnd-settings", "enable-focus"],
+    layout_archetypes=["upcoming-event-action"],
     temporalities=["upcoming"],
     min_semantic_score=8.0,
     min_fields=3,

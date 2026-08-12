@@ -1,4 +1,4 @@
-"""专注模式模板。"""
+"""大号倒计时与主操作模板。"""
 
 from .plugin import PLUGIN
 

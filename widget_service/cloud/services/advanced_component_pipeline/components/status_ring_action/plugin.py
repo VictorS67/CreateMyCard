@@ -7,21 +7,27 @@ from models.generation import TaskSpec
 from ...component_registry import ComponentPlugin, register_component
 from ...models import ActionRef, BindingRef, ComponentSpec, DataShape
 from ..a2ui_base import rows_to_a2ui
-from ..base import binding, event_handler, root_props, validate_numeric_paths
+from ..base import binding, event_handler, root_props
 from ..scene_helpers import asset_src, field_by_terms, first_action, first_asset_id, ref
 
 
 class Invocation(BaseModel):
     status_text: BindingRef = Field(description="低电量状态或省电建议文本绑定。")
-    percentage: BindingRef = Field(description="电池百分比，必须绑定 number 或 integer 字段。")
+    percentage: BindingRef = Field(
+        description=(
+            "电池百分比绑定。优先选择 number 或 integer 字段；若 TaskSpec 只提供"
+            "已格式化的百分比字符串（例如 batterySOCText），允许直接绑定该字符串路径。"
+        )
+    )
     battery_icon: str = Field(description="必须填写 assetCandidates 中的电池资源 id。")
     action_icon: str = Field(description="必须填写 assetCandidates 中的省电资源 id。")
     action: ActionRef = Field(description="省电动作，event_id 必须来自 eventCandidates。")
 
 
 SPEC = ComponentSpec(
-    component_id="low-power",
-    description="低电阈值提醒、环形电量和省电动作。",
+    component_id="status-ring-action",
+    description="状态摘要、单环形指标和圆形图片操作。",
+    slots=["状态摘要", "一个百分比环形进度", "环形中心图片", "一个主要操作"],
     supported_sizes=["2x2"],
     required_signals={"action": 1.0},
     domains=["device"],
@@ -29,6 +35,7 @@ SPEC = ComponentSpec(
     status_semantics=["low-power", "warning"],
     content_semantics=["battery-level", "percentage", "status"],
     action_semantics=["enable-power-saving"],
+    layout_archetypes=["status-ring-action"],
     temporalities=["now"],
     min_semantic_score=8.0,
     min_fields=2,
@@ -142,7 +149,7 @@ def build_a2ui(invocation: Invocation, tokens: dict[str, object], task_spec: Tas
 def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
     return Invocation(
         status_text=ref(field_by_terms(data_shape, "status", "状态", numeric=False)),
-        percentage=ref(field_by_terms(data_shape, "percent", "电量", numeric=True)),
+        percentage=ref(field_by_terms(data_shape, "percent", "soc", "电量", numeric=None)),
         battery_icon=first_asset_id(task_spec, "electricity", "电池"),
         action_icon=first_asset_id(task_spec, "save_power", "省电"),
         action=first_action(task_spec, "省电"),
@@ -150,7 +157,6 @@ def map_offline(task_spec: TaskSpec, data_shape: DataShape) -> Invocation:
 
 
 def validate(invocation: Invocation, task_spec: TaskSpec) -> None:
-    validate_numeric_paths([invocation.percentage.path], task_spec)
     asset_src(invocation.battery_icon, task_spec)
     asset_src(invocation.action_icon, task_spec)
 

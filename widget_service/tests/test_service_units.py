@@ -2207,7 +2207,9 @@ def test_task_spec_builder_projects_valid_object_and_array_fields():
         "eventCandidates",
         "dataModelSchema",
         "assetCandidates",
+        "selectedTemplateId",
     }
+    assert task_spec.selectedTemplateId is None
     assert task_spec.assetCandidates[0]["id"] == "asset.drop_1"
     assert task_spec.assetCandidates[0]["sceneTags"] == ["weather", "humidity"]
 

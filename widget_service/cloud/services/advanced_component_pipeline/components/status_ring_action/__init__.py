@@ -1,4 +1,4 @@
-"""赛事倒计时模板。"""
+"""状态环与主操作模板。"""
 
 from .plugin import PLUGIN
 

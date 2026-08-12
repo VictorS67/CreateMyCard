@@ -20,7 +20,8 @@ from services.terse_dsl_nested2_converter import TerseDslNested2ConversionError
 
 from .argument_mapper import map_arguments_offline, map_arguments_with_llm
 from .compiler import build_component_output
-from .component_selector import select_component
+from .component_registry import get_component
+from .component_selector import select_component, structural_compatibility
 from .composition import build_advanced_composition_plan
 from .content_selectors import (
     advanced_component_data_admission_is_relaxed,
@@ -516,20 +517,29 @@ class AdvancedComponentPipeline:
         selection_candidates = selection.candidates if selection is not None else []
         confidence = selection.confidence if selection is not None else 0.0
         settings = get_settings()
-        threshold = getattr(
-            settings,
-            "advanced_whole_card_confidence_threshold",
-            0.75,
-        )
         whole_card_enabled = getattr(settings, "enable_advanced_whole_card_template", True)
-        use_hybrid = (
-            force_hybrid or not whole_card_enabled or selection is None or confidence < threshold
-        )
+        selected_compatibility = 0.0
+        if selection is not None:
+            selected_compatibility = structural_compatibility(
+                data_shape,
+                SelectionConstraints(
+                    size=task_spec.size,
+                    action_count=len(task_spec.eventCandidates),
+                    asset_count=len(task_spec.assetCandidates),
+                ),
+                get_component(selection.component_id).spec,
+            )["score"]
+        # A selected whole-card component is authoritative while the legacy
+        # route remains enabled. Confidence and structural compatibility stay
+        # observable, but only the explicit server switch or force flag can
+        # bypass a valid selection. The fifth interface uses generate_mixed().
+        use_hybrid = force_hybrid or not whole_card_enabled or selection is None
         selected_component = selection.component_id if selection is not None else "none"
         logger.info(
             f"{_MODULE} component_selection_completed selected_component_id={selected_component} "
-            f"confidence={confidence} threshold={threshold} force_hybrid={force_hybrid} "
+            f"confidence={confidence} force_hybrid={force_hybrid} "
             f"whole_card_enabled={whole_card_enabled} "
+            f"task_spec_compatibility={selected_compatibility} "
             f"route={'hybrid-template' if use_hybrid else 'whole-card-template'} "
             f"candidate_count={len(selection_candidates)}"
         )

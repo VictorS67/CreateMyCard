@@ -131,3 +131,4 @@ class TaskSpec(BaseModel):
     eventCandidates: list[EventAction] = Field(default_factory=list)
     dataModelSchema: dict[str, Any]
     assetCandidates: list[dict[str, Any]] = Field(default_factory=list)
+    selectedTemplateId: str | None = None

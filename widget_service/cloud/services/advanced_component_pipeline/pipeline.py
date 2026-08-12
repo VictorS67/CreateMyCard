@@ -303,13 +303,14 @@ class AdvancedComponentPipeline:
                 )
                 compilation = compile_ux_layout_card(
                     framed_output,
-                    task_spec=mixed_task_spec,
+                    task_spec=task_spec,
                     contract=projection.contract,
                     protocol_profile=protocol_profile,
                     registry=registry,
                     business_title=(
                         str(card_spec.get("title")) if card_spec.get("title") else None
                     ),
+                    enable_data_bindings=True,
                 )
                 break
             except TerseDslNested2ConversionError as exc:
@@ -580,6 +581,7 @@ class AdvancedComponentPipeline:
                     contract=projection.contract,
                     protocol_profile=protocol_profile,
                     registry=registry,
+                    enable_data_bindings=True,
                 )
             except TerseDslNested2ConversionError as exc:
                 logger.error(

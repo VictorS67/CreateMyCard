@@ -29,6 +29,8 @@ _LEAVES = frozenset({"Text", "Image", "Divider", "Progress", "Button", "Checkbox
 _COMPONENTS = _CONTAINERS | _LEAVES
 _TEXT_DESIGNS = {
     "title": {"fontSize": 20, "fontWeight": 700, "fontColor": "font_primary"},
+    "compact-title": {"fontSize": 14, "fontWeight": 700, "fontColor": "font_primary"},
+    "compact-action": {"fontSize": 12, "fontWeight": 600, "fontColor": "font_primary"},
     "body": {"fontSize": 14, "fontWeight": 400, "fontColor": "font_primary"},
     "subtitle": {"fontSize": 12, "fontWeight": 500, "fontColor": "font_secondary"},
     "success": {"fontSize": 14, "fontWeight": 600, "fontColor": "confirm"},
@@ -36,6 +38,7 @@ _TEXT_DESIGNS = {
 }
 _IMAGE_DESIGNS = {
     "icon": {"width": 24, "height": 24, "objectFit": "contain"},
+    "compact-icon": {"width": 16, "height": 16, "objectFit": "contain"},
     "thumbnail": {"width": 40, "height": 40, "objectFit": "cover", "borderRadius": 10},
     "hero": {"width": 64, "height": 64, "objectFit": "contain"},
 }

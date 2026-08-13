@@ -32,25 +32,45 @@ from services.advanced_component_pipeline.component_selector import select_compo
 from services.advanced_component_pipeline.components.status_ring_action.plugin import (
     Invocation as LowPowerInvocation,
 )
+from services.advanced_component_pipeline.content_selectors import (
+    apply_content_selectors,
+    project_content_component_facts,
+)
 from services.advanced_component_pipeline.data_shape import extract_data_shape
 from services.advanced_component_pipeline.models import (
     ActionRef,
     AdvancedPipelineOutput,
+    AdvancedScopeBrief,
     BindingRef,
     SelectionConstraints,
     UIBrief,
 )
+from services.advanced_component_pipeline.scope_planner import (
+    build_advanced_scope_prompt,
+    plan_advanced_scope_with_llm,
+    resolve_scope_layout_ids,
+    scope_template_ids,
+)
 from services.advanced_component_pipeline.ui_planner import build_ui_planner_prompt
+from services.advanced_component_pipeline.ux_mixed_framer import (
+    frame_ux_layout_children,
+    frame_ux_layout_root_children,
+)
+from services.advanced_component_pipeline.ux_mixed_prompt import build_ux_mixed_prompt
 from services.artifact_store import ArtifactStore
+from services.cardplan_template.compiler import compile_ux_layout_card
+from services.cardplan_template.parser import parse_hybrid_card, parse_ux_layout_card
+from services.cardplan_template.registry import get_cardplan_registry
 from services.generation_pipeline import (
     DslProcessorKind,
     GenerationRoutePolicy,
 )
-from services.protocol_registry import (
-    TERSE_DSL_NESTED2_PROFILE_ID,
-)
+from services.protocol_registry import TERSE_DSL_NESTED2_PROFILE_ID, A2UIProtocolRegistry
 from services.source_artifact_repository import SourceArtifactLoadResult
-from services.terse_dsl_nested2_converter import convert_terse_dsl_nested2_to_a2ui
+from services.terse_dsl_nested2_converter import (
+    TerseDslNested2ConversionError,
+    convert_terse_dsl_nested2_to_a2ui,
+)
 from services.validator import ArtifactValidator
 from services.widget_generation_service import WidgetGenerationService
 
@@ -586,6 +606,7 @@ class OfflineModelClient:
         return (
             'Template("card@1", {}, Column("section", '
             'Text("设备电量低于20", "body"), '
+            'Progress({"value":18,"total":100}), '
             'Text("电量低于20%，开启省电模式", "body")));'
         )
 
@@ -714,6 +735,2276 @@ async def test_pipeline_uses_selected_template_even_when_confidence_is_low(monke
     assert output.whole_card_confidence == 0.5
     assert output.fallback_used is False
     assert "Template" not in output.compiled_a2ui
+
+
+@pytest.mark.asyncio
+async def test_server_switch_disables_whole_card_template(monkeypatch):
+    monkeypatch.setattr(get_settings(), "enable_advanced_whole_card_template", False)
+
+    output = await AdvancedComponentPipeline().generate(
+        _metric_task_spec(),
+        OfflineModelClient(),
+    )
+
+    assert output is not None
+    assert output.route == "hybrid-template"
+    assert output.confidence_bypassed is True
+    assert output.fallback_used is False
+
+
+_WEATHER_TERSE_BODY = (
+    'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+    '"conditionIcon":"resources/base/media/weather.svg"}));'
+)
+
+
+class UxMixedModelClient:
+    def __init__(self, body: str | None = None):
+        self.phases: list[str] = []
+        self.prompts: dict[str, list[dict[str, str]]] = {}
+        self.body = body or _WEATHER_TERSE_BODY
+
+    async def generate_json(self, prompt, *, phase):
+        self.phases.append(phase)
+        self.prompts[phase] = prompt
+        return {
+            "scopeVersion": "advanced-scope-brief/1",
+            "themeId": "family-weather-care-blue",
+            "advancedComponentIds": ["WeatherOverview"],
+        }
+
+    async def generate(self, messages, _profile, **kwargs):
+        phase = kwargs.get("phase", "")
+        self.phases.append(phase)
+        self.prompts[phase] = messages
+        return self.body
+
+
+class RetryingUxMixedModelClient(UxMixedModelClient):
+    def __init__(self, bodies: list[str]):
+        super().__init__(bodies[-1])
+        self.bodies = list(bodies)
+
+    async def generate(self, messages, _profile, **kwargs):
+        phase = kwargs.get("phase", "")
+        self.phases.append(phase)
+        self.prompts[phase] = messages
+        return self.bodies.pop(0)
+
+
+def _weather_scope_task() -> TaskSpec:
+    return TaskSpec(
+        userQuery="天气",
+        size="2x2",
+        eventCandidates=[],
+        assetCandidates=[
+            {
+                "src": "resources/base/media/weather.svg",
+                "description": "天气状态图标",
+                "sceneTags": ["condition", "weather"],
+            }
+        ],
+        dataModelSchema={
+            "ViewWeather": {
+                "districtName": _sample_field("深圳"),
+                "temperatureText": _sample_field("38°"),
+                "condition": _sample_field("晴"),
+                "airQuality": _sample_field("空气优"),
+                "temperatureRangeText": _sample_field("26° / 16°"),
+            }
+        },
+    )
+
+
+def test_new_scope_prompt_only_exposes_theme_and_advanced_component_output():
+    task_spec = _weather_scope_task()
+    prompt = build_advanced_scope_prompt(
+        task_spec,
+        extract_data_shape(task_spec),
+        get_cardplan_registry(),
+    )
+    user_payload = json.loads(prompt[1]["content"])
+    output_schema = json.loads(prompt[0]["content"].split("\n", 1)[1])
+
+    assert set(output_schema["properties"]) == {
+        "scopeVersion",
+        "themeId",
+        "advancedComponentIds",
+    }
+    assert "cardPlanCandidates" not in user_payload
+    assert "localTemplates" not in user_payload
+    assert "layoutComponents" not in user_payload
+    assert len(user_payload["advancedComponents"]) <= 8
+
+
+def test_scope_prompt_does_not_pad_positive_matches_with_zero_score_components():
+    prompt = build_advanced_scope_prompt(
+        _weather_scope_task(),
+        extract_data_shape(_weather_scope_task()),
+        get_cardplan_registry(),
+    )
+    candidates = {item["id"] for item in json.loads(prompt[1]["content"])["advancedComponents"]}
+
+    assert "WeatherOverview" in candidates
+    assert "MemoPreview" not in candidates
+
+
+def test_scope_candidates_do_not_promote_action_words_over_calendar_data():
+    task_spec = TaskSpec(
+        userQuery="展示下一日程并进入专注模式",
+        size="2x2",
+        eventCandidates=[EventAction(id="event.open.settings.dnd", call="clickToApi", args={})],
+        dataModelSchema={
+            "GetCalendarEvents": {
+                "events": [
+                    {
+                        "title": _sample_field("UI需求评审会"),
+                        "dtStart": _sample_field("14:00"),
+                        "dtEnd": _sample_field("15:30"),
+                    }
+                ]
+            }
+        },
+        assetCandidates=[],
+    )
+    prompt = build_advanced_scope_prompt(
+        task_spec,
+        extract_data_shape(task_spec),
+        get_cardplan_registry(),
+    )
+    candidates = {item["id"] for item in json.loads(prompt[1]["content"])["advancedComponents"]}
+
+    assert "ScheduleOverview" in candidates
+    assert "SystemModeOverview" not in candidates
+
+
+def test_scope_candidates_match_memory_as_device_resource_not_memo_substring():
+    task_spec = TaskSpec(
+        userQuery="展示内存占用并支持一键清理",
+        size="2x2",
+        eventCandidates=[EventAction(id="event.clean.memory", call="clickToApi", args={})],
+        dataModelSchema={
+            "GetSystemMemInfo": {
+                "usagePercent": {"type": "number", "sampleValue": 72},
+                "availableMemText": {"type": "string", "sampleValue": "3.6 GB 可用"},
+                "totalMemText": {"type": "string", "sampleValue": "共 12 GB"},
+            }
+        },
+        assetCandidates=[],
+    )
+    prompt = build_advanced_scope_prompt(
+        task_spec,
+        extract_data_shape(task_spec),
+        get_cardplan_registry(),
+    )
+    component_candidates = json.loads(prompt[1]["content"])["advancedComponents"]
+    candidates = {item["id"] for item in component_candidates}
+
+    assert "ResourceUsageOverview" in candidates
+    resource = next(item for item in component_candidates if item["id"] == "ResourceUsageOverview")
+    assert resource["variants"] == ["memory"]
+    assert "BatteryOverview" not in candidates
+    assert "MemoPreview" not in candidates
+
+
+def test_scope_provider_gate_hides_components_without_effective_data_capability():
+    task_spec = TaskSpec(
+        userQuery="展示待办并打开设置",
+        size="2x2",
+        eventCandidates=[EventAction(id="event.open.settings", call="clickToApi", args={})],
+        dataModelSchema={"data": {"label": "待办"}},
+        assetCandidates=[],
+    )
+
+    with pytest.raises(ValueError, match="no provider-backed"):
+        build_advanced_scope_prompt(
+            task_spec,
+            extract_data_shape(task_spec),
+            get_cardplan_registry(),
+            available_capability_ids=(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("capability_id", "query", "component_id", "variants"),
+    [
+        (
+            "GetAppUsageDuration",
+            "展示抖音今天的使用时长",
+            "AppUsageOverview",
+            ["singleApp"],
+        ),
+        (
+            "GetHealthAndSportSummary",
+            "展示运动平均心率",
+            "HeartRateOverview",
+            ["average"],
+        ),
+    ],
+)
+def test_scope_exposes_only_provider_backed_component_variants(
+    capability_id: str,
+    query: str,
+    component_id: str,
+    variants: list[str],
+) -> None:
+    schema: dict[str, object] = {capability_id: {}}
+    if capability_id == "GetAppUsageDuration":
+        schema = {
+            capability_id: {
+                "appUsage": {
+                    "appName": _sample_field("抖音"),
+                    "durationText": _sample_field("25分钟"),
+                },
+                "updatedAt": _sample_field("今日 21:30"),
+            }
+        }
+    elif component_id == "HeartRateOverview":
+        schema = {
+            capability_id: {
+                "exerciseHeartRateAvg": {
+                    "type": "integer",
+                    "description": "可信运动平均心率",
+                    "sampleValue": 128,
+                }
+            }
+        }
+    task_spec = TaskSpec(
+        userQuery=query,
+        size="2x2",
+        dataModelSchema=schema,
+        assetCandidates=[],
+    )
+
+    prompt = build_advanced_scope_prompt(
+        task_spec,
+        extract_data_shape(task_spec),
+        get_cardplan_registry(),
+        available_capability_ids=(capability_id,),
+    )
+    candidates = json.loads(prompt[1]["content"])["advancedComponents"]
+    selected = next(item for item in candidates if item["id"] == component_id)
+
+    assert selected["variants"] == variants
+
+
+def test_explicit_provider_id_does_not_override_app_usage_fact_and_intent_gate():
+    task_spec = TaskSpec(
+        userQuery="展示待办和设置，但只有应用时长能力可用",
+        size="2x2",
+        dataModelSchema={"data": {"task": "待办", "setting": "设置"}},
+        assetCandidates=[],
+    )
+
+    with pytest.raises(ValueError, match="no provider-backed"):
+        build_advanced_scope_prompt(
+            task_spec,
+            extract_data_shape(task_spec),
+            get_cardplan_registry(),
+            available_capability_ids=("GetAppUsageDuration",),
+        )
+
+
+def test_2x2_scope_prompt_does_not_advertise_atomic_context_as_second_component():
+    task_spec = _weather_scope_task()
+    prompt = build_advanced_scope_prompt(
+        task_spec,
+        extract_data_shape(task_spec),
+        get_cardplan_registry(),
+        available_capability_ids=("ViewWeather",),
+    )
+    candidates = json.loads(prompt[1]["content"])["advancedComponents"]
+    weather = next(item for item in candidates if item["id"] == "WeatherOverview")
+
+    assert "LocationOverview" not in weather["compatibleWith"]
+
+
+@pytest.mark.asyncio
+async def test_2x2_scope_normalizes_weather_location_to_atomic_weather_owner():
+    task_spec = _weather_scope_task()
+
+    async def generate_json(_messages, _phase):
+        return {
+            "scopeVersion": "advanced-scope-brief/1",
+            "themeId": "family-weather-care-blue",
+            "advancedComponentIds": ["WeatherOverview", "LocationOverview"],
+        }
+
+    scope = await plan_advanced_scope_with_llm(
+        task_spec,
+        extract_data_shape(task_spec),
+        generate_json,
+        get_cardplan_registry(),
+        available_capability_ids=("ViewWeather",),
+    )
+
+    assert scope.advanced_component_ids == ("WeatherOverview",)
+
+
+def test_calendar_selector_derives_only_trusted_date_weekday_and_time_aliases():
+    task_spec = TaskSpec(
+        userQuery="下一场会议",
+        size="2x2",
+        dataModelSchema={
+            "data": {
+                "GetCalendarEvents": {
+                    "events": [
+                        {
+                            "title": _sample_field("产品评审"),
+                            "dtStart": _sample_field("09:30"),
+                            "dtEnd": _sample_field("10:30"),
+                            "eventLocation": _sample_field("A区会议室"),
+                            "startDate": _sample_field("07-15"),
+                        }
+                    ],
+                    "updatedAt": _sample_field("2026-07-15 09:00"),
+                }
+            }
+        },
+        assetCandidates=[],
+    )
+
+    selected = apply_content_selectors(task_spec, {"GetCalendarEvents"})
+    derived = selected.dataModelSchema["data"]["_advancedSelectors"]
+
+    assert derived["schedule"]["title"]["sampleValue"] == "产品评审"
+    assert derived["schedule"]["timeText"]["sampleValue"] == "09:30 - 10:30"
+    assert derived["schedule"]["location"]["sampleValue"] == "A区会议室"
+    assert derived["date"]["date"]["sampleValue"] == "15日"
+    assert derived["date"]["weekday"]["sampleValue"] == "星期三"
+    assert "_advancedSelectors" not in task_spec.dataModelSchema["data"]
+
+
+def test_weather_selector_requires_complete_current_weather_facts():
+    complete = TaskSpec(
+        userQuery="天气",
+        size="2x2",
+        dataModelSchema={
+            "data": {
+                "location": {
+                    "districtName": _sample_field("龙岗区"),
+                    "prefectureName": _sample_field("深圳市"),
+                },
+                "current": {
+                    "temperatureText": _sample_field("38℃"),
+                    "condition": _sample_field("晴"),
+                    "airQuality": _sample_field("优"),
+                },
+                "daily": [{"temperatureRangeText": _sample_field("26℃ / 16℃")}],
+                "updatedAt": _sample_field("2026-07-15 09:30"),
+            }
+        },
+        assetCandidates=[],
+    )
+
+    selected = apply_content_selectors(complete, {"ViewWeather"})
+    derived = selected.dataModelSchema["data"]["_advancedSelectors"]
+
+    assert derived["weather"]["city"]["sampleValue"] == "龙岗区"
+    assert derived["weather"]["temperature"]["sampleValue"] == "38℃"
+    assert derived["weather"]["temperatureRange"]["sampleValue"] == "26℃ / 16℃"
+    assert derived["location"]["label"]["sampleValue"] == "天气位置"
+
+    incomplete = complete.model_copy(
+        update={"dataModelSchema": {"data": {"current": {"condition": _sample_field("晴")}}}}
+    )
+    unchanged = apply_content_selectors(incomplete, {"ViewWeather"})
+    assert unchanged is incomplete
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["city", "temperatureText", "condition", "airQuality", "temperatureRangeText"],
+)
+def test_scope_hides_weather_when_any_required_fact_is_missing(missing_field: str):
+    fields = {
+        "districtName": _sample_field("深圳"),
+        "temperatureText": _sample_field("38°"),
+        "condition": _sample_field("晴"),
+        "airQuality": _sample_field("空气优"),
+        "temperatureRangeText": _sample_field("26° / 16°"),
+    }
+    if missing_field == "city":
+        fields.pop("districtName")
+    else:
+        fields.pop(missing_field)
+    task_spec = _weather_scope_task().model_copy(
+        update={"dataModelSchema": {"ViewWeather": fields}}
+    )
+
+    assert "WeatherOverview" not in _scope_candidate_ids(
+        task_spec,
+        ("ViewWeather",),
+    )
+
+
+def test_scope_accepts_prefecture_as_weather_city_fallback():
+    task_spec = _weather_scope_task().model_copy(
+        update={
+            "dataModelSchema": {
+                "ViewWeather": {
+                    "prefectureName": _sample_field("深圳市"),
+                    "temperatureText": _sample_field("38°"),
+                    "condition": _sample_field("晴"),
+                    "airQuality": _sample_field("空气优"),
+                    "temperatureRangeText": _sample_field("26° / 16°"),
+                }
+            }
+        }
+    )
+
+    prompt = build_advanced_scope_prompt(
+        task_spec,
+        extract_data_shape(task_spec),
+        get_cardplan_registry(),
+        available_capability_ids=("ViewWeather",),
+    )
+
+    assert "WeatherOverview" in {
+        item["id"] for item in json.loads(prompt[1]["content"])["advancedComponents"]
+    }
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_field"),
+    [
+        ("temperatureText", {"type": "number", "sampleValue": 38}),
+        ("condition", {"type": "string", "sampleValue": "  "}),
+    ],
+)
+def test_scope_hides_weather_for_wrong_types_or_empty_strings(
+    field_name: str,
+    invalid_field: dict[str, object],
+):
+    schema = dict(_weather_scope_task().dataModelSchema["ViewWeather"])
+    schema[field_name] = invalid_field
+    task_spec = _weather_scope_task().model_copy(
+        update={"dataModelSchema": {"ViewWeather": schema}}
+    )
+
+    assert "WeatherOverview" not in _scope_candidate_ids(
+        task_spec,
+        ("ViewWeather",),
+    )
+
+
+def test_scope_hides_weather_when_only_unsupported_weather_fields_exist():
+    task_spec = _weather_scope_task().model_copy(
+        update={
+            "dataModelSchema": {
+                "ViewWeather": {
+                    "pressure": _sample_field("1008 hPa"),
+                    "visibility": _sample_field("10 km"),
+                    "aqi": {"type": "integer", "sampleValue": 42},
+                }
+            }
+        }
+    )
+
+    assert "WeatherOverview" not in _scope_candidate_ids(
+        task_spec,
+        ("ViewWeather",),
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "逐小时天气预报",
+        "日出日落",
+        "当前气压",
+        "天气能见度",
+        "显示 AQI 数值",
+        "展示体感温度、湿度、风力、紫外线、预警和降雨概率",
+    ],
+)
+def test_scope_hides_weather_for_unsupported_user_requests(query: str):
+    task_spec = _weather_scope_task().model_copy(update={"userQuery": query})
+
+    assert "WeatherOverview" not in _scope_candidate_ids(
+        task_spec,
+        ("ViewWeather",),
+    )
+
+
+def test_weather_field_coverage_exposes_requested_renderable_visible_gap():
+    query = "展示上海天气、体感温度、湿度、空气质量、风力、紫外线、预警和降雨概率"
+
+    coverage = advanced_pipeline_module.weather_field_coverage(
+        query,
+        _weather_scope_task(),
+        "",
+    )
+
+    assert set(coverage["requested"]) == {
+        "city",
+        "temperature",
+        "condition",
+        "airQuality",
+        "temperatureRange",
+        "feelsLike",
+        "humidity",
+        "wind",
+        "uvIndex",
+        "alert",
+        "rainProbability",
+    }
+    assert coverage["renderableCount"] == 5
+    assert coverage["visibleCount"] == 0
+
+
+def _scope_candidate_ids(
+    task_spec: TaskSpec,
+    capability_ids: tuple[str, ...],
+) -> set[str]:
+    try:
+        prompt = build_advanced_scope_prompt(
+            task_spec,
+            extract_data_shape(task_spec),
+            get_cardplan_registry(),
+            available_capability_ids=capability_ids,
+        )
+    except ValueError as exc:
+        if str(exc) == "no provider-backed UX Business Component candidate":
+            return set()
+        raise
+    return {
+        item["id"] for item in json.loads(prompt[1]["content"])["advancedComponents"]
+    }
+
+
+@pytest.mark.asyncio
+async def test_scope_rejects_forced_weather_model_output_when_five_facts_are_incomplete():
+    task_spec = TaskSpec(
+        userQuery="天气和手机电量",
+        size="2x2",
+        dataModelSchema={
+            "ViewWeather": {"condition": _sample_field("晴")},
+            "GetPhoneBatteryInfo": {
+                "batterySOCText": _sample_field("68%"),
+                "batteryCapacityLevelDesc": _sample_field("电量正常"),
+            },
+        },
+        assetCandidates=[],
+    )
+
+    async def generate_json(_messages, _phase):
+        return {
+            "scopeVersion": "advanced-scope-brief/1",
+            "themeId": "family-weather-care-blue",
+            "advancedComponentIds": ["WeatherOverview"],
+        }
+
+    with pytest.raises(ValueError, match="outside trusted candidates"):
+        await plan_advanced_scope_with_llm(
+            task_spec,
+            extract_data_shape(task_spec),
+            generate_json,
+            get_cardplan_registry(),
+            available_capability_ids=("ViewWeather", "GetPhoneBatteryInfo"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_cross_domain_weather_scope_preserves_primary_scene_theme():
+    task_spec = apply_content_selectors(
+        _weather_schedule_task("2x4", with_action=False),
+        {"ViewWeather", "GetCalendarEvents"},
+    )
+
+    async def generate_json(_messages, _phase):
+        return {
+            "scopeVersion": "advanced-scope-brief/1",
+            "themeId": "family-weather-care-blue",
+            "advancedComponentIds": ["WeatherOverview", "ScheduleOverview"],
+        }
+
+    scope = await plan_advanced_scope_with_llm(
+        task_spec,
+        extract_data_shape(task_spec),
+        generate_json,
+        get_cardplan_registry(),
+        available_capability_ids=("ViewWeather", "GetCalendarEvents"),
+    )
+
+    assert scope.advanced_component_ids == ("WeatherOverview", "ScheduleOverview")
+    assert scope.theme_id == "family-weather-care-blue"
+
+
+def test_weather_multi_business_layout_candidates_exclude_forecast_layout():
+    registry = get_cardplan_registry()
+    scope = AdvancedScopeBrief(
+        themeId="meeting-paper-neutral",
+        advancedComponentIds=("WeatherOverview", "ScheduleOverview"),
+    )
+    layouts_2x2 = resolve_scope_layout_ids(
+        scope,
+        _weather_schedule_task("2x2", with_action=False),
+        registry,
+    )
+    layouts_2x4 = resolve_scope_layout_ids(
+        scope,
+        _weather_schedule_task("2x4", with_action=False),
+        registry,
+    )
+
+    assert layouts_2x2 == ("HeroSupportLayout",)
+    assert "HeroSupportLayout" in layouts_2x4
+    assert "WeatherNowForecastLayout" not in layouts_2x2
+    assert "WeatherNowForecastLayout" not in layouts_2x4
+
+
+def test_weather_single_business_layout_candidates_exclude_forecast_layout():
+    registry = get_cardplan_registry()
+    for size in ("2x2", "2x4"):
+        task_spec = _weather_scope_task().model_copy(update={"size": size})
+        scope = AdvancedScopeBrief(
+            themeId="family-weather-care-blue",
+            advancedComponentIds=("WeatherOverview",),
+        )
+
+        layouts = resolve_scope_layout_ids(scope, task_spec, registry)
+
+        assert "SingleFocusLayout" in layouts
+        assert "WeatherNowForecastLayout" not in layouts
+
+
+def test_selectors_make_v2_weather_and_calendar_templates_satisfiable():
+    weather = TaskSpec(
+        userQuery="天气",
+        size="2x2",
+        dataModelSchema={
+            "ViewWeather": {
+                "districtName": _sample_field("龙岗区"),
+                "temperatureText": _sample_field("38℃"),
+                "condition": _sample_field("晴"),
+                "airQuality": _sample_field("优"),
+                "temperatureRangeText": _sample_field("26℃ / 16℃"),
+                "updatedAt": _sample_field("2026-07-15 09:30"),
+            }
+        },
+        assetCandidates=[
+            {
+                "src": "resources/base/media/weather.svg",
+                "description": "天气状态图标",
+                "sceneTags": ["condition", "weather"],
+            }
+        ],
+    )
+    selected = apply_content_selectors(weather, {"ViewWeather"})
+    templates = scope_template_ids(
+        AdvancedScopeBrief(
+            themeId="family-weather-care-blue",
+            advancedComponentIds=("WeatherOverview",),
+        ),
+        get_cardplan_registry(),
+        selected,
+    )
+
+    assert templates == ()
+
+    calendar = TaskSpec(
+        userQuery="下一场会议",
+        size="2x2",
+        dataModelSchema={
+            "GetCalendarEvents": {
+                "events": [
+                    {
+                        "title": _sample_field("产品评审"),
+                        "dtStart": _sample_field("09:30"),
+                        "dtEnd": _sample_field("10:30"),
+                        "eventLocation": _sample_field("A区会议室"),
+                        "startDate": _sample_field("07-15"),
+                    }
+                ],
+                "updatedAt": _sample_field("2026-07-15 09:00"),
+            }
+        },
+        assetCandidates=[],
+    )
+    selected_calendar = apply_content_selectors(calendar, {"GetCalendarEvents"})
+    calendar_templates = scope_template_ids(
+        AdvancedScopeBrief(
+            themeId="meeting-paper-neutral",
+            advancedComponentIds=("DateOverview", "ScheduleOverview"),
+        ),
+        get_cardplan_registry(),
+        selected_calendar,
+    )
+
+    assert "ux-date-overview@2" not in calendar_templates
+    assert "ux-schedule-overview@2" not in calendar_templates
+
+
+def test_second_layer_projection_keeps_only_selected_component_display_facts():
+    task_spec = TaskSpec(
+        userQuery="深圳天气",
+        size="2x2",
+        dataModelSchema={
+            "data": {
+                "weather": {
+                    "location": {"districtName": _sample_field("深圳")},
+                    "current": {
+                        "temperatureText": _sample_field("38°"),
+                        "condition": _sample_field("晴"),
+                        "airQuality": _sample_field("空气优"),
+                    },
+                    "daily": [{"temperatureRangeText": _sample_field("26° / 16°")}],
+                    "updatedAt": _sample_field("2026-08-11 10:00"),
+                    "transportMetadata": _sample_field("不得进入卡片"),
+                },
+                "calendar": {"events": [{"title": _sample_field("另一个领域")}]},
+            }
+        },
+        assetCandidates=[],
+    )
+
+    selected = apply_content_selectors(task_spec, {"ViewWeather", "GetCalendarEvents"})
+    projected = project_content_component_facts(
+        selected,
+        {"ViewWeather", "GetCalendarEvents"},
+        ("WeatherOverview",),
+    )
+
+    assert set(projected.dataModelSchema["data"]) == {"WeatherOverview"}
+    assert set(projected.dataModelSchema["data"]["WeatherOverview"]) == {
+        "city",
+        "temperature",
+        "condition",
+        "airQuality",
+        "temperatureRange",
+    }
+    assert "updatedAt" not in json.dumps(projected.dataModelSchema, ensure_ascii=False)
+    assert "不得进入卡片" not in json.dumps(projected.dataModelSchema, ensure_ascii=False)
+
+
+def test_battery_projection_derives_trusted_number_from_percentage_text():
+    task_spec = TaskSpec(
+        userQuery="手机电量",
+        size="2x2",
+        dataModelSchema={
+            "GetPhoneBatteryInfo": {
+                "batterySOCText": _sample_field("68%"),
+                "batteryCapacityLevelDesc": _sample_field("电量正常"),
+                "chargingStatusDesc": _sample_field("充电中"),
+            }
+        },
+        assetCandidates=[
+            {
+                "src": "resources/base/media/battery.svg",
+                "description": "手机电池图标",
+                "sceneTags": ["battery", "power"],
+            }
+        ],
+    )
+
+    projected = project_content_component_facts(
+        task_spec,
+        {"GetPhoneBatteryInfo"},
+        ("BatteryOverview",),
+    )
+
+    assert projected.dataModelSchema["data"]["BatteryOverview"]["batterySOC"] == {
+        "type": "integer",
+        "description": "可信手机本机电量百分比数值",
+        "sampleValue": 68,
+    }
+    projection = build_ux_mixed_prompt(
+        task_spec=projected,
+        card_spec={
+            "suggestSize": "2x2",
+            "dataBindings": [{"capabilityId": "GetPhoneBatteryInfo"}],
+        },
+        scope=AdvancedScopeBrief(
+            themeId="system-low-power-blue",
+            advancedComponentIds=("BatteryOverview",),
+        ),
+        registry=get_cardplan_registry(),
+    )
+
+    assert 68 in projection.contract.trusted_numbers
+    assert projection.contract.required_template_groups == ()
+
+
+def test_ux_layout_parser_unwraps_single_object_config_array():
+    parsed = parse_ux_layout_card(
+        'SingleFocusLayout([{"contentAlign":"centerStart"}], Text("天气", "body"));'
+    )
+
+    assert parsed.values == ({"contentAlign": "centerStart"},)
+
+
+def test_workout_projection_uses_only_provider_backed_countdown_variant_fields():
+    task_spec = TaskSpec(
+        userQuery="赛事倒计时",
+        size="2x2",
+        dataModelSchema={
+            "GetCountdownDays": {
+                "countdownDays": {"type": "integer", "sampleValue": 32}
+            },
+            "GetHealthAndSportSummary": {
+                "exerciseTypeName": _sample_field("户外跑步"),
+                "exerciseDurationText": _sample_field("40分"),
+                "exerciseCalorieText": _sample_field("298 千卡"),
+            },
+        },
+        assetCandidates=[],
+    )
+
+    projected = project_content_component_facts(
+        task_spec,
+        {"GetCountdownDays"},
+        ("WorkoutOverview",),
+    )
+
+    assert projected.dataModelSchema == {
+        "data": {
+            "WorkoutOverview": {
+                "countdownDays": {
+                    "type": "integer",
+                    "description": "可信非负剩余天数，0 天为有效值",
+                    "sampleValue": 32,
+                }
+            }
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("duration", "expected"),
+    [
+        ("3小时45分钟", ("3", "小时", "45", "分钟")),
+        ("45分钟", ("45", "分钟", "", "")),
+        ("3h 05m", ("3", "小时", "05", "分钟")),
+    ],
+)
+def test_app_usage_projection_derives_trusted_dual_value_segments(
+    duration: str,
+    expected: tuple[str, str, str, str],
+) -> None:
+    task_spec = TaskSpec(
+        userQuery="应用时长",
+        size="2x2",
+        dataModelSchema={
+            "data": {
+                "AppUsageOverview": {
+                    "appName": _sample_field("抖音"),
+                    "durationText": _sample_field(duration),
+                    "updatedAt": _sample_field("今日"),
+                }
+            }
+        },
+        assetCandidates=[],
+    )
+
+    projected = project_content_component_facts(
+        task_spec,
+        {"GetAppUsageDuration"},
+        ("AppUsageOverview",),
+    )
+    usage = projected.dataModelSchema["data"]["AppUsageOverview"]
+
+    actual = (
+        usage["durationPrimaryValueText"]["sampleValue"],
+        usage["durationPrimaryUnitText"]["sampleValue"],
+        usage.get("durationSecondaryValueText", {}).get("sampleValue", ""),
+        usage.get("durationSecondaryUnitText", {}).get("sampleValue", ""),
+    )
+    assert actual == expected
+
+
+def test_sleep_projection_reuses_trusted_dual_value_segments() -> None:
+    task_spec = TaskSpec(
+        userQuery="睡眠",
+        size="2x2",
+        dataModelSchema={
+            "GetHealthAndSportSummary": {
+                "sleepStatus": _sample_field("睡眠不足"),
+                "nightSleepDurationText": _sample_field("5小时45分钟"),
+                "fallAsleepTimeText": _sample_field("23:15"),
+                "wakeupTimeText": _sample_field("05:00"),
+            }
+        },
+        assetCandidates=[],
+    )
+
+    projected = project_content_component_facts(
+        task_spec,
+        {"GetHealthAndSportSummary"},
+        ("SleepOverview",),
+    )
+    sleep = projected.dataModelSchema["data"]["SleepOverview"]
+
+    assert tuple(
+        sleep[name]["sampleValue"]
+        for name in (
+            "sleepDurationPrimaryValueText",
+            "sleepDurationPrimaryUnitText",
+            "sleepDurationSecondaryValueText",
+            "sleepDurationSecondaryUnitText",
+        )
+    ) == ("5", "小时", "45", "分钟")
+
+
+def _sample_field(value: str) -> dict[str, str]:
+    return {
+        "type": "string",
+        "description": "可信能力字段",
+        "sampleValue": value,
+    }
+
+
+@pytest.mark.asyncio
+async def test_scope_planner_normalizes_empty_model_selection_without_retry():
+    task_spec = _weather_scope_task()
+    calls = 0
+
+    async def generate_json(_messages, _phase):
+        nonlocal calls
+        calls += 1
+        return {
+            "scopeVersion": "advanced-scope-brief/1",
+            "themeId": "family-weather-care-blue",
+            "advancedComponentIds": [],
+        }
+
+    scope = await plan_advanced_scope_with_llm(
+        task_spec,
+        extract_data_shape(task_spec),
+        generate_json,
+        get_cardplan_registry(),
+    )
+
+    assert calls == 1
+    assert scope.advanced_component_ids == ("WeatherOverview",)
+
+
+def test_schedule_direct_scope_has_no_local_template_dependency():
+    task_spec = TaskSpec(
+        userQuery="加入当前会议",
+        size="2x2",
+        eventCandidates=[EventAction(id="event.enter.meeting", call="clickToApi", args={})],
+        dataModelSchema={
+            "data": {
+                "event": {
+                    "title": "UI需求评审会",
+                    "time": "14:00 - 15:30",
+                    "location": "深圳市龙岗区五和大道华为园区",
+                }
+            }
+        },
+        assetCandidates=[
+            {
+                "src": "resources/base/media/ux_golden_asset_time_beige.svg",
+                "description": "时间图标",
+            },
+            {
+                "src": "resources/base/media/ux_golden_asset_icon_id.svg",
+                "description": "位置图标",
+            },
+        ],
+    )
+    registry = get_cardplan_registry()
+    selected = scope_template_ids(
+        AdvancedScopeBrief(
+            themeId="meeting-paper-neutral",
+            advancedComponentIds=("ScheduleOverview",),
+        ),
+        registry,
+        task_spec,
+    )
+
+    assert selected == ()
+
+
+@pytest.mark.asyncio
+async def test_scope_planner_trims_only_when_selected_components_have_no_common_layout():
+    task_spec = TaskSpec(
+        userQuery="展示会议日期和地点",
+        size="2x2",
+        eventCandidates=[EventAction(id="event.enter.meeting", call="clickToApi", args={})],
+        dataModelSchema={
+            "GetCalendarEvents": {
+                "events": [
+                    {
+                        "title": _sample_field("UI需求评审会"),
+                        "dtStart": _sample_field("09:30"),
+                        "eventLocation": _sample_field("A区会议室"),
+                        "startDate": _sample_field("08-27"),
+                    }
+                ],
+                "updatedAt": _sample_field("2026-08-11 09:00"),
+            },
+            "ViewWeather": {
+                "districtName": _sample_field("深圳"),
+                "temperatureText": _sample_field("38°"),
+                "condition": _sample_field("晴"),
+                "airQuality": _sample_field("空气优"),
+                "temperatureRangeText": _sample_field("26° / 16°"),
+                "updatedAt": _sample_field("2026-08-11 09:00"),
+            },
+        },
+        assetCandidates=[],
+    )
+    task_spec = apply_content_selectors(task_spec, {"GetCalendarEvents", "ViewWeather"})
+
+    async def generate_json(_messages, _phase):
+        return {
+            "scopeVersion": "advanced-scope-brief/1",
+            "themeId": "meeting-paper-neutral",
+            "advancedComponentIds": [
+                "ScheduleOverview",
+                "DateOverview",
+                "LocationOverview",
+            ],
+        }
+
+    scope = await plan_advanced_scope_with_llm(
+        task_spec,
+        extract_data_shape(task_spec),
+        generate_json,
+        get_cardplan_registry(),
+    )
+
+    assert scope.advanced_component_ids == ("ScheduleOverview", "DateOverview")
+
+
+@pytest.mark.asyncio
+async def test_new_mixed_entry_uses_new_phases_and_lowers_layout_to_standard_a2ui():
+    model_client = UxMixedModelClient()
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        _weather_scope_task(),
+        model_client,
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert model_client.phases == ["advanced-component-scope", "advanced-mixed-body"]
+    mixed_user_prompt = model_client.prompts["advanced-mixed-body"][1]["content"]
+    assert '"深圳"' in mixed_user_prompt
+    assert '"resources/base/media/weather.svg"' in mixed_user_prompt
+    assert '"resources/base/media/sun_max.svg"' in mixed_user_prompt
+    assert "requiredLocalTemplateGroups=[]" in mixed_user_prompt
+    assert 'directBusinessComponents=["WeatherOverview"]' in mixed_user_prompt
+    assert output.ui_brief == AdvancedScopeBrief(
+        themeId="family-weather-care-blue",
+        advancedComponentIds=("WeatherOverview",),
+    )
+    assert output.route == "hybrid-template"
+    assert output.confidence_bypassed is True
+    assert output.whole_card_candidates == []
+    assert "SingleFocusLayout" in output.raw_output
+    assert "Layout" not in output.effective_output
+    assert "Template" not in output.compiled_a2ui
+    assert "Layout" not in output.compiled_a2ui
+    assert '"borderRadius":20' in output.effective_output
+    assert '"padding":12' in output.effective_output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", ["2x2", "2x4"])
+async def test_weather_terse_expansion_preserves_single_business_hierarchy(size: str):
+    task_spec = _weather_scope_task().model_copy(update={"size": size})
+    output = await AdvancedComponentPipeline().generate_mixed(
+        task_spec,
+        UxMixedModelClient(),
+        {"title": "天气", "description": "天气状态", "suggestSize": size},
+    )
+    effective = output.effective_output
+
+    assert "WeatherOverview" not in effective
+    assert "Template" not in effective
+    assert effective.index('Text("深圳"') < effective.index(
+        'Image("resources/base/media/weather.svg"'
+    )
+    assert '"fontSize":38' in effective
+    assert effective.count('"fontSize":14') >= 2
+    assert '"fontSize":12' in effective
+    if size == "2x4":
+        assert '"height":"matchParent","justifyContent":"spaceBetween"' in effective
+    for fact in ("深圳", "38°", "晴", "空气优", "26° / 16°"):
+        assert effective.count(fact) == 1
+
+    messages = [json.loads(line) for line in output.compiled_a2ui.splitlines()]
+    components = messages[1]["updateComponents"]["components"]
+    text_by_content = {
+        component.get("content"): component
+        for component in components
+        if component.get("component") == "Text"
+    }
+    assert {"深圳", "38°", "晴", "空气优", "26° / 16°"}.issubset(text_by_content)
+    city_id = text_by_content["深圳"]["id"]
+    condition_icon = next(
+        component for component in components if component.get("component") == "Image"
+    )
+    if size == "2x2":
+        title_row = next(
+            component
+            for component in components
+            if component.get("component") == "Row"
+            and component.get("children") == [city_id, condition_icon["id"]]
+        )
+        assert title_row["styles"]["width"] == "matchParent"
+        assert title_row["styles"]["justifyContent"] == "spaceBetween"
+        assert title_row["styles"]["alignItems"] == "top"
+        assert condition_icon["styles"]["width"] == 32
+        weather_column = next(
+            component
+            for component in components
+            if component.get("component") == "Column"
+            and component.get("children", [None])[0] == title_row["id"]
+            and text_by_content["38°"]["id"] in component.get("children", [])
+        )
+        assert weather_column["styles"]["justifyContent"] == "spaceBetween"
+    else:
+        title_row = next(
+            component
+            for component in components
+            if component.get("component") == "Row"
+            and component.get("children") == [city_id, condition_icon["id"]]
+        )
+        assert title_row["styles"]["width"] == "matchParent"
+        assert title_row["styles"]["justifyContent"] == "spaceBetween"
+        assert title_row["styles"]["alignItems"] == "top"
+    for component in components:
+        if component.get("component") not in {"Row", "Column", "Stack"}:
+            continue
+        styles = component.get("styles", {})
+        assert styles.get("width") != "100%"
+        assert styles.get("height") != "100%"
+    coverage = output.invocation["weatherFieldCoverage"]
+    assert coverage["renderable"] == [
+        "city",
+        "temperature",
+        "condition",
+        "airQuality",
+        "temperatureRange",
+    ]
+    assert coverage["visible"] == coverage["renderable"]
+    assert coverage["visibleCount"] == 5
+
+
+@pytest.mark.asyncio
+async def test_weather_terse_uses_condition_icon_selected_by_second_step():
+    task_spec = _weather_scope_task().model_copy(update={"assetCandidates": []})
+    body = (
+        'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/sun_max.svg"}));'
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        task_spec,
+        UxMixedModelClient(body),
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert 'Image("resources/base/media/sun_max.svg"' in output.effective_output
+    assert '"fillColor":"#FFFFC300"' in output.effective_output
+    assert output.trusted_internal_asset_sources == (
+        "resources/base/media/sun_max.svg",
+    )
+    assert output.effective_output.index('Text("深圳"') < output.effective_output.index(
+        'Image("resources/base/media/sun_max.svg"'
+    )
+
+    artifact = WidgetGenerationService()._build_artifact(
+        output.compiled_a2ui,
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+        task_spec.model_dump(mode="json"),
+        [],
+        [],
+        [],
+        [],
+        "a2ui-form-rom6.0-v1",
+        "v0.9",
+        "app-11.7.5.205_rom-6.0",
+        trusted_internal_asset_sources=output.trusted_internal_asset_sources,
+    )
+    errors = ArtifactValidator().validate(
+        artifact,
+        {"id": "a2ui-form-rom6.0-v1"},
+    )
+    assert not any("EFFECTIVE_ASSET_NOT_ALLOWED" in error for error in errors)
+    assert artifact.effectiveCapabilities["asset"] == [
+        "resources/base/media/sun_max.svg"
+    ]
+    assert artifact.generationPlan.candidateAssetIds == []
+
+
+@pytest.mark.asyncio
+async def test_weather_non_sunny_condition_does_not_tint_multicolor_icon():
+    task_spec = _weather_scope_task().model_copy(
+        update={
+            "dataModelSchema": {
+                "ViewWeather": {
+                    "districtName": _sample_field("深圳"),
+                    "temperatureText": _sample_field("26°"),
+                    "condition": _sample_field("多云"),
+                    "airQuality": _sample_field("空气优"),
+                    "temperatureRangeText": _sample_field("31° / 24°"),
+                }
+            }
+        }
+    )
+    body = (
+        'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/weather.svg"}));'
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        task_spec,
+        UxMixedModelClient(body),
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert 'Image("resources/base/media/weather.svg"' in output.effective_output
+    assert '"fillColor"' not in output.effective_output
+
+
+@pytest.mark.asyncio
+async def test_weather_sun_semantic_icon_stays_yellow_for_cloudy_condition():
+    task_spec = _weather_scope_task().model_copy(
+        update={
+            "dataModelSchema": {
+                "ViewWeather": {
+                    "districtName": _sample_field("深圳"),
+                    "temperatureText": _sample_field("26°"),
+                    "condition": _sample_field("多云"),
+                    "airQuality": _sample_field("空气优"),
+                    "temperatureRangeText": _sample_field("31° / 24°"),
+                }
+            }
+        }
+    )
+    body = (
+        'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/sun_max.svg"}));'
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        task_spec,
+        UxMixedModelClient(body),
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert 'Image("resources/base/media/sun_max.svg", "icon", {' in output.effective_output
+    assert '"fillColor":"#FFFFC300"' in output.effective_output
+
+
+@pytest.mark.asyncio
+async def test_weather_multicolor_cloud_artwork_is_not_monochrome_tinted():
+    task_spec = _weather_scope_task().model_copy(
+        update={
+            "dataModelSchema": {
+                "ViewWeather": {
+                    "districtName": _sample_field("上海"),
+                    "temperatureText": _sample_field("26°"),
+                    "condition": _sample_field("多云"),
+                    "airQuality": _sample_field("空气优"),
+                    "temperatureRangeText": _sample_field("31° / 24°"),
+                }
+            },
+            "assetCandidates": [
+                {
+                    "src": "resources/base/media/icon_weather1.svg",
+                    "description": "多云渐变天气图标",
+                    "sceneTags": ["weather", "cloud"],
+                }
+            ],
+        }
+    )
+    body = (
+        'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/icon_weather1.svg"}));'
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        task_spec,
+        UxMixedModelClient(body),
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert 'Image("resources/base/media/icon_weather1.svg", "icon", {' in output.effective_output
+    assert '"fillColor"' not in output.effective_output
+
+
+@pytest.mark.asyncio
+async def test_weather_rain_icon_is_white_on_strong_background():
+    task_spec = _weather_scope_task().model_copy(
+        update={
+            "dataModelSchema": {
+                "ViewWeather": {
+                    "districtName": _sample_field("深圳"),
+                    "temperatureText": _sample_field("26°"),
+                    "condition": _sample_field("小雨"),
+                    "airQuality": _sample_field("空气优"),
+                    "temperatureRangeText": _sample_field("31° / 24°"),
+                }
+            },
+            "assetCandidates": [
+                {
+                    "src": "resources/base/media/drop.svg",
+                    "description": "雨滴图标",
+                    "sceneTags": ["weather", "water"],
+                }
+            ],
+        }
+    )
+    body = (
+        'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/drop.svg"}));'
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        task_spec,
+        UxMixedModelClient(body),
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert 'Image("resources/base/media/drop.svg", "icon", {' in output.effective_output
+    assert '"fillColor":"#FFFFFFFF"' in output.effective_output
+
+
+@pytest.mark.asyncio
+async def test_weather_batch_evidence_keeps_projected_task_and_precompile_dsl(monkeypatch):
+    monkeypatch.setattr(get_settings(), "enable_widget_batch_recording", True)
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        _weather_scope_task(),
+        UxMixedModelClient(),
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    evidence = output.invocation["batchEvidence"]
+    projected = evidence["projectedTaskSpec"]["dataModelSchema"]["data"]
+    assert set(projected["WeatherOverview"]) == {
+        "city",
+        "temperature",
+        "condition",
+        "airQuality",
+        "temperatureRange",
+    }
+    assert evidence["precompileDsl"].startswith("SingleFocusLayout(")
+    assert "WeatherOverview" in evidence["precompileDsl"]
+
+
+@pytest.mark.asyncio
+async def test_weather_details_action_lowers_to_whole_card_click():
+    task_spec = _weather_scope_task().model_copy(
+        update={
+            "eventCandidates": [
+                EventAction(
+                    id="event.open.weather",
+                    displayLabel="天气详情",
+                    call="clickToIntent",
+                    args={},
+                )
+            ],
+            "assetCandidates": [
+                *_weather_scope_task().assetCandidates,
+                {
+                    "src": "resources/base/media/open.svg",
+                    "description": "打开天气详情图标",
+                },
+            ],
+        }
+    )
+    body = (
+        'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/weather.svg"}),'
+        'IconAction({"actionId":"event.open.weather",'
+        '"icon":"resources/base/media/open.svg"}));'
+    )
+    output = await AdvancedComponentPipeline().generate_mixed(
+        task_spec,
+        UxMixedModelClient(body),
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert '"onClick":[{"call":"clickToIntent","args":{}}]' in output.effective_output
+    assert "天气详情" not in output.effective_output
+    assert "resources/base/media/open.svg" not in output.effective_output
+    assert '"alignContent":"bottomEnd"' not in output.effective_output
+    for fact in ("深圳", "38°", "晴", "空气优", "26° / 16°"):
+        assert output.effective_output.count(fact) == 1
+    assert '"width":32,"height":32' in output.effective_output
+    messages = [json.loads(line) for line in output.compiled_a2ui.splitlines()]
+    components = messages[1]["updateComponents"]["components"]
+    root = next(component for component in components if component["id"] == "root")
+    assert root["onClick"] == [{"call": "clickToIntent", "args": {}}]
+    assert not any(component.get("content") == "天气详情" for component in components)
+    assert all(
+        component.get("styles", {}).get("fontColor") == "#FFFFFFFF"
+        for component in components
+        if component.get("component") == "Text"
+    )
+
+
+@pytest.mark.asyncio
+async def test_weather_2x2_normalizes_wrapped_config_and_empty_icon_action():
+    task_spec = _weather_scope_task().model_copy(
+        update={
+            "eventCandidates": [
+                EventAction(
+                    id="event.open.weather",
+                    displayLabel="天气详情",
+                    call="clickToIntent",
+                    args={},
+                )
+            ]
+        }
+    )
+    body = (
+        'SingleFocusLayout([{"contentAlign":"centerStart"}],'
+        'WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/weather.svg"}),'
+        'IconAction({"actionId":"event.open.weather","icon":""}));'
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        task_spec,
+        UxMixedModelClient(body),
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert '"onClick":[{"call":"clickToIntent","args":{}}]' in output.effective_output
+    assert "天气详情" not in output.effective_output
+    assert "IconAction" not in output.effective_output
+
+
+def test_audio_stack_theme_maps_alignment_to_column_axis():
+    capability_ids = {"GetEarphoneInfo"}
+    task_spec = TaskSpec(
+        userQuery="蓝牙耳机电量",
+        size="2x2",
+        dataModelSchema={
+            "GetEarphoneInfo": {
+                "isConnected": {"type": "boolean", "sampleValue": True},
+                "earphoneName": _sample_field("FreeBuds Pro 3"),
+                "leftBatteryLevel": {"type": "number", "sampleValue": 76},
+                "rightBatteryLevel": {"type": "number", "sampleValue": 74},
+                "batteryLevel": {"type": "number", "sampleValue": 80},
+            }
+        },
+        assetCandidates=[],
+    )
+    projected = project_content_component_facts(
+        task_spec,
+        capability_ids,
+        ("BluetoothDeviceOverview",),
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=projected,
+        card_spec={
+            "suggestSize": "2x2",
+            "dataBindings": [{"capabilityId": "GetEarphoneInfo"}],
+        },
+        scope=AdvancedScopeBrief(
+            themeId="audio-product-neutral-violet",
+            advancedComponentIds=("BluetoothDeviceOverview",),
+        ),
+        registry=get_cardplan_registry(),
+    )
+    source = (
+        'SingleFocusLayout(BluetoothDeviceOverview('
+        '{"variant":"earbuds","role":"hero"}));'
+    )
+
+    compiled = compile_ux_layout_card(
+        source,
+        task_spec=projected,
+        contract=projection.contract,
+        protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
+            TERSE_DSL_NESTED2_PROFILE_ID
+        ),
+        registry=get_cardplan_registry(),
+    )
+
+    assert (
+        '"height":20,"itemMargin":4,"justifyContent":"spaceBetween",'
+        '"alignItems":"top"'
+    ) in compiled.effective_output
+    assert "topStart" not in compiled.effective_output
+
+
+def _weather_schedule_task(size: str, *, with_action: bool) -> TaskSpec:
+    events = (
+        [
+            EventAction(
+                id="event.viewCalendarEvent",
+                displayLabel="查看日程",
+                call="clickToIntent",
+                args={},
+            )
+        ]
+        if with_action
+        else []
+    )
+    return TaskSpec(
+        userQuery="天气和下一项日程",
+        size=size,
+        eventCandidates=events,
+        dataModelSchema={
+            "ViewWeather": dict(_weather_scope_task().dataModelSchema["ViewWeather"]),
+            "GetCalendarEvents": {
+                "events": [
+                    {
+                        "title": _sample_field("产品评审"),
+                        "dtStart": _sample_field("09:30"),
+                        "dtEnd": _sample_field("10:30"),
+                    }
+                ]
+            },
+        },
+        assetCandidates=[
+            *_weather_scope_task().assetCandidates,
+            {
+                "src": "resources/base/media/calendar.svg",
+                "description": "日程操作图标",
+            },
+        ],
+    )
+
+
+def _compile_weather_schedule(
+    size: str,
+    source: str,
+    *,
+    with_action: bool,
+):
+    capability_ids = {"ViewWeather", "GetCalendarEvents"}
+    selected = apply_content_selectors(
+        _weather_schedule_task(size, with_action=with_action),
+        capability_ids,
+    )
+    scope = AdvancedScopeBrief(
+        themeId="meeting-paper-neutral",
+        advancedComponentIds=("WeatherOverview", "ScheduleOverview"),
+    )
+    projected = project_content_component_facts(
+        selected,
+        capability_ids,
+        scope.advanced_component_ids,
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=projected,
+        card_spec={
+            "suggestSize": size,
+            "dataBindings": [
+                {"capabilityId": "ViewWeather"},
+                {"capabilityId": "GetCalendarEvents"},
+            ],
+        },
+        scope=scope,
+        registry=get_cardplan_registry(),
+    )
+    return compile_ux_layout_card(
+        source,
+        task_spec=projected,
+        contract=projection.contract,
+        protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
+            TERSE_DSL_NESTED2_PROFILE_ID
+        ),
+        registry=get_cardplan_registry(),
+    )
+
+
+@pytest.mark.parametrize("with_action", [False, True])
+def test_weather_2x2_multi_business_keeps_weather_as_primary(with_action: bool):
+    if with_action:
+        source = (
+            'HeroSupportActionLayout({"heroRatio":"wide"},'
+            'WeatherOverview({"variant":"current","role":"hero",'
+            '"conditionIcon":"resources/base/media/weather.svg"}),'
+            'ScheduleOverview({"variant":"meetingCompact","role":"support"}),'
+            'IconAction({"actionId":"event.viewCalendarEvent",'
+            '"icon":"resources/base/media/calendar.svg"}));'
+        )
+    else:
+        source = (
+            'HeroSupportLayout({"ratio":"heroWide","direction":"vertical"},'
+            'WeatherOverview({"variant":"current","role":"hero",'
+            '"conditionIcon":"resources/base/media/weather.svg"}),'
+            'ScheduleOverview({"variant":"meetingCompact","role":"support"}));'
+        )
+
+    compiled = _compile_weather_schedule("2x2", source, with_action=with_action)
+
+    assert "WeatherOverview" not in compiled.effective_output
+    assert compiled.effective_output.index('Text("深圳"') < compiled.effective_output.index(
+        'Image("resources/base/media/weather.svg"'
+    )
+    assert compiled.effective_output.count("产品评审") == 1
+    assert compiled.effective_output.count("09:30 - 10:30") == 1
+    if with_action:
+        assert '"alignContent":"bottomEnd"' in compiled.effective_output
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        (
+            'HeroSupportLayout({"ratio":"heroWide","direction":"horizontal"},'
+            'WeatherOverview({"variant":"current","role":"hero",'
+            '"conditionIcon":"resources/base/media/weather.svg"}),'
+            'ScheduleOverview({"variant":"meetingExpanded","role":"support"}));'
+        ),
+        (
+            'HeroSupportLayout({"ratio":"heroWide","direction":"horizontal"},'
+            'ScheduleOverview({"variant":"meetingExpanded","role":"hero"}),'
+            'WeatherOverview({"variant":"current","role":"support",'
+            '"conditionIcon":"resources/base/media/weather.svg"}));'
+        ),
+    ],
+)
+def test_weather_2x4_multi_business_supports_primary_and_support_roles(source: str):
+    compiled = _compile_weather_schedule("2x4", source, with_action=False)
+
+    assert "WeatherOverview" not in compiled.effective_output
+    for fact in ("深圳", "38°", "晴", "空气优", "26° / 16°"):
+        assert compiled.effective_output.count(fact) == 1
+
+
+def test_weather_2x4_hero_support_action_keeps_action_in_its_own_region():
+    source = (
+        'HeroSupportActionLayout({"heroRatio":"wide"},'
+        'WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/weather.svg"}),'
+        'ScheduleOverview({"variant":"meetingExpanded","role":"support"}),'
+        'PillAction({"actionId":"event.viewCalendarEvent",'
+        '"icon":"resources/base/media/calendar.svg"}));'
+    )
+
+    compiled = _compile_weather_schedule("2x4", source, with_action=True)
+
+    assert '"justifyContent":"spaceBetween"' in compiled.effective_output
+    assert "查看日程" in compiled.effective_output
+    assert compiled.effective_output.count("产品评审") == 1
+
+
+def test_weather_and_phone_battery_use_hero_support_action_roles():
+    capability_ids = {"ViewWeather", "GetPhoneBatteryInfo"}
+    weather = _weather_scope_task()
+    task_spec = TaskSpec(
+        userQuery="显示天气、手机电量并一键导航回家",
+        size="2x2",
+        eventCandidates=[
+            EventAction(
+                id="event.startNavigate",
+                displayLabel="开始导航",
+                call="clickToIntent",
+                args={"intentName": "StartNavigate"},
+            )
+        ],
+        dataModelSchema={
+            "ViewWeather": dict(weather.dataModelSchema["ViewWeather"]),
+            "GetPhoneBatteryInfo": {
+                "batterySOC": {"type": "number", "sampleValue": 68},
+                "batterySOCText": _sample_field("68%"),
+                "batteryCapacityLevelDesc": _sample_field("正常电量"),
+                "chargingStatusDesc": _sample_field("充电中"),
+            },
+        },
+        assetCandidates=[
+            *weather.assetCandidates,
+            {
+                "src": "resources/base/media/navigation.svg",
+                "description": "一键导航回家图标",
+                "sceneTags": ["location", "navigation"],
+            },
+        ],
+    )
+    selected = apply_content_selectors(task_spec, capability_ids)
+    scope = AdvancedScopeBrief(
+        themeId="meeting-paper-neutral",
+        advancedComponentIds=("WeatherOverview", "BatteryOverview"),
+    )
+    projected = project_content_component_facts(
+        selected,
+        capability_ids,
+        scope.advanced_component_ids,
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=projected,
+        card_spec={"suggestSize": "2x2", "dataBindings": []},
+        scope=scope,
+        registry=get_cardplan_registry(),
+    )
+    compiled = compile_ux_layout_card(
+        'HeroSupportActionLayout(WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/weather.svg"}),'
+        'BatteryOverview({"variant":"charging","role":"support"}),'
+        'IconAction({"actionId":"event.startNavigate",'
+        '"icon":"resources/base/media/navigation.svg"}));',
+        task_spec=projected,
+        contract=projection.contract,
+        protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
+            TERSE_DSL_NESTED2_PROFILE_ID
+        ),
+        registry=get_cardplan_registry(),
+    )
+
+    assert "WeatherOverview" not in compiled.effective_output
+    assert "BatteryOverview" not in compiled.effective_output
+    assert "68%" in compiled.effective_output
+    assert compiled.stats.action_used_ids == ("event.startNavigate",)
+    assert '"fontSize":32' in compiled.effective_output
+    assert '"height":36' in compiled.effective_output
+    assert '"type":"ring"' not in compiled.effective_output
+
+
+def test_weather_phone_and_earphone_three_business_scope_is_rejected():
+    capability_ids = {"ViewWeather", "GetPhoneBatteryInfo", "GetEarphoneInfo"}
+    task_spec = TaskSpec(
+        userQuery="天气、手机电量和耳机电量",
+        size="2x4",
+        dataModelSchema={
+            "ViewWeather": dict(_weather_scope_task().dataModelSchema["ViewWeather"]),
+            "GetPhoneBatteryInfo": {
+                "batterySOC": {"type": "number", "sampleValue": 68},
+                "batterySOCText": _sample_field("68%"),
+                "batteryCapacityLevelDesc": _sample_field("电量正常"),
+                "chargingStatusDesc": _sample_field("充电中"),
+            },
+            "GetEarphoneInfo": {
+                "isConnected": {"type": "boolean", "sampleValue": True},
+                "earphoneName": _sample_field("FreeBuds Pro 3"),
+                "leftBatteryLevel": {"type": "number", "sampleValue": 76},
+                "rightBatteryLevel": {"type": "number", "sampleValue": 74},
+                "batteryLevel": {"type": "number", "sampleValue": 80},
+            },
+        },
+        assetCandidates=[
+            *_weather_scope_task().assetCandidates,
+            {
+                "src": "resources/base/media/battery.svg",
+                "description": "手机电池图标",
+                "sceneTags": ["battery", "power"],
+            },
+        ],
+    )
+    selected = apply_content_selectors(task_spec, capability_ids)
+    scope = AdvancedScopeBrief(
+        themeId="meeting-paper-neutral",
+        advancedComponentIds=(
+            "WeatherOverview",
+            "BatteryOverview",
+            "BluetoothDeviceOverview",
+        ),
+    )
+    projected = project_content_component_facts(
+        selected,
+        capability_ids,
+        scope.advanced_component_ids,
+    )
+    with pytest.raises(ValueError, match="no compatible UX layout"):
+        build_ux_mixed_prompt(
+            task_spec=projected,
+            card_spec={
+                "suggestSize": "2x4",
+                "dataBindings": [
+                    {"capabilityId": capability_id}
+                    for capability_id in capability_ids
+                ],
+            },
+            scope=scope,
+            registry=get_cardplan_registry(),
+        )
+
+
+def test_ux_mixed_contract_rejects_standard_components_replacing_selected_business_component():
+    task_spec = apply_content_selectors(_weather_scope_task(), {"ViewWeather"})
+    scope = AdvancedScopeBrief(
+        themeId="family-weather-care-blue",
+        advancedComponentIds=("WeatherOverview",),
+    )
+    projected = project_content_component_facts(
+        task_spec,
+        {"ViewWeather"},
+        scope.advanced_component_ids,
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=projected,
+        card_spec={"suggestSize": "2x2"},
+        scope=scope,
+        registry=get_cardplan_registry(),
+    )
+
+    with pytest.raises(
+        TerseDslNested2ConversionError,
+        match="must appear exactly once",
+    ):
+        compile_ux_layout_card(
+            'SingleFocusLayout(Text("晴", "body"));',
+            task_spec=projected,
+            contract=projection.contract,
+            protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
+                TERSE_DSL_NESTED2_PROFILE_ID
+            ),
+            registry=get_cardplan_registry(),
+        )
+
+
+def test_ux_mixed_contract_rejects_unknown_weather_variant():
+    task_spec = apply_content_selectors(_weather_scope_task(), {"ViewWeather"})
+    scope = AdvancedScopeBrief(
+        themeId="family-weather-care-blue",
+        advancedComponentIds=("WeatherOverview",),
+    )
+    projected = project_content_component_facts(
+        task_spec,
+        {"ViewWeather"},
+        scope.advanced_component_ids,
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=projected,
+        card_spec={"suggestSize": "2x2"},
+        scope=scope,
+        registry=get_cardplan_registry(),
+    )
+    source = _WEATHER_TERSE_BODY.replace('"current"', '"forecastItem"')
+
+    with pytest.raises(
+        TerseDslNested2ConversionError,
+        match="WeatherOverview variant is not supported",
+    ):
+        compile_ux_layout_card(
+            source,
+            task_spec=projected,
+            contract=projection.contract,
+            protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
+                TERSE_DSL_NESTED2_PROFILE_ID
+            ),
+            registry=get_cardplan_registry(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        (
+            'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero"}));',
+            "WeatherOverview configuration fields are invalid",
+        ),
+        (
+            'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+            '"conditionIcon":"resources/base/media/not-approved.svg"}));',
+            "WeatherOverview conditionIcon is not an approved second-step asset input",
+        ),
+    ],
+)
+def test_weather_overview_requires_approved_second_step_icon(source: str, message: str):
+    task_spec = apply_content_selectors(_weather_scope_task(), {"ViewWeather"})
+    scope = AdvancedScopeBrief(
+        themeId="family-weather-care-blue",
+        advancedComponentIds=("WeatherOverview",),
+    )
+    projected = project_content_component_facts(
+        task_spec,
+        {"ViewWeather"},
+        scope.advanced_component_ids,
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=projected,
+        card_spec={"suggestSize": "2x2"},
+        scope=scope,
+        registry=get_cardplan_registry(),
+    )
+
+    with pytest.raises(TerseDslNested2ConversionError, match=message):
+        compile_ux_layout_card(
+            source,
+            task_spec=projected,
+            contract=projection.contract,
+            protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
+                TERSE_DSL_NESTED2_PROFILE_ID
+            ),
+            registry=get_cardplan_registry(),
+        )
+
+
+def test_ux_mixed_contract_uses_direct_battery_constructor_and_approved_action():
+    task_spec = TaskSpec(
+        userQuery="展示低电状态并开启省电模式",
+        size="2x2",
+        eventCandidates=[
+            EventAction(
+                id="event.setPowerSavingMode",
+                displayLabel="省电模式",
+                call="clickToIntent",
+                args={},
+            )
+        ],
+        dataModelSchema={
+            "GetPhoneBatteryInfo": {
+                "batterySOC": {"type": "number", "sampleValue": 18},
+                "batterySOCText": {"type": "string", "sampleValue": "18%"},
+                "batteryCapacityLevelDesc": {
+                    "type": "string",
+                    "sampleValue": "手机电量低于20%，建议开启省电模式",
+                },
+                "chargingStatusDesc": {"type": "string", "sampleValue": "未充电"},
+            }
+        },
+        assetCandidates=[
+            {
+                "src": "resources/base/media/battery.svg",
+                "description": "充电/闪电图标，适用场景：低电模式",
+            },
+            {
+                "src": "resources/base/media/save-power.svg",
+                "description": "省电模式图标",
+            },
+        ],
+    )
+    projected = project_content_component_facts(
+        task_spec,
+        {"GetPhoneBatteryInfo"},
+        ("BatteryOverview",),
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=projected,
+        card_spec={"suggestSize": "2x2"},
+        scope=AdvancedScopeBrief(
+            themeId="system-low-power-blue",
+            advancedComponentIds=("BatteryOverview",),
+        ),
+        registry=get_cardplan_registry(),
+    )
+    source = (
+        'HeroActionLayout({"actionPlacement":"bottom"}, '
+        'BatteryOverview({"variant":"low","role":"hero",'
+        '"batteryIcon":"resources/base/media/battery.svg"}),'
+        'IconAction({"actionId":"event.setPowerSavingMode",'
+        '"icon":"resources/base/media/save-power.svg"}));'
+    )
+
+    compiled = compile_ux_layout_card(
+        source,
+        task_spec=projected,
+        contract=projection.contract,
+        protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
+            TERSE_DSL_NESTED2_PROFILE_ID
+        ),
+        registry=get_cardplan_registry(),
+    )
+
+    assert compiled.stats.template_used_ids == ()
+    assert "BatteryOverview" not in compiled.effective_output
+    assert "Template" not in compiled.a2ui
+
+
+def test_ux_mixed_prompt_counts_action_outside_business_children():
+    task_spec = _metric_task_spec().model_copy(
+        update={
+            "userQuery": "显示手机电量",
+            "dataModelSchema": {
+                "GetPhoneBatteryInfo": {
+                    "batterySOC": {"type": "number", "sampleValue": 18},
+                    "batterySOCText": {"type": "string", "sampleValue": "18%"},
+                    "batteryCapacityLevelDesc": {
+                        "type": "string",
+                        "sampleValue": "电量较低",
+                    },
+                    "chargingStatusDesc": {"type": "string", "sampleValue": "未充电"},
+                }
+            },
+        }
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=task_spec,
+        card_spec={
+            "suggestSize": "2x2",
+            "dataBindings": [{"capabilityId": "GetPhoneBatteryInfo"}],
+        },
+        scope=AdvancedScopeBrief(
+            themeId="device-clean-blue-teal",
+            advancedComponentIds=("BatteryOverview",),
+        ),
+        registry=get_cardplan_registry(),
+    )
+    system_prompt = projection.messages[0]["content"]
+
+    assert "businessChildren=" in system_prompt
+    assert "Action 必须是连续末尾直接 children" in system_prompt
+    assert "configSchema=" in system_prompt
+    assert "禁止放进 Column/Row/Stack/List/Template" in system_prompt
+
+
+def test_action_matrix_layout_requires_two_approved_controls_in_scope_and_prompt():
+    registry = get_cardplan_registry()
+    scope = AdvancedScopeBrief(
+        themeId="meeting-paper-neutral",
+        advancedComponentIds=("SettingsOverview",),
+    )
+    one_action = _metric_task_spec()
+    two_actions = one_action.model_copy(
+        update={
+            "eventCandidates": [
+                EventAction(id="event.first", call="clickToApi", args={}),
+                EventAction(id="event.second", call="clickToApi", args={}),
+            ]
+        }
+    )
+
+    assert "ActionMatrixLayout" not in resolve_scope_layout_ids(scope, one_action, registry)
+    assert "ActionMatrixLayout" in resolve_scope_layout_ids(scope, two_actions, registry)
+
+    projection = build_ux_mixed_prompt(
+        task_spec=two_actions,
+        card_spec={"suggestSize": "2x2"},
+        scope=scope,
+        registry=registry,
+    )
+
+    assert projection.contract.content_action_ids == ("event.first", "event.second")
+    assert "actions=2..2" in projection.messages[0]["content"]
+
+
+def test_ux_mixed_prompt_exposes_weather_as_direct_terse_component():
+    task_spec = TaskSpec(
+        userQuery="展示雨天天气并支持打车",
+        size="2x2",
+        eventCandidates=[EventAction(id="event.startNavigate", call="clickToApi", args={})],
+        dataModelSchema={
+            "data": {
+                "weather": {
+                    "city": {"type": "string", "sampleValue": "深圳"},
+                    "temperature": {"type": "string", "sampleValue": "12°"},
+                    "condition": {"type": "string", "sampleValue": "雨"},
+                    "airQuality": {"type": "string", "sampleValue": "优"},
+                    "temperatureRange": {"type": "string", "sampleValue": "12° / 9°"},
+                }
+            }
+        },
+        assetCandidates=[
+            {
+                "src": "resources/base/media/car.svg",
+                "description": "汽车打车图标",
+            }
+        ],
+    )
+    projection = build_ux_mixed_prompt(
+        task_spec=task_spec,
+        card_spec={"suggestSize": "2x2"},
+        scope=AdvancedScopeBrief(
+            themeId="rainy-commute-gray-blue",
+            advancedComponentIds=("WeatherOverview",),
+        ),
+        registry=get_cardplan_registry(),
+    )
+    system_prompt = projection.messages[0]["content"]
+
+    assert 'WeatherOverview({"variant":"current|commute",' in system_prompt
+    assert '"conditionIcon":"<trustedAssetSources item>"})' in system_prompt
+    assert "ux-weather-overview@2" not in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_new_mixed_entry_rejects_standard_container_as_content_root():
+    model_client = UxMixedModelClient('Column("section", Text("晴", "body"));')
+
+    with pytest.raises(ValueError, match="root must be one Layout Component"):
+        await AdvancedComponentPipeline().generate_mixed(
+            _weather_scope_task(),
+            model_client,
+            {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_new_mixed_entry_retries_only_second_layer_after_contract_rejection():
+    model_client = RetryingUxMixedModelClient(
+        [
+            'SingleFocusLayout(Text("模型新增标签", "body"));',
+            _WEATHER_TERSE_BODY,
+        ]
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        _weather_scope_task(),
+        model_client,
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert model_client.phases == [
+        "advanced-component-scope",
+        "advanced-mixed-body",
+        "advanced-mixed-body-repair",
+    ]
+    retry_prompt = model_client.prompts["advanced-mixed-body-repair"]
+    assert retry_prompt[-2]["role"] == "assistant"
+    assert "模型新增标签" in retry_prompt[-2]["content"]
+    assert "trustedStringLiterals" in retry_prompt[-1]["content"]
+    assert output.invocation["validationRepairCount"] == 1
+    assert output.fallback_used is False
+    assert "WeatherOverview" in output.raw_output
+
+
+@pytest.mark.asyncio
+async def test_new_mixed_entry_repairs_unknown_weather_variant_without_scope_retry():
+    model_client = RetryingUxMixedModelClient(
+        [
+            _WEATHER_TERSE_BODY.replace('"current"', '"forecastItem"'),
+            _WEATHER_TERSE_BODY,
+        ]
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        _weather_scope_task(),
+        model_client,
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert model_client.phases == [
+        "advanced-component-scope",
+        "advanced-mixed-body",
+        "advanced-mixed-body-repair",
+    ]
+    assert (
+        "WeatherOverview variant is not supported"
+        in model_client.prompts["advanced-mixed-body-repair"][-1]["content"]
+    )
+    assert output.invocation["validationRepairCount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_new_mixed_entry_uses_second_repair_without_repeating_scope(monkeypatch):
+    monkeypatch.setattr(get_settings(), "ux_mixed_validation_max_retry_attempts", 2)
+    model_client = RetryingUxMixedModelClient(
+        [
+            'SingleFocusLayout(Text("模型新增标签", "body"));',
+            'SingleFocusLayout(Column("section"));',
+            _WEATHER_TERSE_BODY,
+        ]
+    )
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        _weather_scope_task(),
+        model_client,
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert model_client.phases == [
+        "advanced-component-scope",
+        "advanced-mixed-body",
+        "advanced-mixed-body-repair",
+        "advanced-mixed-body-repair",
+    ]
+    assert output.invocation["validationRepairCount"] == 2
+    assert output.fallback_used is False
+    assert "WeatherOverview" in output.raw_output
+
+
+@pytest.mark.asyncio
+async def test_new_mixed_entry_keeps_weather_as_direct_layout_child():
+    model_client = UxMixedModelClient()
+
+    output = await AdvancedComponentPipeline().generate_mixed(
+        _weather_scope_task(),
+        model_client,
+        {"title": "天气", "description": "天气状态", "suggestSize": "2x2"},
+    )
+
+    assert output.compiled_a2ui
+    assert "SingleFocusLayout" in output.raw_output
+    assert "SingleFocusLayout" not in output.compiled_a2ui
+    assert "WeatherOverview" not in output.effective_output
+
+
+def test_ux_mixed_framer_repairs_only_trailing_typed_delimiters():
+    source = 'Template("card@1", {"title":"天气"}, SingleFocusLayout(Text("晴", "body"));'
+
+    framed, repaired = frame_ux_layout_children(
+        source,
+        size="2x2",
+        registry=get_cardplan_registry(),
+    )
+
+    assert repaired is True
+    assert framed.endswith(")));")
+    assert parse_hybrid_card(framed).name == "card@1"
+
+
+def test_ux_mixed_root_framer_keeps_weather_direct_in_single_focus_layout():
+    source = (
+        'SingleFocusLayout(WeatherOverview({"variant":"current","role":"hero",'
+        '"conditionIcon":"resources/base/media/drop_1.svg"}),'
+        'Column("compact",Text("多云","body"),Text("26℃","title")),'
+        'PillAction({"actionId":"event.startNavigate",'
+        '"icon":"resources/base/media/location_north_up_right_fill.svg"}));'
+    )
+
+    framed, repaired = frame_ux_layout_root_children(
+        source,
+        size="2x2",
+        registry=get_cardplan_registry(),
+        allowed_layout_ids=("SingleFocusLayout",),
+    )
+    root = parse_ux_layout_card(framed)
+
+    assert repaired is True
+    assert root.name == "SingleFocusLayout"
+    assert [child.name for child in root.children] == ["WeatherOverview", "PillAction"]
+
+
+def test_ux_mixed_root_framer_selects_only_allowed_layout_from_sibling_roots():
+    source = (
+        'BatteryOverview({"variant":"charging","role":"hero"}),'
+        'HeroActionLayout(BatteryOverview({"variant":"charging","role":"hero"}),'
+        'PillAction({"actionId":"event.setPowerSavingMode"}));'
+    )
+
+    framed, repaired = frame_ux_layout_root_children(
+        source,
+        size="2x2",
+        registry=get_cardplan_registry(),
+        allowed_layout_ids=("HeroActionLayout",),
+    )
+
+    assert repaired is True
+    assert parse_ux_layout_card(framed).name == "HeroActionLayout"
+
+
+def test_ux_mixed_root_framer_moves_sibling_business_into_layout():
+    source = (
+        'BatteryOverview({"variant":"charging","role":"hero"}),'
+        'HeroActionLayout({"actionPlacement":"bottom"},Column("compact",'
+        'Text("省电管理","title")),PillAction({"actionId":'
+        '"event.setPowerSavingMode"}));'
+    )
+
+    framed, repaired = frame_ux_layout_root_children(
+        source,
+        size="2x2",
+        registry=get_cardplan_registry(),
+        allowed_layout_ids=("HeroActionLayout",),
+    )
+    root = parse_ux_layout_card(framed)
+
+    assert repaired is True
+    assert [child.name for child in root.children] == ["BatteryOverview", "PillAction"]
+
+
+def test_ux_mixed_root_framer_reparents_layout_wrapped_by_direct_business():
+    source = (
+        'BatteryOverview({"variant":"charging","role":"hero"},'
+        'HeroActionLayout({"actionPlacement":"bottom"},Column("compact",'
+        'Text("省电管理","title")),PillAction({"actionId":'
+        '"event.setPowerSavingMode"})));'
+    )
+
+    framed, repaired = frame_ux_layout_root_children(
+        source,
+        size="2x2",
+        registry=get_cardplan_registry(),
+        allowed_layout_ids=("HeroActionLayout",),
+    )
+    root = parse_ux_layout_card(framed)
+
+    assert repaired is True
+    assert root.name == "HeroActionLayout"
+    assert [child.name for child in root.children] == ["BatteryOverview", "PillAction"]
 
 
 @pytest.mark.asyncio
@@ -894,21 +3185,46 @@ def _template_task_spec():
     )
 
 
-@pytest.mark.parametrize("output_format", ["terse", "a2ui"])
 @pytest.mark.asyncio
 async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
     monkeypatch,
-    output_format,
 ):
     saved_genui: list[str] = []
     saved_design_tokens: list[str | None] = []
     saved_task_specs: list[dict] = []
 
-    async def unavailable_json(_client, _prompt, *, phase):
-        raise RuntimeError(f"offline: {phase}")
+    async def new_mixed_entry(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
+        source = (
+            'Template("card@1", {"title":"天气"}, SingleFocusLayout(Text("天气状态", "body")));'
+        )
+        compiled = convert_terse_dsl_nested2_to_a2ui(
+            'Column("card", Text("天气状态", "body"));',
+            size="2x2",
+            protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
+                TERSE_DSL_NESTED2_PROFILE_ID
+            ),
+        )
+        return AdvancedPipelineOutput(
+            component_id="ux-advanced-component-mixed",
+            style_id="family-weather-care-blue",
+            source_dsl='Column("card", Text("天气状态", "body"));',
+            source_format="a2ui",
+            ui_brief=AdvancedScopeBrief(
+                themeId="family-weather-care-blue",
+                advancedComponentIds=("WeatherOverview",),
+            ),
+            invocation={},
+            planner_mode="llm",
+            mapper_mode="llm",
+            route="hybrid-template",
+            confidence_bypassed=True,
+            raw_output=source,
+            effective_output='Column("card", Text("天气状态", "body"));',
+            compiled_a2ui=compiled,
+        )
 
-    async def must_not_generate_terse(*_args, **_kwargs):
-        raise AssertionError("advanced success must not call the Terse generator")
+    async def old_entry_must_not_run(*_args, **_kwargs):
+        raise AssertionError("fifth interface must bypass the legacy generate entry")
 
     def save_artifact(store, artifact):
         saved_genui.append(artifact.genui)
@@ -919,14 +3235,9 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
             artifactDigest="sha256:advanced",
         )
 
-    monkeypatch.setattr(A2UIModelClient, "generate_json", unavailable_json)
-    monkeypatch.setattr(A2UIModelClient, "generate", must_not_generate_terse)
+    monkeypatch.setattr(AdvancedComponentPipeline, "generate_mixed", new_mixed_entry)
+    monkeypatch.setattr(AdvancedComponentPipeline, "generate", old_entry_must_not_run)
     monkeypatch.setattr(ArtifactStore, "save", save_artifact)
-    monkeypatch.setattr(
-        get_settings(),
-        "advanced_component_output_format",
-        output_format,
-    )
     request = GenerateWidgetCardRequest(
         uid="advanced-e2e",
         prdVer="11.7.5.205",
@@ -967,57 +3278,30 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
     assert response.artifactUrl == "https://artifact.test/advanced"
     assert len(saved_genui[0].splitlines()) == 3
     assert saved_design_tokens[0] is not None
-    assert saved_task_specs[0]["selectedTemplateId"] == "status-ring-action"
-    if output_format == "terse":
-        assert saved_design_tokens[0].startswith('Column("card"')
-    else:
-        assert saved_design_tokens[0].startswith('{"version"')
-        assert saved_design_tokens[0] == saved_genui[0]
+    assert saved_design_tokens[0].startswith('Column("card"')
+    assert "selectedTemplateId" not in saved_task_specs[0]
 
 
 @pytest.mark.asyncio
-async def test_invalid_advanced_template_falls_back_to_original_terse(monkeypatch):
+async def test_new_mixed_entry_failure_does_not_fall_back_to_old_entry_or_legacy_terse(
+    monkeypatch,
+):
     calls: list[str] = []
-    saved_task_specs: list[dict] = []
 
-    async def invalid_advanced(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
-        return AdvancedPipelineOutput(
-            component_id="status-ring-action",
-            style_id="night-violet",
-            source_dsl='["broken","Text",{}]',
-            source_format="terse",
-            ui_brief=UIBrief(
-                purpose="wellbeing-coaching",
-                primaryInformation=["状态"],
-                informationHierarchy=["状态", "操作"],
-                visualTone="calm-night",
-                contentPriorities=["状态优先"],
-                reason="测试高级失败回退。",
-            ),
-            invocation={},
-            planner_mode="offline",
-            mapper_mode="offline",
-        )
+    async def invalid_mixed(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
+        raise ValueError("invalid mixed output")
+
+    async def old_entry(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
+        calls.append("old-entry")
+        raise AssertionError("legacy entry must stay bypassed")
 
     async def generate_terse(_client, _prompt, _profile):
         calls.append("terse")
         return 'Column("card", Text("回退成功", "title"));'
 
-    def save_fallback_artifact(_store, artifact):
-        saved_task_specs.append(artifact.taskSpec)
-        return ArtifactSaveResult(
-            artifactUrl="https://artifact.test/fallback",
-            artifactDigest="sha256:fallback",
-        )
-
-    monkeypatch.setattr(AdvancedComponentPipeline, "generate", invalid_advanced)
+    monkeypatch.setattr(AdvancedComponentPipeline, "generate_mixed", invalid_mixed)
+    monkeypatch.setattr(AdvancedComponentPipeline, "generate", old_entry)
     monkeypatch.setattr(A2UIModelClient, "generate", generate_terse)
-    monkeypatch.setattr(ArtifactValidator, "validate", lambda *_args: [])
-    monkeypatch.setattr(
-        ArtifactStore,
-        "save",
-        save_fallback_artifact,
-    )
     request = GenerateWidgetCardRequest(
         uid="fallback-e2e",
         prdVer="11.7.5.205",
@@ -1029,10 +3313,39 @@ async def test_invalid_advanced_template_falls_back_to_original_terse(monkeypatc
 
     response = await WidgetGenerationService().generate_widget_card_terse_dsl_nested2(request)
 
-    assert response.status == GenerationStatus.SUCCESS
-    assert response.artifactUrl == "https://artifact.test/fallback"
-    assert calls == ["terse"]
-    assert "selectedTemplateId" not in saved_task_specs[0]
+    assert response.status == GenerationStatus.FAILED
+    assert response.generationFallbackUsed is False
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_disabled_whole_card_route_never_falls_back_to_legacy_terse(monkeypatch):
+    calls: list[str] = []
+
+    async def invalid_hybrid(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
+        raise ValueError("invalid hybrid output")
+
+    async def generate_terse(_client, _prompt, _profile):
+        calls.append("terse")
+        return 'Column("card", Text("不应执行", "title"));'
+
+    monkeypatch.setattr(get_settings(), "enable_advanced_whole_card_template", False)
+    monkeypatch.setattr(AdvancedComponentPipeline, "generate_mixed", invalid_hybrid)
+    monkeypatch.setattr(A2UIModelClient, "generate", generate_terse)
+    request = GenerateWidgetCardRequest(
+        uid="strict-hybrid-e2e",
+        prdVer="11.7.5.205",
+        device={"romVersion": "CLS-AL30 6.0.0.328"},
+        userQuery="生成静态摘要",
+        title="摘要",
+        description="严格混合测试",
+    )
+
+    response = await WidgetGenerationService().generate_widget_card_terse_dsl_nested2(request)
+
+    assert response.status == GenerationStatus.FAILED
+    assert response.generationFallbackUsed is False
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -1101,3 +3414,29 @@ async def test_advanced_design_token_is_valid_for_terse_edit_route():
     )
 
     assert valid is True
+
+
+def test_mixed_generation_diagnostics_are_allowlisted_and_payload_free():
+    try:
+        raise TerseDslNested2ConversionError(
+            "Template asset is not approved: private-business-asset"
+        )
+    except TerseDslNested2ConversionError as exc:
+        error_code, error_origin = advanced_pipeline_module.safe_generation_error_metadata(exc)
+
+    assert error_code == "TEMPLATE_ASSET_NOT_APPROVED"
+    assert error_origin.startswith(
+        "test_mixed_generation_diagnostics_are_allowlisted_and_payload_free:"
+    )
+    assert "private-business-asset" not in error_code
+    assert "private-business-asset" not in error_origin
+
+    unknown_code, _ = advanced_pipeline_module.safe_generation_error_metadata(
+        ValueError("private-business-literal")
+    )
+    assert unknown_code == "PIPELINE_VALUE_ERROR"
+    shape = advanced_pipeline_module._safe_raw_contract_shape(
+        'SingleFocusLayout(Template("ux-private@1", "small", {"value":18}));',
+        (("ux-private@1",),),
+    )
+    assert shape == (1, 1, 1)

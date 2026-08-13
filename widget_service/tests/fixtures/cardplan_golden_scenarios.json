@@ -41,7 +41,8 @@
         {
           "id": "asset.icon_watermark",
           "src": "resources/base/media/ux_golden_asset_watermark_beige.svg",
-          "description": "水印图标，当下日程"
+          "description": "水印图标，当下日程",
+          "sceneTags": ["watermark"]
         }
       ],
       "cardTemplate": {
@@ -134,7 +135,8 @@
         {
           "id": "asset.headset_product",
           "src": "resources/base/media/ux_golden_asset_headset_product.png",
-          "description": "蓝牙耳机产品主视觉图，适合设备状态卡片的产品展示区域"
+          "description": "蓝牙耳机产品主视觉图，适合设备状态卡片的产品展示区域",
+          "sceneTags": ["device", "audio", "product"]
         },
         {
           "id": "asset.icon_music",
@@ -570,12 +572,14 @@
         {
           "id": "asset.icon_weather1",
           "src": "resources/base/media/ux_golden_asset_icon_weather1.svg",
-          "description": "天气/雨伞图标，亲人关怀"
+          "description": "天气/雨伞图标，亲人关怀",
+          "sceneTags": ["condition"]
         },
         {
           "id": "asset.icon_high_temperature",
           "src": "resources/base/media/ux_golden_asset_thermometer_sun_fill.svg",
-          "description": "高温/温度计图标，亲人关怀"
+          "description": "高温/温度计图标，亲人关怀",
+          "sceneTags": ["alert"]
         },
         {
           "id": "asset.icon_call",
@@ -872,7 +876,7 @@
         }
       ],
       "eventDisplayLabels": {
-        "event.open.settings.parentControl": "设定管控时间"
+        "event.open.settings.parentControl": "管控时间"
       },
       "assets": [
         {
@@ -906,7 +910,7 @@
           "actionId": "event.open.settings.parentControl"
         }
       },
-      "rawHybridSource": "Template(\"card@1\", {\"title\":\"抖音使用时长\",\"titleIcon\":\"resources/base/media/ux_golden_asset_icon_tiktok.png\",\"action\":{\"label\":\"设定管控时间\",\"id\":\"event.open.settings.parentControl\"}}, Column(\"section\", Template(\"ux-segmented-limit@1\", \"medium\", { safeValue: 225, warningValue: 240, total: 270 }), Template(\"ux-dual-metric@1\", \"medium\", { firstLabel: \"时长设定\", firstValue: \"3h 45m\", secondLabel: \"已超时\", secondValue: \"15m\" })));",
+      "rawHybridSource": "Template(\"card@1\", {\"title\":\"抖音使用时长\",\"titleIcon\":\"resources/base/media/ux_golden_asset_icon_tiktok.png\",\"action\":{\"label\":\"管控时间\",\"id\":\"event.open.settings.parentControl\"}}, Column(\"section\", Template(\"ux-segmented-limit@1\", \"medium\", { safeValue: 225, warningValue: 240, total: 270 }), Template(\"ux-dual-metric@1\", \"medium\", { firstLabel: \"时长设定\", firstValue: \"3h 45m\", secondLabel: \"已超时\", secondValue: \"15m\" })));",
       "goldenFile": "digital-wellbeing.a2ui.jsonl",
       "goldenSha256": "a1d0d3d4aa40b48538308caaf64d6be6015940030b8222458a9c1d48cb89ac52",
       "goldenSummary": {
@@ -916,7 +920,7 @@
           "3h 45m",
           "已超时",
           "15m",
-          "设定管控时间"
+          "管控时间"
         ],
         "actionIds": [],
         "componentTypes": {

@@ -6,6 +6,13 @@ import {
   TERSE_TEMPLATE_REGISTRY_VERSION,
 } from "../../../intermediate_expression/packages/core/src/terse-template-registry.ts";
 import {
+  ADAPTIVE_TEMPLATE_FAMILIES,
+  ADVANCED_COMPONENT_CAPABILITIES,
+  ADVANCED_COMPONENT_DOMAIN_GROUPS,
+  ADVANCED_COMPONENT_REGISTRY_VERSION,
+  CARD_SIZE_CONTENT_BUDGETS,
+} from "../../../intermediate_expression/packages/core/src/advanced-component-registry.ts";
+import {
   cardRootComponent,
   cardRootStyles,
   resolveCardPalette,
@@ -47,6 +54,13 @@ const themes = CANONICAL_PALETTE_PROFILES.map((theme) => {
 writeJson(resolve(outputRoot, "template-registry.json"), {
   registryVersion: TERSE_TEMPLATE_REGISTRY_VERSION,
   templates: TERSE_TEMPLATE_DEFINITIONS,
+});
+writeJson(resolve(outputRoot, "advanced-component-registry.json"), {
+  registryVersion: ADVANCED_COMPONENT_REGISTRY_VERSION,
+  components: ADVANCED_COMPONENT_CAPABILITIES,
+  adaptiveTemplates: ADAPTIVE_TEMPLATE_FAMILIES,
+  sizeBudgets: CARD_SIZE_CONTENT_BUDGETS,
+  domainGroups: ADVANCED_COMPONENT_DOMAIN_GROUPS,
 });
 writeJson(resolve(outputRoot, "theme-profiles.json"), {
   themeRegistryVersion: "theme-registry/1",

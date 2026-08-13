@@ -7,12 +7,12 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TypeGuard
 
 ThemeMode = Literal["light", "dark"]
 
-_A2UI_FORM_CATALOG_ID = "ohos.a2ui.extended.catalog.form"
-_A2UI_ICON_BUTTON_LABEL = "\u200B"
+_A2UI_EXTENDED_CATALOG_ID = "ohos.a2ui.extended.catalog"
+_A2UI_ICON_BUTTON_LABEL = "\u200b"
 _COMPONENT_TYPES = frozenset(
     {
         "Row",
@@ -407,11 +407,6 @@ _COMPACT_ROOT_DIMENSIONS = {
     "2x4": {"width": 320, "height": 160},
     "4x2": {"width": 320, "height": 160},
 }
-_A2UI_FALLBACK_DIMENSIONS = {
-    "2x2": {"width": 160, "height": 160},
-    "2x4": {"width": 320, "height": 160},
-    "4x2": {"width": 320, "height": 160},
-}
 _BUTTON_LABEL_FALLBACKS = (
     (("navigate", "startnavigate", "location", "map"), "导航"),
     (("weather", "forecast"), "天气"),
@@ -499,7 +494,7 @@ def repair_compact_dsl_binding_paths(
             continue
         suffix = path
         if path == "/data" or path.startswith("/data/"):
-            suffix = path[len("/data"):]
+            suffix = path[len("/data") :]
         candidates: set[str] = set()
         for root in roots:
             candidate = f"{root.rstrip('/')}{suffix}"
@@ -565,9 +560,7 @@ def validate_compact_dsl_context(
     binding_paths = _component_binding_paths(normalized_components)
     data_model_schema = task_spec.get("dataModelSchema")
     if not isinstance(data_model_schema, dict):
-        raise CompactDslConversionError(
-            "TaskSpec.dataModelSchema must be an object."
-        )
+        raise CompactDslConversionError("TaskSpec.dataModelSchema must be an object.")
     _validate_binding_schema_types(
         binding_paths,
         data_model,
@@ -606,16 +599,13 @@ def convert_compact_dsl_to_a2ui(
         hide_label = component.component_id in icon_round_button_ids
         converted_components.append(_convert_component(component, hide_label=hide_label))
 
-    surface_dimensions = _surface_dimensions(size, protocol_profile)
     version = str(protocol_profile.get("version") or "v0.9")
     messages = [
         {
             "version": version,
             "createSurface": {
                 "surfaceId": surface_id,
-                "catalogId": _A2UI_FORM_CATALOG_ID,
-                "width": surface_dimensions["width"],
-                "height": surface_dimensions["height"],
+                "catalogId": _A2UI_EXTENDED_CATALOG_ID,
             },
         },
         {
@@ -640,9 +630,7 @@ def convert_compact_dsl_to_a2ui(
 
 def _validate_theme(theme: str) -> None:
     if theme not in {"light", "dark"}:
-        raise CompactDslConversionError(
-            f'Unsupported compatibility theme "{theme}".'
-        )
+        raise CompactDslConversionError(f'Unsupported compatibility theme "{theme}".')
 
 
 def _validate_surface_id(surface_id: str) -> None:
@@ -659,13 +647,11 @@ def _strip_optional_genui_fence(compact_dsl: str) -> str:
 
     closing_index = _find_fence_closing(lines, opening_index + 1)
     body_end = closing_index if closing_index is not None else len(lines)
-    body = "\n".join(lines[opening_index + 1:body_end]).strip()
+    body = "\n".join(lines[opening_index + 1 : body_end]).strip()
     if "```" in body:
-        raise CompactDslConversionError(
-            "Compact DSL must contain exactly one genui fence."
-        )
+        raise CompactDslConversionError("Compact DSL must contain exactly one genui fence.")
     if closing_index is not None:
-        _validate_no_additional_fence(lines[closing_index + 1:])
+        _validate_no_additional_fence(lines[closing_index + 1 :])
     return body
 
 
@@ -687,9 +673,7 @@ def _find_fence_closing(lines: list[str], start: int) -> int | None:
 def _validate_no_additional_fence(lines: list[str]) -> None:
     for line in lines:
         if line.strip().startswith("```"):
-            raise CompactDslConversionError(
-                "Compact DSL must contain exactly one genui fence."
-            )
+            raise CompactDslConversionError("Compact DSL must contain exactly one genui fence.")
 
 
 def _repair_compact_json_rows(compact_dsl: str) -> str:
@@ -699,9 +683,7 @@ def _repair_compact_json_rows(compact_dsl: str) -> str:
     for line_number, row in enumerate(rows, 1):
         repaired = _remove_trailing_json_commas(row)
         value = _parse_json_line(repaired, line_number)
-        repaired_rows.append(
-            json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-        )
+        repaired_rows.append(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
     return "\n".join(repaired_rows)
 
 
@@ -745,9 +727,7 @@ def _extract_top_level_array_rows(body: str) -> list[str]:
         if char not in {"]", "}"}:
             continue
         if char != expected_closers[-1]:
-            raise CompactDslConversionError(
-                "Compact DSL contains mismatched JSON delimiters."
-            )
+            raise CompactDslConversionError("Compact DSL contains mismatched JSON delimiters.")
         expected_closers.pop()
         if not expected_closers:
             rows.append("".join(current))
@@ -755,9 +735,7 @@ def _extract_top_level_array_rows(body: str) -> list[str]:
 
     if expected_closers:
         if in_string:
-            raise CompactDslConversionError(
-                "Compact DSL contains an unclosed JSON string."
-            )
+            raise CompactDslConversionError("Compact DSL contains an unclosed JSON string.")
         current.extend(reversed(expected_closers))
         rows.append("".join(current))
 
@@ -772,9 +750,7 @@ def _validate_text_between_rows(outside: list[str], has_previous_row: bool) -> N
     text = "".join(outside)
     for char in text:
         if not char.isspace() and char not in {"]", "}"}:
-            raise CompactDslConversionError(
-                "Compact DSL contains non-JSON text between rows."
-            )
+            raise CompactDslConversionError("Compact DSL contains non-JSON text between rows.")
 
 
 def _remove_trailing_json_commas(row: str) -> str:
@@ -913,9 +889,7 @@ def _parse_json_line(line: str, line_number: int) -> list[Any]:
             f"Compact DSL line {line_number} is invalid JSON: {exc.msg}."
         ) from exc
     if not isinstance(value, list):
-        raise CompactDslConversionError(
-            f"Compact DSL line {line_number} must be a JSON array."
-        )
+        raise CompactDslConversionError(f"Compact DSL line {line_number} must be a JSON array.")
     return value
 
 
@@ -967,17 +941,12 @@ def _validate_component_header(
         raise CompactDslConversionError(
             f"Compact DSL line {line_number} has an invalid component id."
         )
-    if (
-        not isinstance(component_type, str)
-        or component_type not in _COMPONENT_TYPES
-    ):
+    if not isinstance(component_type, str) or component_type not in _COMPONENT_TYPES:
         raise CompactDslConversionError(
             f'{component_id}: unsupported component type "{component_type}".'
         )
     if not isinstance(props, dict):
-        raise CompactDslConversionError(
-            f"{component_id}: component props must be an object."
-        )
+        raise CompactDslConversionError(f"{component_id}: component props must be an object.")
 
 
 def _parse_children(
@@ -993,9 +962,7 @@ def _parse_children(
             )
         return ()
     if not isinstance(value[3], list):
-        raise CompactDslConversionError(
-            f"{component_id}: children must be an array."
-        )
+        raise CompactDslConversionError(f"{component_id}: children must be an array.")
 
     children: list[str] = []
     for child in value[3]:
@@ -1018,11 +985,7 @@ def _parse_children(
 
 
 def _validate_button_image_children(rows: list[CompactRow]) -> None:
-    components_by_id = {
-        row.component_id: row
-        for row in rows
-        if isinstance(row, ComponentRow)
-    }
+    components_by_id = {row.component_id: row for row in rows if isinstance(row, ComponentRow)}
     button_icon_ids: set[str] = set()
 
     for row in rows:
@@ -1037,9 +1000,7 @@ def _validate_button_image_children(rows: list[CompactRow]) -> None:
         icon_id = row.children[0]
         icon = components_by_id.get(icon_id)
         if icon is None or icon.component_type != "Image":
-            raise CompactDslConversionError(
-                f"{row.component_id}: Button child must be an Image."
-            )
+            raise CompactDslConversionError(f"{row.component_id}: Button child must be an Image.")
         button_icon_ids.add(icon_id)
 
     if button_icon_ids:
@@ -1057,16 +1018,10 @@ def _validate_button_icon_ownership(
         for child_id in row.children:
             if child_id in parent_counts:
                 parent_counts[child_id] += 1
-    shared_icons = [
-        icon_id
-        for icon_id, parent_count in parent_counts.items()
-        if parent_count != 1
-    ]
+    shared_icons = [icon_id for icon_id, parent_count in parent_counts.items() if parent_count != 1]
     if shared_icons:
         icon_list = ", ".join(sorted(shared_icons))
-        raise CompactDslConversionError(
-            f"Button Image children must have one parent: {icon_list}."
-        )
+        raise CompactDslConversionError(f"Button Image children must have one parent: {icon_list}.")
 
 
 def _validate_component_props(
@@ -1080,25 +1035,17 @@ def _validate_component_props(
                 f"{component_id}: legacy property {property_name} is forbidden."
             )
     if "functionCall" in props:
-        raise CompactDslConversionError(
-            f"{component_id}: legacy functionCall is forbidden."
-        )
+        raise CompactDslConversionError(f"{component_id}: legacy functionCall is forbidden.")
     if component_type in {"Row", "Column"} and "space" in props:
         raise CompactDslConversionError(
             f"{component_id}: {component_type} must use itemMargin, not space."
         )
     if component_type != "List" and "space" in props:
-        raise CompactDslConversionError(
-            f"{component_id}: only List supports space."
-        )
+        raise CompactDslConversionError(f"{component_id}: only List supports space.")
     if component_type == "List" and "itemMargin" in props:
-        raise CompactDslConversionError(
-            f"{component_id}: List must use space, not itemMargin."
-        )
+        raise CompactDslConversionError(f"{component_id}: List must use space, not itemMargin.")
     if "itemMargin" in props and component_type not in {"Row", "Column"}:
-        raise CompactDslConversionError(
-            f"{component_id}: only Row and Column support itemMargin."
-        )
+        raise CompactDslConversionError(f"{component_id}: only Row and Column support itemMargin.")
     for property_name, value in props.items():
         _resolve_tokens(property_name, value, component_id)
     _validate_allowed_component_properties(
@@ -1150,9 +1097,7 @@ def _validate_component_property_types(
             continue
         if property_name in _BOOLEAN_PROPERTIES:
             if not isinstance(value, bool):
-                raise CompactDslConversionError(
-                    f"{component_id}: {property_name} must be boolean."
-                )
+                raise CompactDslConversionError(f"{component_id}: {property_name} must be boolean.")
             continue
         if property_name in _STRING_PROPERTIES:
             if not isinstance(value, str) or not value:
@@ -1177,9 +1122,7 @@ def _validate_number_property(
 ) -> None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return
-    raise CompactDslConversionError(
-        f"{component_id}: {property_name} must be numeric."
-    )
+    raise CompactDslConversionError(f"{component_id}: {property_name} must be numeric.")
 
 
 def _validate_spacing_property(
@@ -1221,9 +1164,7 @@ def _validate_dimension_property(
 
 def _validate_button_label(component_id: str, label: Any) -> None:
     if not isinstance(label, str) or not label.strip():
-        raise CompactDslConversionError(
-            f"{component_id}: Button.label must be a non-empty string."
-        )
+        raise CompactDslConversionError(f"{component_id}: Button.label must be a non-empty string.")
 
 
 def _repair_button_label(
@@ -1319,9 +1260,7 @@ def _require_literal_or_binding(
         is_literal = False
     if is_literal or _is_path_binding(value):
         return
-    raise CompactDslConversionError(
-        f"{component_id}: {property_name} has an invalid value."
-    )
+    raise CompactDslConversionError(f"{component_id}: {property_name} has an invalid value.")
 
 
 def _validate_image_source(component_id: str, source: Any) -> None:
@@ -1345,9 +1284,7 @@ def _validate_progress_props(
         props.get("value"),
     )
     if "total" not in props:
-        raise CompactDslConversionError(
-            f"{component_id}: Progress.total is required."
-        )
+        raise CompactDslConversionError(f"{component_id}: Progress.total is required.")
     _require_numeric_or_binding(
         component_id,
         "Progress.total",
@@ -1402,7 +1339,7 @@ def _validate_checkbox_props(
     _validate_optional_bool(component_id, "Checkbox.select", props)
 
 
-def _is_path_binding(value: Any) -> bool:
+def _is_path_binding(value: Any) -> TypeGuard[dict[str, str]]:
     if not isinstance(value, dict) or set(value) != {"path"}:
         return False
     path = value.get("path")
@@ -1411,35 +1348,25 @@ def _is_path_binding(value: Any) -> bool:
 
 def _validate_on_click(component_id: str, on_click: Any) -> None:
     if not isinstance(on_click, list) or not on_click:
-        raise CompactDslConversionError(
-            f"{component_id}: onClick must be a non-empty array."
-        )
+        raise CompactDslConversionError(f"{component_id}: onClick must be a non-empty array.")
     for handler in on_click:
         _validate_event_handler(component_id, handler)
 
 
 def _validate_event_handler(component_id: str, handler: Any) -> None:
     if not isinstance(handler, dict):
-        raise CompactDslConversionError(
-            f"{component_id}: each onClick handler must be an object."
-        )
+        raise CompactDslConversionError(f"{component_id}: each onClick handler must be an object.")
     allowed_keys = {"call", "args"}
     unknown_keys = set(handler) - allowed_keys
     if unknown_keys:
         names = ", ".join(sorted(unknown_keys))
-        raise CompactDslConversionError(
-            f"{component_id}: onClick has unsupported fields: {names}."
-        )
+        raise CompactDslConversionError(f"{component_id}: onClick has unsupported fields: {names}.")
     call = handler.get("call")
     if not isinstance(call, str) or not call:
-        raise CompactDslConversionError(
-            f"{component_id}: onClick.call must be a non-empty string."
-        )
+        raise CompactDslConversionError(f"{component_id}: onClick.call must be a non-empty string.")
     args = handler.get("args")
     if args is not None and not isinstance(args, dict):
-        raise CompactDslConversionError(
-            f"{component_id}: onClick.args must be an object."
-        )
+        raise CompactDslConversionError(f"{component_id}: onClick.args must be an object.")
 
 
 def _validate_source_value(value: Any, context: str) -> None:
@@ -1454,9 +1381,7 @@ def _validate_source_value(value: Any, context: str) -> None:
         return
 
     if "functionCall" in value:
-        raise CompactDslConversionError(
-            f"{context}: legacy functionCall is forbidden."
-        )
+        raise CompactDslConversionError(f"{context}: legacy functionCall is forbidden.")
     if "path" in value:
         _validate_path_binding(value, context)
         return
@@ -1479,9 +1404,7 @@ def _validate_path_binding(value: dict[str, Any], context: str) -> None:
         )
     path = value.get("path")
     if not isinstance(path, str) or not path.startswith("/"):
-        raise CompactDslConversionError(
-            f"{context}: path binding must contain a JSON Pointer."
-        )
+        raise CompactDslConversionError(f"{context}: path binding must contain a JSON Pointer.")
     _decode_json_pointer(path)
 
 
@@ -1494,9 +1417,7 @@ def _validate_component_tree(
             "The root Row/Column component is missing; model output may be truncated."
         )
     if first_row.component_id != "root" or first_row.component_type not in _ROOT_COMPONENT_TYPES:
-        first_component = (
-            f"{first_row.component_id}/{first_row.component_type}"
-        )
+        first_component = f"{first_row.component_id}/{first_row.component_type}"
         raise CompactDslConversionError(
             "The root Row/Column component is missing; model output may be "
             f"truncated. First parsed component: {first_component}."
@@ -1520,9 +1441,7 @@ def _validate_component_tree(
     unresolved_ids = announced_ids - seen_ids
     if unresolved_ids:
         unresolved = ", ".join(sorted(unresolved_ids))
-        raise CompactDslConversionError(
-            f"Compact DSL references missing components: {unresolved}."
-        )
+        raise CompactDslConversionError(f"Compact DSL references missing components: {unresolved}.")
     return components, data_rows
 
 
@@ -1533,12 +1452,10 @@ def _validate_component_position(
 ) -> None:
     component_id = component.component_id
     if component_id in seen_ids:
-        raise CompactDslConversionError(
-            f'Duplicate Compact DSL component id "{component_id}".'
-        )
+        raise CompactDslConversionError(f'Duplicate Compact DSL component id "{component_id}".')
     if component_id not in announced_ids:
         raise CompactDslConversionError(
-            f'{component_id}: component must be declared by an earlier parent.'
+            f"{component_id}: component must be declared by an earlier parent."
         )
 
 
@@ -1553,8 +1470,7 @@ def _announce_children(
         existing_parent = parent_by_child.get(child_id)
         if existing_parent is not None:
             raise CompactDslConversionError(
-                f"{child_id}: referenced by both {existing_parent} "
-                f"and {component.component_id}."
+                f"{child_id}: referenced by both {existing_parent} and {component.component_id}."
             )
         parent_by_child[child_id] = component.component_id
         announced_ids.add(child_id)
@@ -1590,8 +1506,7 @@ def _expand_component_design(component: ComponentRow) -> dict[str, Any]:
     component_designs = _COMPONENT_DESIGNS.get(component.component_type)
     if component_designs is None or design not in component_designs:
         raise CompactDslConversionError(
-            f"{component.component_id}: unsupported "
-            f'{component.component_type}.design "{design}".'
+            f'{component.component_id}: unsupported {component.component_type}.design "{design}".'
         )
     expanded = copy.deepcopy(component_designs[design])
     for property_name, value in explicit_props.items():
@@ -1621,9 +1536,7 @@ def _resolve_tokens(
             return _resolve_gradient_stops(value, component_id)
         resolved_items: list[Any] = []
         for item in value:
-            resolved_items.append(
-                _resolve_tokens(property_name, item, component_id)
-            )
+            resolved_items.append(_resolve_tokens(property_name, item, component_id))
         return resolved_items
     if not isinstance(value, str):
         return value
@@ -1646,13 +1559,9 @@ def _resolve_gradient_stops(
             )
         color, position = stop
         if not isinstance(color, str):
-            raise CompactDslConversionError(
-                f"{component_id}: gradient colors must be strings."
-            )
+            raise CompactDslConversionError(f"{component_id}: gradient colors must be strings.")
         if not isinstance(position, (int, float)):
-            raise CompactDslConversionError(
-                f"{component_id}: gradient positions must be numbers."
-            )
+            raise CompactDslConversionError(f"{component_id}: gradient positions must be numbers.")
         resolved_stops.append([_COLOR_TOKENS.get(color, color), position])
     return resolved_stops
 
@@ -1755,10 +1664,7 @@ def _move_component_property(
     if property_name == "onClick":
         converted["onClick"] = value
         return True
-    if (
-        property_name == "itemMargin"
-        and component.component_type in {"Row", "Column"}
-    ):
+    if property_name == "itemMargin" and component.component_type in {"Row", "Column"}:
         converted["itemMargin"] = value
         return True
     if property_name == "space" and component.component_type == "List":
@@ -1795,46 +1701,8 @@ def _validate_compact_root_dimensions(
     if width == expected["width"] and height == expected["height"]:
         return
     raise CompactDslConversionError(
-        f"root dimensions must be {expected['width']}x{expected['height']} "
-        f'for size "{size}".'
+        f'root dimensions must be {expected["width"]}x{expected["height"]} for size "{size}".'
     )
-
-
-def _surface_dimensions(
-    size: str,
-    protocol_profile: dict[str, Any],
-) -> dict[str, int]:
-    if size not in _A2UI_FALLBACK_DIMENSIONS:
-        raise CompactDslConversionError(f'Unsupported Form size "{size}".')
-    if size in _COMPACT_ROOT_DIMENSIONS:
-        return copy.deepcopy(_COMPACT_ROOT_DIMENSIONS[size])
-    sizes = protocol_profile.get("sizes")
-    dimensions = _profile_dimensions(size, sizes)
-    if dimensions is not None:
-        return dimensions
-    return copy.deepcopy(_A2UI_FALLBACK_DIMENSIONS[size])
-
-
-def _profile_dimensions(
-    size: str,
-    sizes: Any,
-) -> dict[str, int] | None:
-    if not isinstance(sizes, dict):
-        return None
-    dimensions = sizes.get(size)
-    if dimensions is None and size == "4x2":
-        dimensions = sizes.get("2x4")
-    if not isinstance(dimensions, dict):
-        return None
-    width = dimensions.get("width")
-    height = dimensions.get("height")
-    if not _is_positive_integer(width) or not _is_positive_integer(height):
-        return None
-    return {"width": width, "height": height}
-
-
-def _is_positive_integer(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def _build_data_model(data_rows: list[DataRow]) -> dict[str, Any]:
@@ -1844,7 +1712,7 @@ def _build_data_model(data_rows: list[DataRow]) -> dict[str, Any]:
         existing = data_values.get(row.path)
         if row.path in data_values and existing != row.value:
             raise CompactDslConversionError(
-                f'{row.path}: duplicate data rows contain different values.'
+                f"{row.path}: duplicate data rows contain different values."
             )
         data_values[row.path] = copy.deepcopy(row.value)
         _set_json_pointer(root, row.path, copy.deepcopy(row.value))
@@ -1887,9 +1755,7 @@ def _set_json_pointer(root: dict[str, Any], path: str, value: Any) -> None:
 
 def _merge_root_data(root: dict[str, Any], value: Any) -> None:
     if not isinstance(value, dict):
-        raise CompactDslConversionError(
-            "Compact DSL root DataModel row must contain an object."
-        )
+        raise CompactDslConversionError("Compact DSL root DataModel row must contain an object.")
     merged = _merge_compatible_values(root, value, "/")
     root.clear()
     root.update(merged)
@@ -1915,7 +1781,7 @@ def _set_dict_pointer_part(
         current[token] = child
     if not isinstance(child, expected_type):
         raise CompactDslConversionError(
-            f'{path}: data path conflicts with an existing scalar value.'
+            f"{path}: data path conflicts with an existing scalar value."
         )
     return child
 
@@ -1946,7 +1812,7 @@ def _set_list_pointer_part(
         current[array_index] = child
     if not isinstance(child, expected_type):
         raise CompactDslConversionError(
-            f'{path}: data path conflicts with an existing scalar value.'
+            f"{path}: data path conflicts with an existing scalar value."
         )
     return child
 
@@ -1968,9 +1834,7 @@ def _merge_compatible_values(existing: Any, incoming: Any, path: str) -> Any:
         return _merge_lists(existing, incoming, path)
     if existing == incoming:
         return copy.deepcopy(existing)
-    raise CompactDslConversionError(
-        f'{path}: data rows contain incompatible values.'
-    )
+    raise CompactDslConversionError(f"{path}: data rows contain incompatible values.")
 
 
 def _merge_lists(existing: list[Any], incoming: list[Any], path: str) -> list[Any]:
@@ -1997,8 +1861,7 @@ def _validate_binding_paths(
         for path in paths:
             if not _json_pointer_exists(data_model, path):
                 raise CompactDslConversionError(
-                    f"{component.component_id}: binding path {path} "
-                    "has no matching data value."
+                    f"{component.component_id}: binding path {path} has no matching data value."
                 )
 
 
@@ -2033,8 +1896,7 @@ def _validate_binding_schema_types(
             continue
         actual_type = _json_type_name(value)
         raise CompactDslConversionError(
-            f"{path}: DataModel type {actual_type} does not match "
-            f"schema type {expected_type}."
+            f"{path}: DataModel type {actual_type} does not match schema type {expected_type}."
         )
 
 
@@ -2123,9 +1985,7 @@ def _validate_data_capability_roots(
             continue
         if any(_path_is_within(path, root) for root in roots):
             continue
-        raise CompactDslConversionError(
-            f"{path}: binding is not backed by CardSpec.dataBindings."
-        )
+        raise CompactDslConversionError(f"{path}: binding is not backed by CardSpec.dataBindings.")
 
 
 def _unused_data_capability_warnings(
@@ -2136,9 +1996,7 @@ def _unused_data_capability_warnings(
     for root in _card_spec_data_roots(card_spec):
         if any(_path_is_within(path, root) for path in binding_paths):
             continue
-        warnings.append(
-            f"{root}: declared data capability is not used by any component."
-        )
+        warnings.append(f"{root}: declared data capability is not used by any component.")
     return warnings
 
 
@@ -2210,8 +2068,7 @@ def _validate_event_candidates(
             if _stable_json(handler) in allowed_keys:
                 continue
             raise CompactDslConversionError(
-                f"{component.component_id}: onClick is not present in "
-                "TaskSpec.eventCandidates."
+                f"{component.component_id}: onClick is not present in TaskSpec.eventCandidates."
             )
 
 
@@ -2319,9 +2176,7 @@ def _decode_json_pointer(path: str) -> list[str]:
     if path == "/":
         return []
     if not isinstance(path, str) or not path.startswith("/"):
-        raise CompactDslConversionError(
-            f'Compact DSL path "{path}" is not a JSON Pointer.'
-        )
+        raise CompactDslConversionError(f'Compact DSL path "{path}" is not a JSON Pointer.')
     tokens: list[str] = []
     for raw_token in path[1:].split("/"):
         _validate_pointer_escape(raw_token, path)
@@ -2357,7 +2212,5 @@ def _parse_array_index(token: str, path: str) -> int:
 def _serialize_rows(rows: list[Any]) -> str:
     serialized_rows: list[str] = []
     for row in rows:
-        serialized_rows.append(
-            json.dumps(row, ensure_ascii=False, separators=(",", ":"))
-        )
+        serialized_rows.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
     return "\n".join(serialized_rows)

@@ -2,9 +2,9 @@
 promptGroup: hybrid-body-generator
 fragmentId: hybrid-kernel
 order: 0
-promptVersion: hybrid-body-prompt/0.24
+promptVersion: hybrid-body-prompt/0.25
 protocolVersion: tersedsl-nested-2-hybrid/0.2
-contractVersion: hybrid-body-contract/0.4
+contractVersion: hybrid-body-contract/0.5
 ---
 
 <!-- prompt:start -->

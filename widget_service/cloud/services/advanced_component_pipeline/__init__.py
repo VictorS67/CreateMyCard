@@ -4,7 +4,17 @@
 生成链路隔离，未选中高级组件时由调用方继续使用原有 Terse 生成流程。
 """
 
-from .compiler import build_terse_nested2
-from .pipeline import AdvancedComponentPipeline
-
 __all__ = ["AdvancedComponentPipeline", "build_terse_nested2"]
+
+
+def __getattr__(name: str):
+    """延迟加载，避免 Registry 读取严格模型时形成包级循环依赖。"""
+    if name == "AdvancedComponentPipeline":
+        from .pipeline import AdvancedComponentPipeline
+
+        return AdvancedComponentPipeline
+    if name == "build_terse_nested2":
+        from .compiler import build_terse_nested2
+
+        return build_terse_nested2
+    raise AttributeError(name)

@@ -2,9 +2,9 @@
 promptGroup: hybrid-body-generator
 fragmentId: template-composition
 order: 10
-promptVersion: hybrid-body-prompt/0.24
+promptVersion: hybrid-body-prompt/0.25
 protocolVersion: tersedsl-nested-2-hybrid/0.2
-contractVersion: hybrid-body-contract/0.4
+contractVersion: hybrid-body-contract/0.5
 ---
 
 <!-- prompt:start -->
@@ -13,6 +13,8 @@ contractVersion: hybrid-body-contract/0.4
 普通组件和局部 Template 可以作为兄弟或嵌套在 content 中；局部 Template 不接收 children。card@1 只允许出现在根并接收一个 content。Template 参数只能使用本次可信字面量。Action Template 仅在本次契约显式下发 contentActionCandidates 时可用。最终 A2UI 中不存在 Template 节点；服务端会先做静态展开，再执行完整 Catalog、节点、深度、Action 和安全校验。
 
 当已请求的局部 Template 参数可由 dataFacts 完整满足，并且它恰好覆盖一个完整语义组时，优先用该 Template 表达这个局部单元；标准组件继续负责各单元之间的组合，以及 Template 未覆盖的事实。不得为了使用基础组件而拆散一个已完整匹配的 Template 语义组。
+
+请求若包含 `advancedComposition`，其中的 `primaryDomain`、`advancedComponentIds` 和 `adaptiveTemplateId` 是服务端根据数据 Schema、领域组合白名单与尺寸预算确定的只读语义计划。content 必须保持其中的主次和并列关系，但这些名称不是可输出的运行时组件，也不授权新增数据、字面量、Template 或 Action。没有 `adaptiveTemplateId` 时按现有 Template 能力和数据事实自由编排；最终仍只输出批准的标准组件与局部 Template。
 
 选择 Template variant 时，不仅类型必须匹配，参数值还必须符合参数 description 的语义；在同一语义组可用的 variant 中，选择能够消费全部相关 dataFacts 的 variant。禁止仅因为 string 类型相同就把素材地址填入文字、标题、符号、标签或数值参数。
 

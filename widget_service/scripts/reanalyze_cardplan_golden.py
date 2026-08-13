@@ -8,7 +8,6 @@ import json
 import os
 import sys
 import time
-from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,25 +22,20 @@ if str(CLOUD_ROOT) not in sys.path:
 from evaluate_cardplan_golden import (  # noqa: E402
     FIXTURE_PATH,
     _a2ui_summary,
-    _action_ids_from_a2ui,
     _aggregate_usage,
     _alignment,
     _scenario_inputs,
     _summary,
 )
 
-from config.config import get_settings  # noqa: E402
-from custom.deepseek_call_budget import DeepSeekCallBudget  # noqa: E402
-from services.advanced_component_pipeline.component_selector import (  # noqa: E402
-    select_component,
+from services.advanced_component_pipeline.models import AdvancedScopeBrief  # noqa: E402
+from services.advanced_component_pipeline.ux_mixed_framer import (  # noqa: E402
+    frame_ux_layout_root_children,
 )
-from services.advanced_component_pipeline.data_shape import extract_data_shape  # noqa: E402
-from services.advanced_component_pipeline.models import (  # noqa: E402
-    SelectionConstraints,
-    UIBrief,
+from services.advanced_component_pipeline.ux_mixed_prompt import (  # noqa: E402
+    build_ux_mixed_prompt,
 )
-from services.cardplan_template.compiler import compile_hybrid_card  # noqa: E402
-from services.cardplan_template.prompt import build_hybrid_prompt  # noqa: E402
+from services.cardplan_template.compiler import compile_ux_layout_card  # noqa: E402
 from services.cardplan_template.registry import get_cardplan_registry  # noqa: E402
 from services.protocol_registry import (  # noqa: E402
     TERSE_DSL_NESTED2_PROFILE_ID,
@@ -67,63 +61,70 @@ def _reanalyze_scene(
     started = time.perf_counter()
     calls = evidence.get("modelCalls", [])
     result = dict(evidence)
-    if len(calls) != 2:
+    body_calls = [
+        item for item in calls if str(item.get("phase", "")).startswith("advanced-mixed-body")
+    ]
+    if not calls or not body_calls:
         result.update(
             modelRawProtocolSuccess=False,
             finalReady=False,
             fallback=False,
             goldenAlignment=_failed_alignment(
                 evidence.get("goldenAlignment"),
-                "Expected exactly two saved model calls.",
+                "Expected saved Advanced Scope and mixed-body model calls.",
             ),
-            failureReason="Expected exactly two saved model calls.",
+            failureReason="Expected saved Advanced Scope and mixed-body model calls.",
         )
         return result
     try:
-        brief_payload = json_repair.loads(calls[0]["raw_output"])
-        brief = UIBrief.model_validate(brief_payload)
+        effective_scope = evidence.get("uiBrief")
+        brief_payload = (
+            effective_scope
+            if isinstance(effective_scope, dict)
+            else json_repair.loads(calls[0]["raw_output"])
+        )
+        scope = AdvancedScopeBrief.model_validate(brief_payload)
         task_spec, card_spec = _scenario_inputs(fixture)
         registry = get_cardplan_registry()
-        projection = build_hybrid_prompt(
+        projection = build_ux_mixed_prompt(
             task_spec=task_spec,
             card_spec=card_spec,
-            ui_brief=brief,
+            scope=scope,
             registry=registry,
         )
         profile = A2UIProtocolRegistry.read_design_protocol_profile(TERSE_DSL_NESTED2_PROFILE_ID)
-        compilation = compile_hybrid_card(
-            calls[1]["raw_output"],
+        framed_output, _layout_children_framed = frame_ux_layout_root_children(
+            body_calls[-1]["raw_output"],
+            size=task_spec.size,
+            registry=registry,
+        )
+        compilation = compile_ux_layout_card(
+            framed_output,
             task_spec=task_spec,
             contract=projection.contract,
             protocol_profile=profile,
             registry=registry,
+            business_title=card_spec.get("title"),
         )
-        selection = select_component(
-            extract_data_shape(task_spec),
-            brief,
-            SelectionConstraints(
-                size=task_spec.size,
-                action_count=len(task_spec.eventCandidates),
-            ),
-        )
-        actual = _a2ui_summary(compilation.a2ui, ())
-        actual["actionIds"] = _action_ids_from_a2ui(compilation.a2ui)
+        actual = _a2ui_summary(compilation.a2ui, compilation.stats.action_used_ids)
         calls[0]["protocol_success"] = True
-        calls[1]["protocol_success"] = True
+        body_calls[-1]["protocol_success"] = True
+        baseline = evidence.get("standardA2UIBaseline", {})
+        baseline_summary = baseline.get("summary") if isinstance(baseline, dict) else None
+        if not isinstance(baseline_summary, dict):
+            baseline_summary = fixture["goldenSummary"]
         result.update(
-            uiBrief=brief.model_dump(mode="json", by_alias=True),
+            uiBrief=scope.model_dump(mode="json", by_alias=True),
             candidateTemplates=list(projection.requested_template_ids),
-            wholeCardConfidence=selection.confidence if selection else 0.0,
-            wholeCardCandidates=(
-                [item.model_dump(mode="json") for item in selection.candidates] if selection else []
-            ),
+            wholeCardConfidence=None,
+            wholeCardCandidates=[],
             confidenceBypassed=True,
             route="hybrid-template",
             rawHybridOutput=compilation.raw_output,
             effectiveHybridOutput=compilation.effective_output,
             compiledA2UI=compilation.a2ui,
             modelCalls=calls,
-            modelRawProtocolSuccess=True,
+            modelRawProtocolSuccess=bool(evidence.get("modelRawProtocolSuccess")),
             uiBriefFallback=False,
             finalReady=True,
             fallback=False,
@@ -137,15 +138,19 @@ def _reanalyze_scene(
                 float(evidence.get("latencyMs", 0)) + (time.perf_counter() - started) * 1000,
                 2,
             ),
-            goldenAlignment=_alignment(actual, fixture["goldenSummary"]),
+            goldenAlignment=_alignment(
+                actual,
+                baseline_summary,
+                ignored_title=fixture.get("title", ""),
+            ),
             failureReason="",
         )
     except Exception as exc:
         failure_reason = f"{type(exc).__name__}: {exc}"
         if calls:
             calls[0]["protocol_success"] = bool(calls[0].get("raw_output", "").strip())
-        if len(calls) > 1:
-            calls[1]["protocol_success"] = False
+        if body_calls:
+            body_calls[-1]["protocol_success"] = False
         result.update(
             modelCalls=calls,
             modelRawProtocolSuccess=False,
@@ -172,11 +177,6 @@ def main() -> int:
     evidence, reports = _sources(args.input)
     fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
     results = [_reanalyze_scene(scene, evidence[scene["id"]]) for scene in fixture["scenarios"]]
-    settings = get_settings()
-    budget = DeepSeekCallBudget(
-        settings.resolved_deepseek_call_budget_path,
-        settings.deepseek_call_budget_limit,
-    )
     summary = _summary(results)
     report = {
         "schemaVersion": "cardplan-template-python-evaluation/1",
@@ -185,7 +185,7 @@ def main() -> int:
         "sourceReports": [str(path) for path in args.input],
         "fallbackRequired": False,
         "budgetBefore": reports[0].get("budgetBefore"),
-        "budgetAfter": asdict(budget.status()),
+        "budgetAfter": reports[-1].get("budgetAfter"),
         "summary": summary,
         "scenarios": results,
     }

@@ -20,9 +20,7 @@ from services.compact_dsl_a2ui_converter import (
 def _serialize(rows: list[list[object]]) -> str:
     values: list[str] = []
     for row in rows:
-        values.append(
-            json.dumps(row, ensure_ascii=False, separators=(",", ":"))
-        )
+        values.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
     return "\n".join(values)
 
 
@@ -30,7 +28,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.profile = {
             "version": "v0.9",
-            "catalogId": "ohos.a2ui.extended.catalog.form",
+            "catalogId": "ohos.a2ui.extended.catalog",
             "sizes": {
                 "2x2": {"width": 140, "height": 140},
                 "2x4": {"width": 300, "height": 140},
@@ -95,9 +93,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
                                 "intentName": "ViewDetail",
                                 "params": {
                                     "entityId": {
-                                        "path": (
-                                            "/data/calendar/events/0/entityId"
-                                        ),
+                                        "path": ("/data/calendar/events/0/entityId"),
                                     },
                                 },
                             },
@@ -267,7 +263,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
             compact_dsl,
             task_spec={
                 "dataModelSchema": {},
-                "assetCandidates": [],
+                "assetCandidates": [{"src": "resources/base/media/weather.svg"}],
                 "eventCandidates": [event],
             },
             card_spec={"dataBindings": []},
@@ -285,7 +281,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
             ["root", "action", "action_icon"],
         )
         self.assertEqual(components[1]["children"], ["action_icon"])
-        self.assertEqual(components[1]["label"], "\u200B")
+        self.assertEqual(components[1]["label"], "\u200b")
         self.assertEqual(
             components[2]["src"],
             "resources/base/media/weather.svg",
@@ -552,7 +548,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         event = data_model["data"]["calendar"]["events"][0]
         self.assertEqual(event["title"], "产品评审")
 
-    def test_always_uses_form_catalog_id(self) -> None:
+    def test_always_uses_extended_catalog_id(self) -> None:
         profile = dict(self.profile)
         profile["catalogId"] = "ohos.a2ui.extended.catalog"
 
@@ -565,7 +561,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
 
         self.assertEqual(
             create_surface["catalogId"],
-            "ohos.a2ui.extended.catalog.form",
+            "ohos.a2ui.extended.catalog",
         )
 
     def test_accepts_one_genui_fence(self) -> None:
@@ -580,11 +576,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         self.assertEqual(len(result.splitlines()), 3)
 
     def test_repairs_bom_json_fence_and_surrounding_text(self) -> None:
-        source = (
-            "\ufeffModel output follows.\n"
-            f"```json\n{self.compact_dsl}\n```\n"
-            "End of output."
-        )
+        source = f"\ufeffModel output follows.\n```json\n{self.compact_dsl}\n```\nEnd of output."
 
         result = convert_compact_dsl_to_a2ui(
             source,
@@ -931,9 +923,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         )
 
         task_spec["dataModelSchema"]["data"]["backup"] = schema
-        card_spec["dataBindings"].append(
-            {"writeResultTo": "/data/backup"}
-        )
+        card_spec["dataBindings"].append({"writeResultTo": "/data/backup"})
         self.assertEqual(
             repair_compact_dsl_binding_paths(
                 compact_dsl,
@@ -1077,9 +1067,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
                 card_spec={"dataBindings": []},
             )
 
-        task_spec["assetCandidates"][0]["src"] = (
-            "resources/base/media/unknown.svg"
-        )
+        task_spec["assetCandidates"][0]["src"] = "resources/base/media/unknown.svg"
         with self.assertRaisesRegex(
             CompactDslConversionError,
             "onClick is not present",
@@ -1135,8 +1123,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
 
             self.assertEqual(result, 0)
             messages = [
-                json.loads(line)
-                for line in target.read_text(encoding="utf-8").splitlines()
+                json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()
             ]
             self.assertEqual(len(messages), 3)
             self.assertIn("updateComponents", messages[1])

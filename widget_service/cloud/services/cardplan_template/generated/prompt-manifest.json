@@ -1,23 +1,30 @@
 {
   "a2uiTargetSpecVersion": "v0.9.1",
   "a2uiWireVersion": "v0.9",
+  "advancedComponentRegistryVersion": "advanced-component-registry/1",
   "bodyProtocolVersion": "tersedsl-nested-2-hybrid/0.2",
   "bundleVersion": "cardplan-template-python-bundle/1",
-  "catalogId": "ohos.a2ui.extended.catalog.form",
-  "contractVersion": "hybrid-body-contract/0.4",
+  "catalogId": "ohos.a2ui.extended.catalog",
+  "contractVersion": "hybrid-body-contract/0.5",
   "files": {
+    "advanced-component-registry.json": "sha256:61f0c5f82a0c158056a56da4936c3d5f253ab7d1c36f265a0aec2da00981e386",
+    "advanced-component-ux-registry.json": "sha256:90878715d7443eb2299d0b46d6b9bd1d5fe3bfe0692cf0477fe2ed4c58e34c69",
     "prompts/card-template-planner/00-chrome-kernel.md": "sha256:af96ada042901e2554f4c323695174c67d5de28d0aa140568cb22724726a8652",
     "prompts/card-template-planner/10-dsl-and-boundary.md": "sha256:43e13eedfc305ce2848622890cd97cfd81e42b6df950a9047e0e086a56e76ced",
-    "prompts/hybrid-body-generator/00-hybrid-kernel.md": "sha256:240bf965e9333d907da63a72ead36230ca7afc3126530b285a964b8dd0245601",
-    "prompts/hybrid-body-generator/10-template-composition.md": "sha256:ce66d19a5c55fba095fabf2f75be1a4910971c55057ee6e1d04b8fd8bd074f30",
-    "prompts/hybrid-body-generator/20-action-and-budget.md": "sha256:3ff785722324600990026678eda5dbf2fe04931a34997fcef80cde68958056c8",
-    "template-registry.json": "sha256:f96cc087080d96c7eae6f05e465e7acef4f795e072d1a08bc53208eaa7dfc119",
-    "theme-profiles.json": "sha256:6194dfd7314586ad0e228434527dadfdba4a0b1d0440b1ca458754e40a7eed4a"
+    "prompts/hybrid-body-generator/00-hybrid-kernel.md": "sha256:4f4b0f621ad00cc0c005c34be25def5bd603e1adb744c7488eabdadba63c29b9",
+    "prompts/hybrid-body-generator/10-template-composition.md": "sha256:780bb4bd0c4f72a9bfd38b2a121d34e49311331895eed361b97419ab72fc4bf0",
+    "prompts/hybrid-body-generator/20-action-and-budget.md": "sha256:89d5c674e52b124b9cb2672f1ba9966d73d3d406ec2daeb115101246cecbb2d7",
+    "prompts/ux-mixed-generator/00-ux-mixed-kernel.md": "sha256:4447ed47359c48c43accd64586d10efe0a2a281dbefb97dd477f833ec677728b",
+    "template-registry.json": "sha256:ea4ff4b1c61c26619ad6c5937b7e2250aa6f8a9ef1ead5ac0a1a7b344a84bb18",
+    "theme-profiles.json": "sha256:1f784dab57a867ba22dfcd0217f4fa34e2d9dedb5490915f5da617c6be7c83a2"
   },
   "promptSha256": {
-    "body": "e9c93c87c2f2205578a25103e03b07a5ef152fa9a1462a8463d1019c29d521b0",
-    "selection": "78431eb8cc0c69f3a98dfd76344af908784de61abeb54be83ed2b32c171af8a3"
+    "body": "990cf244ce30b6d70e71f5e9dbf387227384449422b931e69ee6367b031b5c4b",
+    "selection": "78431eb8cc0c69f3a98dfd76344af908784de61abeb54be83ed2b32c171af8a3",
+    "ux_mixed": "1a93044a9cccd5d7f2649da5802ceed60b1eb8a83531eec7c706dfc536d0a968"
   },
   "selectionProtocolVersion": "card-plan-template/0.2",
-  "templateRegistryVersion": "terse-template-registry/0.7"
+  "templateRegistryVersion": "terse-template-registry/0.7",
+  "uxAdvancedComponentRegistryVersion": "advanced-component-ux-registry/1",
+  "uxMixedProtocolVersion": "tersedsl-nested-2-ux-mixed/0.2"
 }

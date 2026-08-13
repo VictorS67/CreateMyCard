@@ -2219,6 +2219,7 @@ def _battery_compact_overview(
                 12,
                 400,
                 max_lines=2,
+                font_color="#99000000",
             ),
             bottom_region,
         ),
@@ -2508,12 +2509,13 @@ def _battery_text(
     *,
     max_lines: int = 1,
     text_align: str | None = None,
+    font_color: str | None = None,
 ) -> Nested2Node:
     options: dict[str, Any] = {
         "width": "matchParent",
         "fontSize": font_size,
         "fontWeight": font_weight,
-        "fontColor": "#E6000000" if font_size >= 12 else "#99000000",
+        "fontColor": font_color or ("#E6000000" if font_size >= 12 else "#99000000"),
         "maxLines": max_lines,
         "textOverflow": "ellipsis",
         "constraintSize": {"minWidth": 0, "minHeight": 0},

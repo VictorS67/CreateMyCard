@@ -14,14 +14,14 @@
     "prompts/hybrid-body-generator/00-hybrid-kernel.md": "sha256:735e5aee6269c59fec9e8cf0d5ba8a5c078ad3f3861450cbefd9150674131e17",
     "prompts/hybrid-body-generator/10-template-composition.md": "sha256:ad4835aeef92b624d44743196787af99b5b6d47f4bfa134cdcd2bab602982e86",
     "prompts/hybrid-body-generator/20-action-and-budget.md": "sha256:aa214947ee5a935123fddb1b0267faf756e56a1507ba95f1f755854486b1497f",
-    "prompts/ux-mixed-generator/00-ux-mixed-kernel.md": "sha256:11cadd16035f942cabc7f54101fe6fa0e557d0ca7f192ba8cf973cf4567a9044",
+    "prompts/ux-mixed-generator/00-ux-mixed-kernel.md": "sha256:9fb0f5aac75cf4acc3a15b4166846196f508831dfa29ccfb9dc0910e34625dc8",
     "template-registry.json": "sha256:1d260cb84d1cd3fa20e98e95e4baabeead66653416a52fbc2c2b146133e09324",
     "theme-profiles.json": "sha256:94be37a79128861e0443d1281e0d79602e88fdbae81553aca997603770fb5e40"
   },
   "promptSha256": {
     "body": "990cf244ce30b6d70e71f5e9dbf387227384449422b931e69ee6367b031b5c4b",
     "selection": "78431eb8cc0c69f3a98dfd76344af908784de61abeb54be83ed2b32c171af8a3",
-    "ux_mixed": "1a93044a9cccd5d7f2649da5802ceed60b1eb8a83531eec7c706dfc536d0a968"
+    "ux_mixed": "966a67a5b4f716b4b00ec3f74ced43a54ea7d833b9645f948bf225d25b50ea16"
   },
   "selectionProtocolVersion": "card-plan-template/0.2",
   "templateRegistryVersion": "terse-template-registry/0.7",

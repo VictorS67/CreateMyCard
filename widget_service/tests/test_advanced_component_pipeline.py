@@ -805,12 +805,14 @@ def _weather_scope_task() -> TaskSpec:
             }
         ],
         dataModelSchema={
-            "ViewWeather": {
-                "districtName": _sample_field("深圳"),
-                "temperatureText": _sample_field("38°"),
-                "condition": _sample_field("晴"),
-                "airQuality": _sample_field("空气优"),
-                "temperatureRangeText": _sample_field("26° / 16°"),
+            "data": {
+                "ViewWeather": {
+                    "districtName": _sample_field("深圳"),
+                    "temperatureText": _sample_field("38°"),
+                    "condition": _sample_field("晴"),
+                    "airQuality": _sample_field("空气优"),
+                    "temperatureRangeText": _sample_field("26° / 16°"),
+                }
             }
         },
     )
@@ -1176,7 +1178,7 @@ def test_scope_hides_weather_for_wrong_types_or_empty_strings(
     field_name: str,
     invalid_field: dict[str, object],
 ):
-    schema = dict(_weather_scope_task().dataModelSchema["ViewWeather"])
+    schema = dict(_weather_scope_task().dataModelSchema["data"]["ViewWeather"])
     schema[field_name] = invalid_field
     task_spec = _weather_scope_task().model_copy(
         update={"dataModelSchema": {"ViewWeather": schema}}
@@ -1814,7 +1816,7 @@ async def test_weather_terse_expansion_preserves_single_business_hierarchy(size:
 
     assert "WeatherOverview" not in effective
     assert "Template" not in effective
-    assert effective.index('Text("深圳"') < effective.index(
+    assert effective.index('Text("${data.ViewWeather.districtName}"') < effective.index(
         'Image("resources/base/media/weather.svg"'
     )
     assert '"fontSize":38' in effective
@@ -1822,18 +1824,34 @@ async def test_weather_terse_expansion_preserves_single_business_hierarchy(size:
     assert '"fontSize":12' in effective
     if size == "2x4":
         assert '"height":"matchParent","justifyContent":"spaceBetween"' in effective
-    for fact in ("深圳", "38°", "晴", "空气优", "26° / 16°"):
-        assert effective.count(fact) == 1
+    for path in (
+        "${data.ViewWeather.districtName}",
+        "${data.ViewWeather.temperatureText}",
+        "${data.ViewWeather.condition}",
+        "${data.ViewWeather.airQuality}",
+        "${data.ViewWeather.temperatureRangeText}",
+    ):
+        assert effective.count(path) == 1
 
     messages = [json.loads(line) for line in output.compiled_a2ui.splitlines()]
     components = messages[1]["updateComponents"]["components"]
+    data_model = messages[2]["updateDataModel"]["value"]
+    assert data_model["data"]["ViewWeather"]["temperatureText"] == "38°"
+    assert "_advancedSelectors" not in data_model["data"]
     text_by_content = {
         component.get("content"): component
         for component in components
         if component.get("component") == "Text"
     }
-    assert {"深圳", "38°", "晴", "空气优", "26° / 16°"}.issubset(text_by_content)
-    city_id = text_by_content["深圳"]["id"]
+    expected_bindings = {
+        "{{ ${/data/ViewWeather/districtName} }}",
+        "{{ ${/data/ViewWeather/temperatureText} }}",
+        "{{ ${/data/ViewWeather/condition} }}",
+        "{{ ${/data/ViewWeather/airQuality} }}",
+        "{{ ${/data/ViewWeather/temperatureRangeText} }}",
+    }
+    assert expected_bindings.issubset(text_by_content)
+    city_id = text_by_content["{{ ${/data/ViewWeather/districtName} }}"]["id"]
     condition_icon = next(
         component for component in components if component.get("component") == "Image"
     )
@@ -1853,7 +1871,9 @@ async def test_weather_terse_expansion_preserves_single_business_hierarchy(size:
             for component in components
             if component.get("component") == "Column"
             and component.get("children", [None])[0] == title_row["id"]
-            and text_by_content["38°"]["id"] in component.get("children", [])
+            and text_by_content[
+                "{{ ${/data/ViewWeather/temperatureText} }}"
+            ]["id"] in component.get("children", [])
         )
         assert weather_column["styles"]["justifyContent"] == "spaceBetween"
     else:
@@ -1903,9 +1923,9 @@ async def test_weather_terse_uses_condition_icon_selected_by_second_step():
     assert output.trusted_internal_asset_sources == (
         "resources/base/media/sun_max.svg",
     )
-    assert output.effective_output.index('Text("深圳"') < output.effective_output.index(
-        'Image("resources/base/media/sun_max.svg"'
-    )
+    assert output.effective_output.index(
+        'Text("${data.ViewWeather.districtName}"'
+    ) < output.effective_output.index('Image("resources/base/media/sun_max.svg"')
 
     artifact = WidgetGenerationService()._build_artifact(
         output.compiled_a2ui,
@@ -2125,8 +2145,14 @@ async def test_weather_details_action_lowers_to_whole_card_click():
     assert "天气详情" not in output.effective_output
     assert "resources/base/media/open.svg" not in output.effective_output
     assert '"alignContent":"bottomEnd"' not in output.effective_output
-    for fact in ("深圳", "38°", "晴", "空气优", "26° / 16°"):
-        assert output.effective_output.count(fact) == 1
+    for path in (
+        "${data.ViewWeather.districtName}",
+        "${data.ViewWeather.temperatureText}",
+        "${data.ViewWeather.condition}",
+        "${data.ViewWeather.airQuality}",
+        "${data.ViewWeather.temperatureRangeText}",
+    ):
+        assert output.effective_output.count(path) == 1
     assert '"width":32,"height":32' in output.effective_output
     messages = [json.loads(line) for line in output.compiled_a2ui.splitlines()]
     components = messages[1]["updateComponents"]["components"]
@@ -2245,7 +2271,9 @@ def _weather_schedule_task(size: str, *, with_action: bool) -> TaskSpec:
         size=size,
         eventCandidates=events,
         dataModelSchema={
-            "ViewWeather": dict(_weather_scope_task().dataModelSchema["ViewWeather"]),
+            "ViewWeather": dict(
+                _weather_scope_task().dataModelSchema["data"]["ViewWeather"]
+            ),
             "GetCalendarEvents": {
                 "events": [
                     {
@@ -2306,6 +2334,7 @@ def _compile_weather_schedule(
             TERSE_DSL_NESTED2_PROFILE_ID
         ),
         registry=get_cardplan_registry(),
+        enable_data_bindings=True,
     )
 
 
@@ -2330,12 +2359,12 @@ def test_weather_2x2_multi_business_keeps_weather_as_primary(with_action: bool):
 
     compiled = _compile_weather_schedule("2x2", source, with_action=with_action)
 
-    assert "WeatherOverview" not in compiled.effective_output
-    assert compiled.effective_output.index('Text("深圳"') < compiled.effective_output.index(
-        'Image("resources/base/media/weather.svg"'
-    )
-    assert compiled.effective_output.count("产品评审") == 1
-    assert compiled.effective_output.count("09:30 - 10:30") == 1
+    assert "WeatherOverview(" not in compiled.effective_output
+    assert compiled.effective_output.index(
+        'Text("${data.WeatherOverview.city}"'
+    ) < compiled.effective_output.index('Image("resources/base/media/weather.svg"')
+    assert compiled.effective_output.count("${data.ScheduleOverview.title}") == 1
+    assert compiled.effective_output.count("${data.ScheduleOverview.timeText}") == 1
     if with_action:
         assert '"alignContent":"bottomEnd"' in compiled.effective_output
 
@@ -2360,9 +2389,15 @@ def test_weather_2x2_multi_business_keeps_weather_as_primary(with_action: bool):
 def test_weather_2x4_multi_business_supports_primary_and_support_roles(source: str):
     compiled = _compile_weather_schedule("2x4", source, with_action=False)
 
-    assert "WeatherOverview" not in compiled.effective_output
-    for fact in ("深圳", "38°", "晴", "空气优", "26° / 16°"):
-        assert compiled.effective_output.count(fact) == 1
+    assert "WeatherOverview(" not in compiled.effective_output
+    for path in (
+        "${data.WeatherOverview.city}",
+        "${data.WeatherOverview.temperature}",
+        "${data.WeatherOverview.condition}",
+        "${data.WeatherOverview.airQuality}",
+        "${data.WeatherOverview.temperatureRange}",
+    ):
+        assert compiled.effective_output.count(path) == 1
 
 
 def test_weather_2x4_hero_support_action_keeps_action_in_its_own_region():
@@ -2379,7 +2414,7 @@ def test_weather_2x4_hero_support_action_keeps_action_in_its_own_region():
 
     assert '"justifyContent":"spaceBetween"' in compiled.effective_output
     assert "查看日程" in compiled.effective_output
-    assert compiled.effective_output.count("产品评审") == 1
+    assert compiled.effective_output.count("${data.ScheduleOverview.title}") == 1
 
 
 def test_weather_and_phone_battery_use_hero_support_action_roles():
@@ -2397,7 +2432,7 @@ def test_weather_and_phone_battery_use_hero_support_action_roles():
             )
         ],
         dataModelSchema={
-            "ViewWeather": dict(weather.dataModelSchema["ViewWeather"]),
+            "ViewWeather": dict(weather.dataModelSchema["data"]["ViewWeather"]),
             "GetPhoneBatteryInfo": {
                 "batterySOC": {"type": "number", "sampleValue": 68},
                 "batterySOCText": _sample_field("68%"),
@@ -2442,11 +2477,12 @@ def test_weather_and_phone_battery_use_hero_support_action_roles():
             TERSE_DSL_NESTED2_PROFILE_ID
         ),
         registry=get_cardplan_registry(),
+        enable_data_bindings=True,
     )
 
-    assert "WeatherOverview" not in compiled.effective_output
-    assert "BatteryOverview" not in compiled.effective_output
-    assert "68%" in compiled.effective_output
+    assert "WeatherOverview(" not in compiled.effective_output
+    assert "BatteryOverview(" not in compiled.effective_output
+    assert "${data.BatteryOverview.batterySOCText}" in compiled.effective_output
     assert compiled.stats.action_used_ids == ("event.startNavigate",)
     assert '"fontSize":32' in compiled.effective_output
     assert '"height":36' in compiled.effective_output
@@ -2459,7 +2495,9 @@ def test_weather_phone_and_earphone_three_business_scope_is_rejected():
         userQuery="天气、手机电量和耳机电量",
         size="2x4",
         dataModelSchema={
-            "ViewWeather": dict(_weather_scope_task().dataModelSchema["ViewWeather"]),
+            "ViewWeather": dict(
+                _weather_scope_task().dataModelSchema["data"]["ViewWeather"]
+            ),
             "GetPhoneBatteryInfo": {
                 "batterySOC": {"type": "number", "sampleValue": 68},
                 "batterySOCText": _sample_field("68%"),
@@ -2687,10 +2725,11 @@ def test_ux_mixed_contract_uses_direct_battery_constructor_and_approved_action()
             TERSE_DSL_NESTED2_PROFILE_ID
         ),
         registry=get_cardplan_registry(),
+        enable_data_bindings=True,
     )
 
     assert compiled.stats.template_used_ids == ()
-    assert "BatteryOverview" not in compiled.effective_output
+    assert "BatteryOverview(" not in compiled.effective_output
     assert "Template" not in compiled.a2ui
 
 
@@ -3104,6 +3143,27 @@ def test_other_advanced_templates_convert_to_standard_a2ui(
     assert '"linearGradient"' in genui
     assert 'Image("resources/base/media/bell.svg"' in source_dsl
     assert 'Image("resources/base/media/moon.svg"' in source_dsl
+
+
+def test_nested2_converter_requires_task_spec_leaf_for_data_placeholder():
+    task_spec = _template_task_spec().model_dump(mode="json")
+    source = 'Column("card", Text("${data.metric.caption}", "title"));'
+
+    genui = convert_terse_dsl_nested2_to_a2ui(
+        source,
+        size="2x2",
+        protocol_profile={"version": "v0.9"},
+        task_spec=task_spec,
+    )
+
+    assert '"content":"{{ ${/data/metric/caption} }}"' in genui
+    with pytest.raises(TerseDslNested2ConversionError, match="not a TaskSpec leaf"):
+        convert_terse_dsl_nested2_to_a2ui(
+            'Column("card", Text("${data.metric.missing}", "title"));',
+            size="2x2",
+            protocol_profile={"version": "v0.9"},
+            task_spec=task_spec,
+        )
 
 
 @pytest.mark.parametrize(

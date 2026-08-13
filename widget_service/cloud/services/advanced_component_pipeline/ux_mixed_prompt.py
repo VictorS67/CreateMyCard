@@ -277,6 +277,8 @@ def build_ux_mixed_prompt(
             "requiredLocalTemplateGroups="
             + json.dumps(required_template_groups, ensure_ascii=False),
             "directBusinessComponents=" + json.dumps(direct_components, ensure_ascii=False),
+            "业务高级组件字段由服务端绑定到 TaskSpec.dataModelSchema 的端侧数据路径；"
+            "最终有效 TerseDSL 使用完整 `${data.weather.temperature}` 占位值，模型不得编造路径。",
             "只输出混合 DSL，不输出说明。",
         )
     )

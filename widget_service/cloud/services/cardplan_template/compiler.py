@@ -54,6 +54,7 @@ from services.advanced_component_pipeline.models import (
 from services.terse_dsl_nested2_converter import (
     Nested2Node,
     TerseDslNested2ConversionError,
+    bind_task_spec_values,
     convert_terse_dsl_nested2_to_a2ui,
 )
 
@@ -92,6 +93,28 @@ _LAYOUT_ALIASES = {
     ("Stack", "ux-ring-medium"): "overlay",
     ("Stack", "ux-ring-small"): "overlay",
 }
+
+
+def _a2ui_component_types(a2ui: str) -> frozenset[str]:
+    """Return component discriminators without inspecting business data values."""
+    component_types: set[str] = set()
+    for line in a2ui.splitlines():
+        message = json.loads(line)
+        update = message.get("updateComponents")
+        if not isinstance(update, dict):
+            continue
+        components = update.get("components")
+        if not isinstance(components, list):
+            continue
+        for component in components:
+            if not isinstance(component, dict):
+                continue
+            component_type = component.get("component")
+            if isinstance(component_type, str):
+                component_types.add(component_type)
+    return frozenset(component_types)
+
+
 _DESIGN_ALIASES = {
     ("Text", "caption"): "subtitle",
     ("Text", "metric-hero"): "title",
@@ -142,6 +165,7 @@ def compile_hybrid_card(
     contract: HybridBodyContract,
     protocol_profile: dict[str, Any],
     registry: CardPlanRegistry,
+    enable_data_bindings: bool = False,
 ) -> HybridCompilation:
     composition = parse_hybrid_card(source)
     raw_card_params = composition.values[0]
@@ -254,15 +278,19 @@ def compile_hybrid_card(
         root = _compile_card_shell(card_params, content, task_spec, contract, registry)
         root = _apply_theme_text_role(root, text_role)
         root = _apply_theme_icon_role(root, text_role)
+    if enable_data_bindings:
+        root = bind_task_spec_values(root, task_spec.model_dump(mode="json"))
     effective = _serialize_node(root) + ";"
     a2ui = convert_terse_dsl_nested2_to_a2ui(
         effective,
         size=task_spec.size,
         protocol_profile=protocol_profile,
+        task_spec=task_spec.model_dump(mode="json") if enable_data_bindings else None,
     )
-    if "Template" in a2ui:
+    component_types = _a2ui_component_types(a2ui)
+    if "Template" in component_types:
         raise TerseDslNested2ConversionError("Template leaked into final A2UI.")
-    if any(layout_id in a2ui for layout_id in UX_LAYOUT_COMPONENT_IDS):
+    if component_types & UX_LAYOUT_COMPONENT_IDS:
         raise TerseDslNested2ConversionError("UX Layout leaked into final A2UI.")
     return HybridCompilation(
         raw_output=source,
@@ -297,6 +325,7 @@ def compile_ux_layout_card(
     protocol_profile: dict[str, Any],
     registry: CardPlanRegistry,
     business_title: str | None = None,
+    enable_data_bindings: bool = False,
 ) -> HybridCompilation:
     """Compile the fifth-interface layout root without invoking ``card@1``.
 
@@ -407,19 +436,23 @@ def compile_ux_layout_card(
     if depth > contract.limits.max_nesting_depth:
         raise TerseDslNested2ConversionError("Hybrid component depth budget exceeded.")
     _validate_expanded_tree(root, contract)
+    if enable_data_bindings:
+        root = bind_task_spec_values(root, task_spec.model_dump(mode="json"))
     effective = _serialize_node(root) + ";"
     a2ui = convert_terse_dsl_nested2_to_a2ui(
         effective,
         size=task_spec.size,
         protocol_profile=protocol_profile,
+        task_spec=task_spec.model_dump(mode="json") if enable_data_bindings else None,
     )
-    if "Template" in a2ui:
+    component_types = _a2ui_component_types(a2ui)
+    if "Template" in component_types:
         raise TerseDslNested2ConversionError("Template leaked into final A2UI.")
-    if any(layout_id in a2ui for layout_id in UX_LAYOUT_COMPONENT_IDS):
+    if component_types & UX_LAYOUT_COMPONENT_IDS:
         raise TerseDslNested2ConversionError("UX Layout leaked into final A2UI.")
-    if any(action_id in a2ui for action_id in _UX_ACTION_COMPONENTS):
+    if component_types & _UX_ACTION_COMPONENTS:
         raise TerseDslNested2ConversionError("UX Action leaked into final A2UI.")
-    if any(component_id in a2ui for component_id in _UX_DIRECT_BUSINESS_COMPONENTS):
+    if component_types & _UX_DIRECT_BUSINESS_COMPONENTS:
         raise TerseDslNested2ConversionError("UX Business Component leaked into final A2UI.")
     return HybridCompilation(
         raw_output=source,

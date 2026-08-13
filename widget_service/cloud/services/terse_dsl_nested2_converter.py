@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import io
 import json
+import re
 import tokenize
 from dataclasses import dataclass
 from typing import Any
@@ -27,6 +28,7 @@ _FORBIDDEN_KEYS = frozenset({"__proto__", "prototype", "constructor"})
 _CONTAINERS = frozenset({"Row", "Column", "List", "Stack"})
 _LEAVES = frozenset({"Text", "Image", "Divider", "Progress", "Button", "Checkbox"})
 _COMPONENTS = _CONTAINERS | _LEAVES
+_DATA_PLACEHOLDER = re.compile(r"^\$\{(data(?:\.[A-Za-z_][A-Za-z0-9_]*|\.\d+)+)\}$")
 _TEXT_DESIGNS = {
     "title": {"fontSize": 20, "fontWeight": 700, "fontColor": "font_primary"},
     "compact-title": {"fontSize": 14, "fontWeight": 700, "fontColor": "font_primary"},
@@ -86,13 +88,17 @@ def convert_terse_dsl_nested2_to_a2ui(
     *,
     size: str,
     protocol_profile: dict[str, Any],
+    task_spec: dict[str, Any] | None = None,
 ) -> str:
     """Convert one literal-only Nested-2 component tree to three A2UI messages."""
     root, data_model = _parse_terse_dsl_nested2_document(source)
+    allowed_binding_paths = _task_spec_leaf_paths(task_spec)
     compact_rows: list[list[Any]] = []
-    _append_compact_rows(root, "root", size, compact_rows)
+    _append_compact_rows(root, "root", size, compact_rows, allowed_binding_paths)
     if data_model is not None:
         compact_rows.append(["/data", data_model])
+    elif task_spec is not None:
+        compact_rows.append(["/", _task_spec_sample_data(task_spec)])
     else:
         compact_rows.append(["/ui/state", "ready"])
     compact_dsl = "\n".join(
@@ -279,18 +285,159 @@ def _append_compact_rows(
     component_id: str,
     size: str,
     rows: list[list[Any]],
+    allowed_binding_paths: frozenset[str],
 ) -> None:
     child_ids = [
         _explicit_component_id(child) or f"{component_id}_{index}"
         for index, child in enumerate(node.children)
     ]
-    props = _component_props(node, component_id, size)
+    props = _convert_data_placeholders(
+        _component_props(node, component_id, size),
+        allowed_binding_paths,
+    )
     row: list[Any] = [component_id, node.component_type, props]
     if node.component_type in _CONTAINERS:
         row.append(child_ids)
     rows.append(row)
     for child, child_id in zip(node.children, child_ids, strict=True):
-        _append_compact_rows(child, child_id, size, rows)
+        _append_compact_rows(child, child_id, size, rows, allowed_binding_paths)
+
+
+def bind_task_spec_values(root: Nested2Node, task_spec: dict[str, Any]) -> Nested2Node:
+    """Bind exact advanced-component facts to their declared TaskSpec leaf paths."""
+    bindings = _unique_task_spec_sample_bindings(task_spec)
+
+    def bind(node: Nested2Node) -> Nested2Node:
+        children = tuple(bind(child) for child in node.children)
+        values = list(node.values)
+        if node.component_type == "Text" and values:
+            placeholder = bindings.get(_stable_sample_key(values[0]))
+            if placeholder is not None:
+                values[0] = placeholder
+        if node.component_type in {"Progress", "Checkbox"}:
+            values = [_bind_numeric_semantic_fields(value, bindings) for value in values]
+        return Nested2Node(node.component_type, tuple(values), children)
+
+    return bind(root)
+
+
+def _bind_numeric_semantic_fields(value: Any, bindings: dict[str, str]) -> Any:
+    if not isinstance(value, dict):
+        return value
+    result = dict(value)
+    for field in ("value", "total", "select"):
+        if field not in result:
+            continue
+        placeholder = bindings.get(_stable_sample_key(result[field]))
+        if placeholder is not None:
+            result[field] = placeholder
+    return result
+
+
+def _unique_task_spec_sample_bindings(task_spec: dict[str, Any]) -> dict[str, str]:
+    candidates: dict[str, list[str]] = {}
+    _collect_task_spec_samples(task_spec.get("dataModelSchema"), "", candidates)
+    bindings: dict[str, str] = {}
+    for key, paths in candidates.items():
+        if len(paths) != 1:
+            continue
+        placeholder = _pointer_to_placeholder(paths[0])
+        if placeholder is not None:
+            bindings[key] = placeholder
+    return bindings
+
+
+def _collect_task_spec_samples(
+    value: Any,
+    path: str,
+    candidates: dict[str, list[str]],
+) -> None:
+    if isinstance(value, dict) and "type" in value:
+        is_runtime_path = path.startswith("/data/")
+        is_internal_selector = "/_advancedSelectors/" in path
+        if is_runtime_path and not is_internal_selector and "sampleValue" in value:
+            candidates.setdefault(_stable_sample_key(value["sampleValue"]), []).append(path)
+        return
+    if isinstance(value, dict):
+        for key, child in value.items():
+            _collect_task_spec_samples(child, f"{path}/{key}", candidates)
+        return
+    if isinstance(value, list) and value:
+        _collect_task_spec_samples(value[0], f"{path}/0", candidates)
+
+
+def _stable_sample_key(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _pointer_to_placeholder(path: str) -> str | None:
+    parts = path.removeprefix("/").split("/")
+    valid_parts = all(
+        part.isdigit() or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part)
+        for part in parts
+    )
+    if not parts or parts[0] != "data" or not valid_parts:
+        return None
+    return "${" + ".".join(parts) + "}"
+
+
+def _convert_data_placeholders(value: Any, allowed_paths: frozenset[str]) -> Any:
+    if isinstance(value, str):
+        match = _DATA_PLACEHOLDER.fullmatch(value)
+        if match is None:
+            return value
+        path = "/" + match.group(1).replace(".", "/")
+        if path not in allowed_paths:
+            raise TerseDslNested2ConversionError(
+                f"Data binding path is not a TaskSpec leaf: {path}."
+            )
+        return {"path": path}
+    if isinstance(value, dict):
+        return {
+            key: _convert_data_placeholders(child, allowed_paths)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [_convert_data_placeholders(child, allowed_paths) for child in value]
+    return value
+
+
+def _task_spec_leaf_paths(task_spec: dict[str, Any] | None) -> frozenset[str]:
+    if task_spec is None:
+        return frozenset()
+    paths: set[str] = set()
+
+    def visit(value: Any, path: str) -> None:
+        if isinstance(value, dict) and "type" in value:
+            paths.add(path)
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key == "_advancedSelectors":
+                    continue
+                visit(child, f"{path}/{key}")
+        elif isinstance(value, list) and value:
+            visit(value[0], f"{path}/0")
+
+    visit(task_spec.get("dataModelSchema"), "")
+    return frozenset(paths)
+
+
+def _task_spec_sample_data(task_spec: dict[str, Any]) -> Any:
+    def sample(value: Any) -> Any:
+        if isinstance(value, dict) and "type" in value:
+            return value.get("sampleValue")
+        if isinstance(value, dict):
+            return {
+                key: sample(child)
+                for key, child in value.items()
+                if key != "_advancedSelectors"
+            }
+        if isinstance(value, list):
+            return [sample(child) for child in value]
+        return value
+
+    return sample(task_spec.get("dataModelSchema", {}))
 
 
 def _explicit_component_id(node: Nested2Node) -> str | None:

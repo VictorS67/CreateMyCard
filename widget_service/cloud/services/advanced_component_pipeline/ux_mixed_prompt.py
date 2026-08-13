@@ -29,6 +29,7 @@ from .content_selectors import (
     extract_resource_usage_overview_facts,
     extract_schedule_overview_facts,
     extract_sleep_overview_facts,
+    extract_weather_overview_facts,
     relaxed_activity_overview_variants,
     relaxed_workout_overview_variants,
     schedule_query_requests_focus,
@@ -160,6 +161,23 @@ def build_ux_mixed_prompt(
         )
     required_literals = base.contract.required_literals
     protected_literals = base.contract.protected_literals
+    if "WeatherOverview" in direct_components:
+        weather_facts = extract_weather_overview_facts(task_spec.dataModelSchema)
+        if weather_facts is None:
+            raise ValueError("WeatherOverview has no complete trusted weather facts")
+        server_owned_weather_literals = {
+            weather_facts.city,
+            weather_facts.temperature,
+            weather_facts.condition,
+            weather_facts.air_quality,
+            weather_facts.temperature_range,
+        }
+        required_literals = tuple(
+            item for item in required_literals if item not in server_owned_weather_literals
+        )
+        protected_literals = tuple(
+            item for item in protected_literals if item not in server_owned_weather_literals
+        )
     if "ScheduleOverview" in direct_components:
         schedule_facts = extract_schedule_overview_facts(task_spec.dataModelSchema)
         optional_literals = {
@@ -282,9 +300,17 @@ def build_ux_mixed_prompt(
             "只输出混合 DSL，不输出说明。",
         )
     )
+    base_user_message = "\n".join(
+        (
+            "mustKeep=" + json.dumps(contract.required_literals, ensure_ascii=False)
+            if line.startswith("mustKeep=")
+            else line
+        )
+        for line in base.messages[1]["content"].splitlines()
+    )
     messages = [
         {"role": "system", "content": base.messages[0]["content"] + ux_override},
-        {"role": "user", "content": base.messages[1]["content"] + "\n" + user_suffix},
+        {"role": "user", "content": base_user_message + "\n" + user_suffix},
     ]
     if sum(len(item["content"]) for item in messages) > 80_000:
         raise ValueError("UX Mixed Prompt exceeds the service input budget")

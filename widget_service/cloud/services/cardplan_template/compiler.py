@@ -3635,6 +3635,9 @@ def _schedule_overview_tree(
                 font_color=metadata_color,
             )
         )
+    divider_height = sum(font_sizes[: len(text_column_children)]) + (
+        registry.ux_tokens["denseInnerGap"] * (len(text_column_children) - 1)
+    ) - 10
     text_column = Nested2Node(
         "Column",
         (
@@ -3667,12 +3670,12 @@ def _schedule_overview_tree(
                 "constraintSize": {"minWidth": 0, "minHeight": 0},
             },
         ),
-        (_schedule_rail(accent_color, rail_color), text_column),
+        (_schedule_rail(accent_color, rail_color, divider_height), text_column),
     )
     children: list[Nested2Node] = []
     if variant == "nextEvent" or isinstance(source_icon, str):
         children.append(
-            _schedule_header(source_icon, primary_color, registry)
+            _schedule_header(source_icon, secondary_color, accent_color, registry)
         )
     else:
         return _merge_node_options(body, {"_advancedComponent": "ScheduleOverview"})
@@ -3698,7 +3701,8 @@ def _schedule_overview_tree(
 
 def _schedule_header(
     source_icon: Any,
-    primary_color: str,
+    secondary_color: str,
+    accent_color: str,
     registry: CardPlanRegistry,
 ) -> Nested2Node:
     label = _schedule_text(
@@ -3706,20 +3710,25 @@ def _schedule_header(
         "subtitle",
         font_size=12,
         font_weight=400,
-        font_color=primary_color,
+        font_color=secondary_color,
     )
     children: list[Nested2Node] = [
         _merge_node_options(label, {"layoutWeight": 1})
     ]
     if isinstance(source_icon, str):
-        size = registry.ux_tokens["titleSourceIconSize"]
+        size = 12
         children.append(
             Nested2Node(
                 "Image",
                 (
                     source_icon,
                     "icon",
-                    {"width": size, "height": size, "objectFit": "contain"},
+                    {
+                        "width": size,
+                        "height": size,
+                        "objectFit": "contain",
+                        "fillColor": accent_color,
+                    },
                 ),
                 (),
             )
@@ -3730,7 +3739,7 @@ def _schedule_header(
             "between",
             {
                 "width": "100%",
-                "height": 20,
+                "height": 12,
                 "itemMargin": registry.ux_tokens["denseInnerGap"],
                 "justifyContent": "spaceBetween",
                 "alignItems": "top",
@@ -3741,7 +3750,11 @@ def _schedule_header(
     )
 
 
-def _schedule_rail(accent_color: str, rail_color: str) -> Nested2Node:
+def _schedule_rail(
+    accent_color: str,
+    rail_color: str,
+    divider_height: int,
+) -> Nested2Node:
     invisible_fill = Nested2Node(
         "Divider",
         ({"width": 0, "height": 0, "strokeWidth": 0, "color": "#00FFFFFF"},),
@@ -3769,8 +3782,7 @@ def _schedule_rail(accent_color: str, rail_color: str) -> Nested2Node:
         (
             {
                 "width": 1,
-                "height": "100%",
-                "layoutWeight": 1,
+                "height": max(divider_height, 0),
                 "strokeWidth": 1,
                 "vertical": True,
                 "color": rail_color,
@@ -3883,12 +3895,7 @@ def _expand_weather_overview_call(
         task_spec.size == "2x2"
         and layout_id in {"HeroSupportLayout", "HeroSupportActionLayout"}
     )
-    if compact:
-        icon_size = 24
-    elif task_spec.size == "2x2":
-        icon_size = 32
-    else:
-        icon_size = registry.ux_tokens["weatherIconCompactSize"]
+    icon_size = 20
     temperature_size = 30 if role in {"support", "peer"} else 38
     if task_spec.size == "2x2" and compact:
         temperature_size = 32
@@ -3917,7 +3924,8 @@ def _expand_weather_overview_call(
             "between",
             {
                 "width": "matchParent",
-                "height": icon_size,
+                "height": 20,
+                "padding": {"right": 12},
                 "itemMargin": registry.ux_tokens["denseInnerGap"],
                 "justifyContent": "spaceBetween",
                 "alignItems": "top",
@@ -3929,7 +3937,7 @@ def _expand_weather_overview_call(
                 facts.city,
                 "compact-title",
                 font_size=12,
-                font_weight=600,
+                font_weight=400,
                 layout_weight=1,
             ),
             Nested2Node(
@@ -3955,20 +3963,24 @@ def _expand_weather_overview_call(
             },
         ),
         (
-            _weather_text(facts.condition, "body", font_size=primary_size, font_weight=500),
-            _weather_text(facts.air_quality, "body", font_size=primary_size, font_weight=500),
+            _weather_text(
+                f"{facts.condition}｜{facts.air_quality}",
+                "body",
+                font_size=primary_size,
+                font_weight=500,
+            ),
         ),
     )
     if task_spec.size == "2x2" and layout_id == "SingleFocusLayout" and role == "hero":
         temperature = _weather_text(
-            facts.temperature,
+            _weather_temperature(facts.temperature),
             "title",
             font_size=temperature_size,
             font_weight=800,
             min_font_size=temperature_size,
         )
         range_text = _weather_text(
-            facts.temperature_range,
+            _weather_temperature_range(facts.temperature_range),
             "subtitle",
             font_size=range_size,
             font_weight=400,
@@ -3979,7 +3991,7 @@ def _expand_weather_overview_call(
                 "compact",
                 {
                     "width": "matchParent",
-                    "itemMargin": 2,
+                    "itemMargin": 4,
                     "alignItems": "start",
                 },
             ),
@@ -3993,7 +4005,7 @@ def _expand_weather_overview_call(
                     "_advancedComponent": "WeatherOverview",
                     "width": "matchParent",
                     "height": "matchParent",
-                    "itemMargin": 2,
+                    "itemMargin": 4,
                     "justifyContent": "spaceBetween",
                     "alignItems": "start",
                     "clip": True,
@@ -4009,14 +4021,14 @@ def _expand_weather_overview_call(
                 "compact",
                 {
                     "width": "matchParent",
-                    "itemMargin": registry.ux_tokens["sectionGap"],
+                    "itemMargin": 4,
                     "alignItems": "start",
                 },
             ),
             (
                 title,
                 _weather_text(
-                    facts.temperature,
+                    _weather_temperature(facts.temperature),
                     "title",
                     font_size=temperature_size,
                     font_weight=800,
@@ -4051,7 +4063,7 @@ def _expand_weather_overview_call(
             (
                 wide_primary,
                 _weather_text(
-                    facts.temperature_range,
+                    _weather_temperature_range(facts.temperature_range),
                     "subtitle",
                     font_size=range_size,
                     font_weight=400,
@@ -4082,7 +4094,7 @@ def _expand_weather_overview_call(
                 "_advancedComponent": "WeatherOverview",
                 "width": "matchParent",
                 "height": "matchParent",
-                "itemMargin": 2 if compact else registry.ux_tokens["denseInnerGap"],
+                "itemMargin": 4,
                 "justifyContent": "start",
                 "alignItems": "start",
                 "clip": True,
@@ -4092,7 +4104,7 @@ def _expand_weather_overview_call(
         (
             title,
             _weather_text(
-                facts.temperature,
+                _weather_temperature(facts.temperature),
                 "title",
                 font_size=temperature_size,
                 font_weight=800,
@@ -4100,7 +4112,7 @@ def _expand_weather_overview_call(
             ),
             primary,
             _weather_text(
-                facts.temperature_range,
+                _weather_temperature_range(facts.temperature_range),
                 "subtitle",
                 font_size=range_size,
                 font_weight=400,
@@ -4149,6 +4161,16 @@ def _weather_text(
     if layout_weight is not None:
         options["layoutWeight"] = layout_weight
     return Nested2Node("Text", (value, design, options), ())
+
+
+def _weather_temperature(value: str) -> str:
+    """Remove the trailing Celsius marker from a current temperature fact."""
+    return re.sub(r"\s*[℃Cc]\s*$", "", value).strip()
+
+
+def _weather_temperature_range(value: str) -> str:
+    """Remove Celsius markers from each side of a trusted temperature range."""
+    return re.sub(r"\s*[℃Cc](?=\s*(?:/|至|-|~|～|$))", "", value).strip()
 
 
 def _validate_template_params(

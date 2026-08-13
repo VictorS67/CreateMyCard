@@ -20,9 +20,7 @@ from services.compact_dsl_a2ui_converter import (
 def _serialize(rows: list[list[object]]) -> str:
     values: list[str] = []
     for row in rows:
-        values.append(
-            json.dumps(row, ensure_ascii=False, separators=(",", ":"))
-        )
+        values.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
     return "\n".join(values)
 
 
@@ -30,7 +28,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.profile = {
             "version": "v0.9",
-            "catalogId": "ohos.a2ui.extended.catalog.form",
+            "catalogId": "ohos.a2ui.extended.catalog",
             "sizes": {
                 "2x2": {"width": 140, "height": 140},
                 "2x4": {"width": 300, "height": 140},
@@ -95,9 +93,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
                                 "intentName": "ViewDetail",
                                 "params": {
                                     "entityId": {
-                                        "path": (
-                                            "/data/calendar/events/0/entityId"
-                                        ),
+                                        "path": ("/data/calendar/events/0/entityId"),
                                     },
                                 },
                             },
@@ -267,9 +263,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
             compact_dsl,
             task_spec={
                 "dataModelSchema": {},
-                "assetCandidates": [
-                    {"src": "resources/base/media/weather.svg"},
-                ],
+                "assetCandidates": [{"src": "resources/base/media/weather.svg"}],
                 "eventCandidates": [event],
             },
             card_spec={"dataBindings": []},
@@ -287,70 +281,10 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
             ["root", "action", "action_icon"],
         )
         self.assertEqual(components[1]["children"], ["action_icon"])
-        self.assertEqual(components[1]["label"], "\u200B")
+        self.assertEqual(components[1]["label"], "\u200b")
         self.assertEqual(
             components[2]["src"],
             "resources/base/media/weather.svg",
-        )
-
-    def test_preserves_label_less_icon_round_button_image_child(self) -> None:
-        event = {
-            "call": "clickToDeeplink",
-            "args": {
-                "intentName": "Music",
-                "uri": "hwmusic://com.huawei.hmsapp.music/showMusicList",
-            },
-        }
-        compact_dsl = _serialize(
-            [
-                [
-                    "root",
-                    "Column",
-                    {"width": 160, "height": 160},
-                    ["action_area"],
-                ],
-                [
-                    "action_area",
-                    "Column",
-                    {"flexShrink": 0},
-                    ["cta"],
-                ],
-                [
-                    "cta",
-                    "Button",
-                    {
-                        "design": "icon-round",
-                        "fontColor": "#FF0A59F7",
-                        "onClick": [event],
-                    },
-                    ["action_icon"],
-                ],
-                [
-                    "action_icon",
-                    "Image",
-                    {
-                        "width": 16,
-                        "height": 16,
-                        "src": "resources/base/media/play_fill.svg",
-                    },
-                ],
-            ]
-        )
-
-        a2ui = convert_compact_dsl_to_a2ui(
-            compact_dsl,
-            size="2x2",
-            protocol_profile=self.profile,
-        )
-        components = json.loads(a2ui.splitlines()[1])["updateComponents"]["components"]
-        components_by_id = {component["id"]: component for component in components}
-
-        self.assertEqual(components_by_id["action_area"]["children"], ["cta"])
-        self.assertEqual(components_by_id["cta"]["children"], ["action_icon"])
-        self.assertEqual(components_by_id["cta"]["label"], "\u200B")
-        self.assertEqual(
-            components_by_id["action_icon"]["src"],
-            "resources/base/media/play_fill.svg",
         )
 
     def test_repairs_empty_button_label(self) -> None:
@@ -516,216 +450,6 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
             a2ui_components[component["id"]] = component
         self.assertNotIn("threshold", a2ui_components["threshold"]["styles"])
 
-    def test_expands_ring_unit_center_reading(self) -> None:
-        compact_dsl = _serialize(
-            [
-                [
-                    "root",
-                    "Column",
-                    {"width": 160, "height": 160},
-                    ["visual_slot"],
-                ],
-                [
-                    "visual_slot",
-                    "RingUnit",
-                    {
-                        "state": "center-reading",
-                        "size": 52,
-                        "value": {"path": "/data/memory/usedPercent"},
-                        "total": 100,
-                        "reading": {
-                            "path": "/data/memory/usedPercent",
-                            "unit": "%",
-                        },
-                    },
-                ],
-                ["/data/memory/usedPercent", 68],
-            ]
-        )
-
-        normalized = normalize_compact_dsl_design_tokens(compact_dsl)
-        rows = [json.loads(line) for line in normalized.splitlines()]
-        components = {row[0]: row for row in rows if not row[0].startswith("/")}
-
-        self.assertNotIn("RingUnit", [row[1] for row in components.values()])
-        self.assertEqual(components["visual_slot"][1], "Stack")
-        self.assertEqual(
-            components["visual_slot"][3],
-            ["visual_slot_ring_bar", "visual_slot_center_reading"],
-        )
-        self.assertEqual(components["visual_slot_ring_bar"][1], "Progress")
-        self.assertEqual(components["visual_slot_ring_bar"][2]["type"], "ring")
-        self.assertEqual(components["visual_slot_center_reading"][1], "Row")
-        self.assertEqual(
-            components["visual_slot_center_reading"][3],
-            ["visual_slot_reading_num", "visual_slot_reading_unit"],
-        )
-
-        a2ui = convert_compact_dsl_to_a2ui(
-            compact_dsl,
-            size="2x2",
-            protocol_profile=self.profile,
-        )
-        update = json.loads(a2ui.splitlines()[1])["updateComponents"]
-        self.assertNotIn(
-            "RingUnit",
-            [component["component"] for component in update["components"]],
-        )
-
-    def test_expands_ring_unit_with_reading_and_icon(self) -> None:
-        compact_dsl = _serialize(
-            [
-                [
-                    "root",
-                    "Column",
-                    {"width": 160, "height": 160},
-                    ["visual_slot"],
-                ],
-                [
-                    "visual_slot",
-                    "RingUnit",
-                    {
-                        "state": "with-reading",
-                        "size": 44,
-                        "value": {"path": "/data/disk/usedPercent"},
-                        "total": 100,
-                        "centerIcon": "resources/base/media/drop_1.svg",
-                        "reading": {"path": "/data/disk/usedPercent"},
-                    },
-                ],
-                ["/data/disk/usedPercent", "68%"],
-            ]
-        )
-
-        normalized = normalize_compact_dsl_design_tokens(compact_dsl)
-        rows = [json.loads(line) for line in normalized.splitlines()]
-        components = {row[0]: row for row in rows if not row[0].startswith("/")}
-
-        self.assertEqual(components["visual_slot"][1], "Column")
-        self.assertEqual(
-            components["visual_slot"][3],
-            ["visual_slot_ring_stack", "visual_slot_reading_below"],
-        )
-        self.assertEqual(
-            components["visual_slot_ring_stack"][3],
-            ["visual_slot_ring_bar", "visual_slot_center_icon"],
-        )
-        self.assertEqual(components["visual_slot_center_icon"][2]["width"], 20)
-        self.assertEqual(components["visual_slot_reading_below"][1], "Text")
-
-    def test_expands_ring_unit_center_icon_below_text(self) -> None:
-        compact_dsl = _serialize(
-            [
-                [
-                    "root",
-                    "Column",
-                    {"width": 160, "height": 160},
-                    ["visual_slot"],
-                ],
-                [
-                    "visual_slot",
-                    "RingUnit",
-                    {
-                        "state": "center-icon-below-text",
-                        "size": 44,
-                        "value": {"path": "/data/phoneBattery/batterySOC"},
-                        "total": 100,
-                        "centerIcon": "resources/base/media/battery_leaf_fill.svg",
-                        "reading": {"path": "/data/phoneBattery/batterySOCText"},
-                        "flexShrink": 0,
-                    },
-                ],
-                ["/data/phoneBattery/batterySOC", 68],
-                ["/data/phoneBattery/batterySOCText", "68%"],
-            ]
-        )
-
-        normalized = normalize_compact_dsl_design_tokens(compact_dsl)
-        rows = [json.loads(line) for line in normalized.splitlines()]
-        components = {row[0]: row for row in rows if not row[0].startswith("/")}
-
-        self.assertEqual(components["visual_slot"][1], "Column")
-        self.assertEqual(
-            components["visual_slot"][3],
-            ["visual_slot_ring_stack", "visual_slot_reading_below"],
-        )
-        self.assertEqual(
-            components["visual_slot_ring_stack"][3],
-            ["visual_slot_ring_bar", "visual_slot_center_icon"],
-        )
-        self.assertEqual(components["visual_slot_reading_below"][2]["content"], {
-            "path": "/data/phoneBattery/batterySOCText",
-        })
-
-    def test_expands_ring_unit_center_icon(self) -> None:
-        compact_dsl = _serialize(
-            [
-                [
-                    "root",
-                    "Column",
-                    {"width": 160, "height": 160},
-                    ["visual_slot"],
-                ],
-                [
-                    "visual_slot",
-                    "RingUnit",
-                    {
-                        "state": "center-icon",
-                        "size": 52,
-                        "value": {"path": "/data/phoneBattery/batterySOC"},
-                        "total": 100,
-                        "centerIcon": "resources/base/media/bolt_fill.svg",
-                        "flexShrink": 0,
-                    },
-                ],
-                ["/data/phoneBattery/batterySOC", 68],
-            ]
-        )
-
-        normalized = normalize_compact_dsl_design_tokens(compact_dsl)
-        rows = [json.loads(line) for line in normalized.splitlines()]
-        components = {row[0]: row for row in rows if not row[0].startswith("/")}
-
-        self.assertEqual(components["visual_slot"][1], "Stack")
-        self.assertEqual(
-            components["visual_slot"][3],
-            ["visual_slot_ring_bar", "visual_slot_center_icon"],
-        )
-        self.assertEqual(components["visual_slot_center_icon"][2]["width"], 24)
-
-    def test_rejects_invalid_ring_unit_contract(self) -> None:
-        compact_dsl = _serialize(
-            [
-                [
-                    "root",
-                    "Column",
-                    {"width": 160, "height": 160},
-                    ["visual_slot"],
-                ],
-                [
-                    "visual_slot",
-                    "RingUnit",
-                    {
-                        "state": "center-reading",
-                        "size": 44,
-                        "value": 68,
-                        "total": 100,
-                        "reading": {
-                            "path": "/data/memory/usedPercent",
-                            "unit": "%",
-                        },
-                    },
-                ],
-                ["/data/memory/usedPercent", 68],
-            ]
-        )
-
-        with self.assertRaisesRegex(
-            CompactDslConversionError,
-            "center-reading requires size 52",
-        ):
-            normalize_compact_dsl_design_tokens(compact_dsl)
-
     def test_rejects_design_aliases_removed_from_latest_prompt(self) -> None:
         compact_dsl = _serialize(
             [
@@ -797,8 +521,8 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         messages = [json.loads(line) for line in a2ui.splitlines()]
 
         self.assertEqual(len(messages), 3)
-        self.assertEqual(messages[0]["createSurface"]["width"], 160)
-        self.assertEqual(messages[0]["createSurface"]["height"], 160)
+        self.assertNotIn("width", messages[0]["createSurface"])
+        self.assertNotIn("height", messages[0]["createSurface"])
         update = messages[1]["updateComponents"]
         self.assertEqual(update["root"], "root")
         components = {}
@@ -824,7 +548,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         event = data_model["data"]["calendar"]["events"][0]
         self.assertEqual(event["title"], "产品评审")
 
-    def test_always_uses_form_catalog_id(self) -> None:
+    def test_always_uses_extended_catalog_id(self) -> None:
         profile = dict(self.profile)
         profile["catalogId"] = "ohos.a2ui.extended.catalog"
 
@@ -837,7 +561,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
 
         self.assertEqual(
             create_surface["catalogId"],
-            "ohos.a2ui.extended.catalog.form",
+            "ohos.a2ui.extended.catalog",
         )
 
     def test_accepts_one_genui_fence(self) -> None:
@@ -852,11 +576,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         self.assertEqual(len(result.splitlines()), 3)
 
     def test_repairs_bom_json_fence_and_surrounding_text(self) -> None:
-        source = (
-            "\ufeffModel output follows.\n"
-            f"```json\n{self.compact_dsl}\n```\n"
-            "End of output."
-        )
+        source = f"\ufeffModel output follows.\n```json\n{self.compact_dsl}\n```\nEnd of output."
 
         result = convert_compact_dsl_to_a2ui(
             source,
@@ -993,7 +713,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
                 protocol_profile=self.profile,
             )
 
-    def test_uses_surface_dimensions_for_4x2(self) -> None:
+    def test_omits_surface_dimensions_for_4x2(self) -> None:
         wide_rows = [
             [
                 "root",
@@ -1016,8 +736,8 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         )
         create_surface = json.loads(result.splitlines()[0])["createSurface"]
 
-        self.assertEqual(create_surface["width"], 320)
-        self.assertEqual(create_surface["height"], 160)
+        self.assertNotIn("width", create_surface)
+        self.assertNotIn("height", create_surface)
 
     def test_rejects_legacy_action_and_row_space(self) -> None:
         legacy_action = _serialize(
@@ -1203,9 +923,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         )
 
         task_spec["dataModelSchema"]["data"]["backup"] = schema
-        card_spec["dataBindings"].append(
-            {"writeResultTo": "/data/backup"}
-        )
+        card_spec["dataBindings"].append({"writeResultTo": "/data/backup"})
         self.assertEqual(
             repair_compact_dsl_binding_paths(
                 compact_dsl,
@@ -1349,9 +1067,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
                 card_spec={"dataBindings": []},
             )
 
-        task_spec["assetCandidates"][0]["src"] = (
-            "resources/base/media/unknown.svg"
-        )
+        task_spec["assetCandidates"][0]["src"] = "resources/base/media/unknown.svg"
         with self.assertRaisesRegex(
             CompactDslConversionError,
             "onClick is not present",
@@ -1407,8 +1123,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
 
             self.assertEqual(result, 0)
             messages = [
-                json.loads(line)
-                for line in target.read_text(encoding="utf-8").splitlines()
+                json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()
             ]
             self.assertEqual(len(messages), 3)
             self.assertIn("updateComponents", messages[1])

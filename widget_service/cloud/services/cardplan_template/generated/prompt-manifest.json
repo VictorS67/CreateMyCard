@@ -7,16 +7,16 @@
   "catalogId": "ohos.a2ui.extended.catalog",
   "contractVersion": "hybrid-body-contract/0.5",
   "files": {
-    "advanced-component-registry.json": "sha256:61f0c5f82a0c158056a56da4936c3d5f253ab7d1c36f265a0aec2da00981e386",
-    "advanced-component-ux-registry.json": "sha256:90878715d7443eb2299d0b46d6b9bd1d5fe3bfe0692cf0477fe2ed4c58e34c69",
-    "prompts/card-template-planner/00-chrome-kernel.md": "sha256:af96ada042901e2554f4c323695174c67d5de28d0aa140568cb22724726a8652",
-    "prompts/card-template-planner/10-dsl-and-boundary.md": "sha256:43e13eedfc305ce2848622890cd97cfd81e42b6df950a9047e0e086a56e76ced",
-    "prompts/hybrid-body-generator/00-hybrid-kernel.md": "sha256:4f4b0f621ad00cc0c005c34be25def5bd603e1adb744c7488eabdadba63c29b9",
-    "prompts/hybrid-body-generator/10-template-composition.md": "sha256:780bb4bd0c4f72a9bfd38b2a121d34e49311331895eed361b97419ab72fc4bf0",
-    "prompts/hybrid-body-generator/20-action-and-budget.md": "sha256:89d5c674e52b124b9cb2672f1ba9966d73d3d406ec2daeb115101246cecbb2d7",
-    "prompts/ux-mixed-generator/00-ux-mixed-kernel.md": "sha256:4447ed47359c48c43accd64586d10efe0a2a281dbefb97dd477f833ec677728b",
-    "template-registry.json": "sha256:ea4ff4b1c61c26619ad6c5937b7e2250aa6f8a9ef1ead5ac0a1a7b344a84bb18",
-    "theme-profiles.json": "sha256:1f784dab57a867ba22dfcd0217f4fa34e2d9dedb5490915f5da617c6be7c83a2"
+    "advanced-component-registry.json": "sha256:49fe295ebcf216e06db2d48fc3f2cb245c712d33b3f5931b7cf0bf82d49b2fdb",
+    "advanced-component-ux-registry.json": "sha256:a02a6dcd88f1ae31934bae0435b89e42874e9ed6b3a6a4851e0fdc5ba963d72c",
+    "prompts/card-template-planner/00-chrome-kernel.md": "sha256:8e411781f796d9891164299c226618ceb92b9e9b8286b994050ab4f5686b15aa",
+    "prompts/card-template-planner/10-dsl-and-boundary.md": "sha256:96928eee998503f3d84519c1744c210049e9dfd35090ef73c0f96d80b875bdfe",
+    "prompts/hybrid-body-generator/00-hybrid-kernel.md": "sha256:735e5aee6269c59fec9e8cf0d5ba8a5c078ad3f3861450cbefd9150674131e17",
+    "prompts/hybrid-body-generator/10-template-composition.md": "sha256:ad4835aeef92b624d44743196787af99b5b6d47f4bfa134cdcd2bab602982e86",
+    "prompts/hybrid-body-generator/20-action-and-budget.md": "sha256:aa214947ee5a935123fddb1b0267faf756e56a1507ba95f1f755854486b1497f",
+    "prompts/ux-mixed-generator/00-ux-mixed-kernel.md": "sha256:11cadd16035f942cabc7f54101fe6fa0e557d0ca7f192ba8cf973cf4567a9044",
+    "template-registry.json": "sha256:1d260cb84d1cd3fa20e98e95e4baabeead66653416a52fbc2c2b146133e09324",
+    "theme-profiles.json": "sha256:94be37a79128861e0443d1281e0d79602e88fdbae81553aca997603770fb5e40"
   },
   "promptSha256": {
     "body": "990cf244ce30b6d70e71f5e9dbf387227384449422b931e69ee6367b031b5c4b",

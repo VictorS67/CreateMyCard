@@ -14,7 +14,7 @@
     "prompts/hybrid-body-generator/00-hybrid-kernel.md": "sha256:735e5aee6269c59fec9e8cf0d5ba8a5c078ad3f3861450cbefd9150674131e17",
     "prompts/hybrid-body-generator/10-template-composition.md": "sha256:ad4835aeef92b624d44743196787af99b5b6d47f4bfa134cdcd2bab602982e86",
     "prompts/hybrid-body-generator/20-action-and-budget.md": "sha256:aa214947ee5a935123fddb1b0267faf756e56a1507ba95f1f755854486b1497f",
-    "prompts/ux-mixed-generator/00-ux-mixed-kernel.md": "sha256:9fb0f5aac75cf4acc3a15b4166846196f508831dfa29ccfb9dc0910e34625dc8",
+    "prompts/ux-mixed-generator/00-ux-mixed-kernel.md": "sha256:5e748350d36bff23fd0678987b10c060d20dbef8063590a4e84be6a81b9a0272",
     "template-registry.json": "sha256:1d260cb84d1cd3fa20e98e95e4baabeead66653416a52fbc2c2b146133e09324",
     "theme-profiles.json": "sha256:94be37a79128861e0443d1281e0d79602e88fdbae81553aca997603770fb5e40"
   },

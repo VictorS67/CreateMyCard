@@ -1553,7 +1553,26 @@ def _sleep_hero_overview(
         if facts.status is not None
         else None
     )
-    hero_children = (title, duration, status) if status is not None else (title, duration)
+    # Group duration and status at bottom
+    if status is not None:
+        bottom_section = Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "width": "matchParent",
+                    "itemMargin": registry.ux_tokens["denseInnerGap"],
+                    "justifyContent": "end",
+                    "alignItems": "start",
+                    "clip": True,
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            (duration, status),
+        )
+        hero_children = (title, bottom_section)
+    else:
+        hero_children = (title, duration)
     hero = Nested2Node(
         "Column",
         (
@@ -1669,7 +1688,7 @@ def _sleep_title_row(
                 "height": 20,
                 "itemMargin": registry.ux_tokens["denseInnerGap"],
                 "justifyContent": "spaceBetween",
-                "alignItems": "top",
+                "alignItems": "middle",
                 "clip": True,
                 "constraintSize": {"minWidth": 0, "minHeight": 0},
             },

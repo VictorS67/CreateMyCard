@@ -18,6 +18,165 @@ _MODULE = "[Artifact Store]"
 file_obs = UploadFileOSMS()
 
 
+def _compute_10_percent_opacity(color: str) -> str | None:
+    """Compute 10% opacity version of an ARGB color string.
+
+    Args:
+        color: ARGB color string like "#FF64BB5C" or "#AARRGGBB"
+
+    Returns:
+        Color string with 10% opacity (alpha = 0x19), or None if invalid format.
+        10% of 255 ≈ 38 ≈ 0x26, but using 0x19 (25/255 ≈ 9.8%) for consistency.
+    """
+    if not color or not isinstance(color, str):
+        return None
+    color = color.strip()
+    if not color.startswith("#") or len(color) != 9:
+        return None
+    # Extract RGB part (last 6 characters)
+    rgb = color[3:]
+    return f"#19{rgb}"
+
+
+def _fix_bluetooth_button_background(genui: str, card_spec: dict) -> str:
+    """Fix button background color for Bluetooth device cards.
+
+    For cards with GetEarphoneInfo data binding, this function:
+    1. Finds Stack components with onClick handlers (buttons)
+    2. Gets the fontColor from Text components inside the button
+    3. Computes 10% opacity of that fontColor
+    4. Applies it as the button's backgroundColor
+
+    This simulates runtime behavior where background color is computed from text color.
+
+    Args:
+        genui: The A2UI genui string with JSON objects
+        card_spec: The cardSpec dict which may contain dataBindings
+    """
+    # Check if this is a bluetooth-related card
+    has_bluetooth_binding = False
+    data_bindings = card_spec.get("dataBindings", [])
+    for binding in data_bindings:
+        if binding.get("capabilityId") == "GetEarphoneInfo":
+            has_bluetooth_binding = True
+            break
+
+    if not has_bluetooth_binding:
+        logger.info(f"{_MODULE} bluetooth_button_background_skipped reason=no_GetEarphoneInfo_binding")
+        return genui
+
+    logger.info(f"{_MODULE} bluetooth_button_background_processing reason=GetEarphoneInfo_binding_found")
+
+    # The genui contains multiple JSON objects, each on its own line
+    # Format: {"version":"v0.9","createSurface":{...}}
+    #         {"version":"v0.9","updateComponents":{...}}
+    #         {"version":"v0.9","updateDataModel":{...}}
+    lines = genui.strip().split('\n')
+    modified_lines = []
+    modified = False
+
+    for line in lines:
+        try:
+            obj = json.loads(line)
+            if obj.get("version") == "v0.9" and "updateComponents" in obj:
+                # Parse and modify the components
+                update_data = obj["updateComponents"]
+                if "components" in update_data:
+                    new_components = _fix_components_button_background(update_data["components"])
+                    if new_components != update_data["components"]:
+                        modified = True
+                        update_data["components"] = new_components
+            modified_lines.append(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
+        except json.JSONDecodeError:
+            # Keep lines that aren't valid JSON as-is
+            modified_lines.append(line)
+
+    if modified:
+        logger.info(f"{_MODULE} bluetooth_button_background_fixed applied=true")
+        return '\n'.join(modified_lines)
+    else:
+        logger.info(f"{_MODULE} bluetooth_button_background_fixed applied=false (no Stack+onClick buttons found)")
+        return '\n'.join(modified_lines)
+
+
+def _build_component_lookup(components: list) -> dict:
+    """Build a lookup map of component ID → component object."""
+    lookup = {}
+    for comp in components:
+        if isinstance(comp, dict) and "id" in comp:
+            lookup[comp["id"]] = comp
+    return lookup
+
+
+def _resolve_and_find_font_color(children_ids: list, lookup: dict) -> str | None:
+    """Resolve children IDs to components and find the first Text's fontColor."""
+    for child_id in children_ids:
+        if not isinstance(child_id, str):
+            continue
+        comp = lookup.get(child_id)
+        if not isinstance(comp, dict):
+            continue
+        # If this is a Text component, return its fontColor
+        if comp.get("component") == "Text":
+            styles = comp.get("styles", {})
+            if isinstance(styles, dict):
+                font_color = styles.get("fontColor")
+                if font_color:
+                    return font_color
+        # If this component has children, recurse
+        children = comp.get("children")
+        if isinstance(children, list) and children:
+            result = _resolve_and_find_font_color(children, lookup)
+            if result:
+                return result
+    return None
+
+
+def _fix_components_button_background(components: list) -> list:
+    """Fix button (Stack with onClick) background color using ID-based resolution.
+
+    In A2UI genui, children are referenced by ID strings, not direct objects.
+    This function:
+    1. Builds a lookup map of ID → component
+    2. Finds Stack components with onClick (buttons)
+    3. Resolves children IDs to find Text components and their fontColor
+    4. Computes 10% opacity of fontColor and applies as backgroundColor
+    """
+    # Build lookup map for ID-based resolution
+    lookup = _build_component_lookup(components)
+    result = []
+    modified_any = False
+
+    for comp in components:
+        if isinstance(comp, dict):
+            comp_copy = dict(comp)
+            # Check if this is a Stack with onClick (button)
+            if comp_copy.get("component") == "Stack" and "onClick" in comp_copy:
+                # Get children IDs (strings like ["root_0_1_0"])
+                children_ids = comp_copy.get("children", [])
+                if isinstance(children_ids, list) and children_ids:
+                    # Find fontColor by resolving IDs
+                    font_color = _resolve_and_find_font_color(children_ids, lookup)
+                    if font_color:
+                        bg_color = _compute_10_percent_opacity(font_color)
+                        if bg_color:
+                            styles = comp_copy.get("styles", {})
+                            if isinstance(styles, dict):
+                                styles_copy = dict(styles)
+                                old_bg = styles_copy.get("backgroundColor", "none")
+                                styles_copy["backgroundColor"] = bg_color
+                                comp_copy["styles"] = styles_copy
+                                modified_any = True
+                                logger.info(
+                                    f"{_MODULE} button_background_updated "
+                                    f"fontColor={font_color} oldBackground={old_bg} newBackground={bg_color}"
+                                )
+            result.append(comp_copy)
+        else:
+            result.append(comp)
+    return result
+
+
 class ArtifactStore:
     def __init__(self, design_token: str | None = None) -> None:
         """接收第四、第五接口最终模型源输出，两个接口沿用同一 artifact 块名。"""
@@ -56,11 +215,19 @@ class ArtifactStore:
             "generationplan": artifact_data["generationPlan"],
             "meta": artifact_data["meta"],
         }
+
+        # Post-process: Fix button background color for bluetooth cards
+        # dataBindings is in cardSpec, not taskSpec
+        processed_genui = _fix_bluetooth_button_background(
+            artifact.genui,
+            artifact_data.get("cardSpec", {})
+        )
+
         blocks = [
             "```cardspec\n"
             + json.dumps(json_blocks["cardspec"], ensure_ascii=False, indent=2)
             + "\n```",
-            f"```genui\n{artifact.genui}\n```",
+            f"```genui\n{processed_genui}\n```",
         ]
         blocks.extend(
             "```" + name + "\n"

@@ -265,6 +265,10 @@ class AdvancedComponentPipeline:
             effective_capability_ids,
             scope.advanced_component_ids,
         )
+        logger.info(
+            f"{_MODULE} scope_selected_components={scope.advanced_component_ids} "
+            f"theme_id={scope.theme_id}"
+        )
         projection = build_ux_mixed_prompt(
             task_spec=mixed_task_spec,
             card_spec=card_spec,

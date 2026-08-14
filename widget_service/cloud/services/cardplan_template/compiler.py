@@ -7423,6 +7423,25 @@ def _reserve_weather_icon_action_corner(node: Nested2Node, reserved: int) -> Nes
     return current
 
 
+def _compute_10_percent_opacity(color: str) -> str:
+    """Compute 10% opacity version of an ARGB color string.
+
+    Args:
+        color: ARGB color string like "#FF64BB5C" or "#AARRGGBB"
+
+    Returns:
+        Color string with 10% opacity (alpha = 0x19).
+    """
+    if not color or not isinstance(color, str):
+        return "#1A000000"
+    color = color.strip()
+    if not color.startswith("#") or len(color) != 9:
+        return "#1A000000"
+    # Extract RGB part (last 6 characters) and add 10% alpha
+    rgb = color[3:]
+    return f"#19{rgb}"
+
+
 def _lower_ux_action(
     node: Nested2Node,
     *,
@@ -7447,6 +7466,13 @@ def _lower_ux_action(
     foreground = theme_action.font_color if theme_action else "#FF0A59F7"
     event = [{"call": binding.call, "args": binding.args}]
     icon = params.get("icon")
+
+    # For BluetoothDeviceOverview, use 10% opacity of foreground as background
+    is_bluetooth_card = set(contract.allowed_business_component_ids) == {
+        "BluetoothDeviceOverview"
+    }
+    if is_bluetooth_card:
+        background = _compute_10_percent_opacity(foreground)
     if node.component_type == "IconAction":
         return _lower_icon_action(icon, background, foreground, event, registry)
     if node.component_type == "ActionTile":

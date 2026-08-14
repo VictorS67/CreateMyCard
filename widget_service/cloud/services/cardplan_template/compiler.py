@@ -1392,19 +1392,37 @@ def _workout_countdown_overview(
                 "width": "matchParent",
                 "height": "matchParent",
                 "itemMargin": registry.ux_tokens["denseInnerGap"],
-                "justifyContent": "spaceBetween",
+                "justifyContent": "start",
                 "alignItems": "start",
                 "constraintSize": {"minWidth": 0, "minHeight": 0},
             },
         ),
         (
             _overview_header("运动倒计时", source_icon, registry),
-            _overview_value_row(
-                str(facts.countdown_days),
-                "天",
-                accent="#FFFFFFFF",
-                registry=registry,
-                hero=True,
+            Nested2Node(
+                "Column",
+                (
+                    "compact",
+                    {
+                        "width": "matchParent",
+                        "layoutWeight": 1,
+                        "justifyContent": "center",
+                        "alignItems": "center",
+                        "constraintSize": {"minWidth": 0, "minHeight": 0},
+                    },
+                ),
+                (
+                    _merge_node_options(
+                        _overview_value_row(
+                            str(facts.countdown_days),
+                            "天",
+                            accent="#FFFFFFFF",
+                            registry=registry,
+                            hero=True,
+                        ),
+                        {"justifyContent": "center"},
+                    ),
+                ),
             ),
         ),
     )

@@ -172,7 +172,7 @@ def test_terse_dsl_nested2_rejects_executable_or_unsupported_input(source):
 
 
 @pytest.mark.asyncio
-async def test_terse_dsl_nested2_generation_uses_local_prompt_and_converter(monkeypatch):
+async def test_terse_dsl_nested2_no_template_does_not_use_legacy_converter(monkeypatch):
     source = """
 Column("card",
   Text("静态天气", "title"),
@@ -253,13 +253,10 @@ Column("card",
         _model_failure_request()
     )
 
-    assert response.status == GenerationStatus.SUCCESS
-    assert response.artifactUrl == "https://artifact.test/nested2"
-    assert '"createSurface"' in saved_genui[0]
-    assert selected_conversion_profiles == ["terse-dsl-nested-2", "terse-dsl-nested-2"]
-    create_surface = json_module.loads(saved_genui[0].splitlines()[0])["createSurface"]
-    assert "width" not in create_surface
-    assert "height" not in create_surface
+    assert response.status == GenerationStatus.FAILED
+    assert response.errorCode == ErrorCode.A2UI_GENERATION_FAILED.value
+    assert saved_genui == []
+    assert selected_conversion_profiles == ["terse-dsl-nested-2"]
 
 
 def test_terse_dsl_nested2_prompt_builder_uses_terse_system_prompt():
@@ -284,7 +281,7 @@ def test_terse_dsl_nested2_prompt_builder_uses_terse_system_prompt():
 async def test_terse_dsl_nested2_accepts_dynamic_requests(monkeypatch):
     policies = []
 
-    async def generate_with_policy(_service, request, policy, **_kwargs):
+    async def route_terse(_host, request, policy, **_kwargs):
         policies.append(policy)
         return GenerateWidgetCardResponse(
             status=GenerationStatus.SUCCESS,
@@ -293,9 +290,8 @@ async def test_terse_dsl_nested2_accepts_dynamic_requests(monkeypatch):
         )
 
     monkeypatch.setattr(
-        WidgetGenerationService,
-        "_generate_widget_card_with_policy",
-        generate_with_policy,
+        "services.widget_generation_service.route_terse_nested2_generation",
+        route_terse,
     )
     dynamic_request = GenerateWidgetCardRequest(
         uid="test-user",
@@ -3604,7 +3600,24 @@ async def test_generation_routes_accept_each_configured_model_backend(
         captured["design_profile_id"] = policy.design_profile_id
         return sentinel
 
-    monkeypatch.setattr(service, "_generate_widget_card_with_policy", capture_route)
+    if generation_method == "generate_widget_card_terse_dsl_nested2":
+
+        async def capture_terse_route(
+            _host,
+            _request,
+            policy,
+            *,
+            before_model_call=None,
+        ):
+            assert before_model_call is None
+            return await capture_route(_request, policy)
+
+        monkeypatch.setattr(
+            "services.widget_generation_service.route_terse_nested2_generation",
+            capture_terse_route,
+        )
+    else:
+        monkeypatch.setattr(service, "_generate_widget_card_with_policy", capture_route)
 
     result = await getattr(service, generation_method)(_model_failure_request())
 
@@ -4571,7 +4584,7 @@ def _a2ui_genui_with_image(
                     "version": "v0.9",
                     "createSurface": {
                         "surfaceId": "card",
-                        "catalogId": "ohos.a2ui.extended.catalog",
+                        "catalogId": "ohos.a2ui.extended.catalog.form",
                     },
                 },
                 separators=(",", ":"),

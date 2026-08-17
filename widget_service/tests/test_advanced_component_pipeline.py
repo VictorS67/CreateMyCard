@@ -17,7 +17,7 @@ if str(CLOUD_ROOT) not in sys.path:
 import services.advanced_component_pipeline.pipeline as advanced_pipeline_module
 from api.schemas import GenerateWidgetCardRequest
 from config.config import get_settings
-from core.errors import GenerationStatus
+from core.errors import ErrorCode, GenerationStatus
 from custom.a2ui_model_client import A2UIModelClient
 from models.artifact import ArtifactMeta, WidgetArtifact
 from models.generation import EventAction, TaskSpec
@@ -39,7 +39,6 @@ from services.advanced_component_pipeline.content_selectors import (
 from services.advanced_component_pipeline.data_shape import extract_data_shape
 from services.advanced_component_pipeline.models import (
     ActionRef,
-    AdvancedPipelineOutput,
     AdvancedScopeBrief,
     BindingRef,
     SelectionConstraints,
@@ -3246,7 +3245,7 @@ def _template_task_spec():
 
 
 @pytest.mark.asyncio
-async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
+async def test_terse_endpoint_does_not_enter_legacy_advanced_pipeline(
     monkeypatch,
 ):
     saved_genui: list[str] = []
@@ -3254,34 +3253,7 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
     saved_task_specs: list[dict] = []
 
     async def new_mixed_entry(_pipeline, _task_spec, _model_client, *_args, **_kwargs):
-        source = (
-            'Template("card@1", {"title":"天气"}, SingleFocusLayout(Text("天气状态", "body")));'
-        )
-        compiled = convert_terse_dsl_nested2_to_a2ui(
-            'Column("card", Text("天气状态", "body"));',
-            size="2x2",
-            protocol_profile=A2UIProtocolRegistry.read_design_protocol_profile(
-                TERSE_DSL_NESTED2_PROFILE_ID
-            ),
-        )
-        return AdvancedPipelineOutput(
-            component_id="ux-advanced-component-mixed",
-            style_id="family-weather-care-blue",
-            source_dsl='Column("card", Text("天气状态", "body"));',
-            source_format="a2ui",
-            ui_brief=AdvancedScopeBrief(
-                themeId="family-weather-care-blue",
-                advancedComponentIds=("WeatherOverview",),
-            ),
-            invocation={},
-            planner_mode="llm",
-            mapper_mode="llm",
-            route="hybrid-template",
-            confidence_bypassed=True,
-            raw_output=source,
-            effective_output='Column("card", Text("天气状态", "body"));',
-            compiled_a2ui=compiled,
-        )
+        pytest.fail("strict Terse route must not call the legacy mixed pipeline")
 
     async def old_entry_must_not_run(*_args, **_kwargs):
         raise AssertionError("fifth interface must bypass the legacy generate entry")
@@ -3334,12 +3306,11 @@ async def test_terse_endpoint_runs_advanced_pipeline_end_to_end(
 
     response = await WidgetGenerationService().generate_widget_card_terse_dsl_nested2(request)
 
-    assert response.status == GenerationStatus.SUCCESS
-    assert response.artifactUrl == "https://artifact.test/advanced"
-    assert len(saved_genui[0].splitlines()) == 3
-    assert saved_design_tokens[0] is not None
-    assert saved_design_tokens[0].startswith('Column("card"')
-    assert "selectedTemplateId" not in saved_task_specs[0]
+    assert response.status == GenerationStatus.FAILED
+    assert response.errorCode == ErrorCode.A2UI_GENERATION_FAILED.value
+    assert saved_genui == []
+    assert saved_design_tokens == []
+    assert saved_task_specs == []
 
 
 @pytest.mark.asyncio

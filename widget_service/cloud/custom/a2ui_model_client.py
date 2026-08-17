@@ -482,7 +482,7 @@ class A2UIModelClient:
             # 修改 createSurface.catalogId
             create_surface = data.get("createSurface")
             if create_surface:
-                create_surface["catalogId"] = "ohos.a2ui.extended.catalog"
+                create_surface["catalogId"] = "ohos.a2ui.extended.catalog.form"
 
             # 修改 root 的宽高
             update_components = data.get("updateComponents")

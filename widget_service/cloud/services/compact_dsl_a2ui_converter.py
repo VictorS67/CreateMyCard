@@ -11,7 +11,7 @@ from typing import Any, Literal, TypeGuard
 
 ThemeMode = Literal["light", "dark"]
 
-_A2UI_EXTENDED_CATALOG_ID = "ohos.a2ui.extended.catalog"
+_A2UI_EXTENDED_CATALOG_ID = "ohos.a2ui.extended.catalog.form"
 _A2UI_ICON_BUTTON_LABEL = "\u200b"
 _COMPONENT_TYPES = frozenset(
     {
@@ -152,7 +152,7 @@ _STRING_PROPERTIES = frozenset(
     }
 )
 _FORBIDDEN_PROPERTIES = frozenset({"action", "event", "submit_form"})
-_FORBIDDEN_STRING_FRAGMENTS = ("{{", "$item", "$__dataModel")
+_FORBIDDEN_STRING_FRAGMENTS = ("$item", "$__dataModel")
 _LEGACY_TOKEN_PREFIXES = (
     "padding_level",
     "corner_radius_level",

@@ -654,22 +654,19 @@ def _business_component_line(
             "不得输出旧 ActivityOverview(...) 构造器。"
         )
     if component.name == "WorkoutOverview":
-        workout_templates = [
-            item for item in ("WorkoutOverview@1", "WorkoutCountdown@1") if item in templates
-        ]
-        if workout_templates:
+        if "WorkoutOverview@1" in templates:
             return (
                 common
-                + "; syntax="
-                + (
-                    'Template("WorkoutOverview@1","latest",params)'
-                    if "WorkoutOverview@1" in workout_templates
-                    else 'Template("WorkoutCountdown@1","countdown",params)'
-                )
-                + "; 只能使用 Prompt 实际下发的数据能力对应 Template。"
+                + '; syntax=Template("WorkoutOverview@1","latest",params); '
                 "params 只传 Variant 签名允许且语义匹配的 sourceIcon/caloriesIcon，缺失时使用 {}。"
                 "动作只由布局末尾持有；不得输出旧 WorkoutOverview(...) 构造器。"
             )
+    if component.name == "CountdownOverview" and "CountdownOverview@1" in templates:
+        return (
+            common + '; syntax=Template("CountdownOverview@1","countdown",{}); '
+            "只展示可信 countdownDays 与模板内置的通用倒计时标签；不得补造"
+            "事件名、目标日期、进度或运动语义，不得输出旧 WorkoutOverview(...) 构造器。"
+        )
     if component.name == "SleepOverview" and "SleepOverview@1" in templates:
         return (
             common + '; syntax=Template("SleepOverview@1",'
@@ -687,10 +684,11 @@ def _business_component_line(
     if component.name == "BluetoothDeviceOverview" and "BluetoothDeviceOverview@1" in templates:
         return (
             common + '; syntax=Template("BluetoothDeviceOverview@1",'
-            '"disconnected|disconnectedPhone|earbuds|leftEarbud|rightEarbud|earbudPair|earbudsFull|'
+            '"connection|disconnected|disconnectedPhone|earbuds|leftEarbud|rightEarbud|earbudPair|earbudsFull|'
             'earbudsDynamicWide|earbudsPhone|earbudsPhoneWide",params); '
             "未连接单业务使用 disconnected，与手机组合使用 disconnectedPhone；"
-            "单业务 2x2 使用实际字段最完整 Variant，2x4 统一使用 "
+            "单业务 2x2 仅查连接状态使用 connection；仅查充电盒电量或充电盒电量+"
+            "连接状态使用 earbuds；其余使用实际字段最完整 Variant。2x4 统一使用 "
             "earbudsDynamicWide；与手机组合的 2x2/2x4 分别使用 earbudsPhone/"
             "earbudsPhoneWide，模板会按可信左右耳/充电盒字段自动裁剪。params 只传 "
             "Variant 签名允许且语义匹配的 sourceIcon/"

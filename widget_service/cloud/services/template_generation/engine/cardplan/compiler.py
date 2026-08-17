@@ -27,6 +27,7 @@ from services.template_generation.engine.advanced.content_selectors import (
     activity_overview_variants,
     advanced_component_data_admission_is_relaxed,
     approved_schedule_focus_action_ids,
+    bluetooth_device_overview_template_focus,
     extract_activity_overview_facts,
     extract_app_usage_overview_facts,
     extract_battery_overview_facts,
@@ -955,6 +956,10 @@ def _validate_provider_template_state(
             expected = "earbudsPhone" if task_spec.size == "2x2" else "earbudsPhoneWide"
         elif task_spec.size == "2x4":
             expected = "earbudsDynamicWide"
+        elif bluetooth_device_overview_template_focus(task_spec.userQuery) == "connection":
+            expected = "connection"
+        elif bluetooth_device_overview_template_focus(task_spec.userQuery) == "case":
+            expected = "earbuds"
         elif facts.left_battery_level is not None and facts.right_battery_level is not None:
             expected = "earbudsFull" if facts.case_battery_level is not None else "earbudPair"
         elif facts.left_battery_level is not None:
@@ -2982,18 +2987,22 @@ def _expand_app_usage_overview_call(
     facts = extract_app_usage_overview_facts(task_spec.dataModelSchema)
     if facts is None:
         raise TerseDslNested2ConversionError(
-            "AppUsageOverview requires complete trusted single-app duration facts."
+            "AppUsageOverview requires trusted single-app duration facts."
         )
     parameters = call.values[0]
     app_icon = parameters.get("appIcon")
     title = _app_usage_title_row(facts, app_icon, registry)
     duration = _app_usage_duration_row(facts)
-    updated = _app_usage_text(
-        facts.updated_at,
-        "subtitle",
-        font_size=10,
-        font_weight=400,
-        font_color="#99000000",
+    updated = (
+        _app_usage_text(
+            facts.updated_at,
+            "subtitle",
+            font_size=10,
+            font_weight=400,
+            font_color="#99000000",
+        )
+        if facts.updated_at is not None
+        else None
     )
     if task_spec.size == "2x2":
         hero = Nested2Node(
@@ -3026,7 +3035,7 @@ def _expand_app_usage_overview_call(
                     "constraintSize": {"minWidth": 0, "minHeight": 0},
                 },
             ),
-            (title, hero, updated),
+            (title, hero, *((updated,) if updated is not None else ())),
         )
     duration_region = Nested2Node(
         "Column",
@@ -3059,22 +3068,26 @@ def _expand_app_usage_overview_call(
         ),
         (title, duration_region),
     )
-    support = Nested2Node(
-        "Column",
-        (
-            "compact",
-            {
-                "layoutWeight": 2,
-                "padding": 8,
-                "borderRadius": 12,
-                "backgroundColor": "#0D000000",
-                "justifyContent": "center",
-                "alignItems": "start",
-                "clip": True,
-                "constraintSize": {"minWidth": 0, "minHeight": 0},
-            },
-        ),
-        (updated,),
+    support = (
+        Nested2Node(
+            "Column",
+            (
+                "compact",
+                {
+                    "layoutWeight": 2,
+                    "padding": 8,
+                    "borderRadius": 12,
+                    "backgroundColor": "#0D000000",
+                    "justifyContent": "center",
+                    "alignItems": "start",
+                    "clip": True,
+                    "constraintSize": {"minWidth": 0, "minHeight": 0},
+                },
+            ),
+            (updated,),
+        )
+        if updated is not None
+        else None
     )
     return Nested2Node(
         "Row",
@@ -3091,7 +3104,7 @@ def _expand_app_usage_overview_call(
                 "constraintSize": {"minWidth": 0, "minHeight": 0},
             },
         ),
-        (hero, support),
+        (hero, *((support,) if support is not None else ())),
     )
 
 
@@ -3550,6 +3563,7 @@ def _resource_usage_text(
     font_weight: int,
     fill_width: bool = False,
     text_align: str | None = None,
+    font_color: str | None = None,
 ) -> Nested2Node:
     options: dict[str, Any] = {
         "fontSize": font_size,
@@ -3563,6 +3577,8 @@ def _resource_usage_text(
         options["width"] = "matchParent"
     if text_align is not None:
         options["textAlign"] = text_align
+    if font_color is not None:
+        options["fontColor"] = font_color
     return Nested2Node(
         "Text",
         (
@@ -5596,7 +5612,6 @@ _PROVIDER_TEMPLATE_DIRECT_VARIANTS = {
         "dailySummaryWide": "dailySummary",
     },
     "WorkoutOverview@1": {"latest": "latest"},
-    "WorkoutCountdown@1": {"countdown": "countdown"},
     "SleepOverview@1": {
         "duration": "duration",
         "durationDetailed": "duration",
@@ -5610,6 +5625,7 @@ _PROVIDER_TEMPLATE_DIRECT_VARIANTS = {
         "scheduleDetailedStatus": "schedule",
     },
     "BluetoothDeviceOverview@1": {
+        "connection": "earbuds",
         "disconnected": "earbuds",
         "disconnectedPhone": "earbuds",
         "earbuds": "earbuds",
@@ -6755,7 +6771,8 @@ def _inject_resource_battery_title(
         title,
         "compact-title",
         font_size=12,
-        font_weight=600,
+        font_weight=400,
+        font_color="#99182431",
     )
     body = _with_flex_weight(node, 1, axis="vertical")
     return Nested2Node(
@@ -8036,6 +8053,12 @@ def _lower_ux_action(
     theme_action = registry.require_theme(contract.theme_profile_id).action_style
     background = theme_action.background_color if theme_action else "#1A0A59F7"
     foreground = theme_action.font_color if theme_action else "#FF0A59F7"
+    background = _provider_layout_action_background(
+        contract,
+        registry,
+        foreground=foreground,
+        default=background,
+    )
     event = [{"call": binding.call, "args": binding.args}]
     icon = params.get("icon")
     if node.component_type == "IconAction":
@@ -8059,6 +8082,31 @@ def _lower_ux_action(
         event,
         registry,
     )
+
+
+def _provider_layout_action_background(
+    contract: HybridBodyContract,
+    registry: CardPlanRegistry,
+    *,
+    foreground: str,
+    default: str,
+) -> str:
+    """Resolve a single-business Provider Template Action background override."""
+    if len(_contract_ux_business_component_names(contract, registry)) != 1:
+        return default
+    styles = tuple(
+        definition.layout_action_style
+        for wire_id in contract.allowed_template_ids
+        if (definition := registry.templates.get(wire_id)) is not None
+        and definition.source_format == "cardtpl/1"
+        and definition.layout_action_style is not None
+    )
+    if len(styles) != 1:
+        return default
+    if not foreground.startswith("#") or len(foreground) != 9:
+        return "#1A000000"
+    alpha = int(255 * styles[0].background_opacity)
+    return f"#{alpha:02X}{foreground[-6:]}"
 
 
 def _lower_pill_action(

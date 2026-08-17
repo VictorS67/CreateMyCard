@@ -30,7 +30,7 @@ Column("compact", {
     maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 }
   }),
   Text(`电量 ${percentText}，${level}，${charging}`, "body", {
-    width: "matchParent", fontSize: 12, fontWeight: 400, fontColor: "#E6000000",
+    width: "matchParent", fontSize: 12, fontWeight: 400, fontColor: "#99000000",
     maxLines: 2, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 }
   }),
   Stack("overlay", {
@@ -105,7 +105,7 @@ Column("compact", {
 #Variant("normalPeer", { sizes: ["2x2", "2x4"], roles: ["peer"], requires: ["percent", "percentText", "charging", "level"] })
 Column("compact", {
   _advancedComponent: "BatteryOverview", width: "matchParent", height: "matchParent",
-  itemMargin: 2, justifyContent: "center", alignItems: "center", clip: true,
+  itemMargin: 2, justifyContent: "end", alignItems: "center", clip: true,
   constraintSize: { minWidth: 0, minHeight: 0 }
 },
   Stack("overlay", { width: 52, height: 52, alignContent: "center", flexShrink: 0 },
@@ -114,7 +114,7 @@ Column("compact", {
       backgroundColor: "#1A000000", width: 52, height: 52, strokeWidth: 6
     }),
     IfParam("batteryIcon",
-      Image(Asset("batteryIcon"), "icon", { width: 24, height: 24, objectFit: "contain", fillColor: "#99000000" })
+      Image(Asset("batteryIcon"), "icon", { width: 20, height: 20, objectFit: "contain", fillColor: "#99000000" })
     )
   ),
   Text(Bind("percentText"), "compact-title", {

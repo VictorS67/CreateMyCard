@@ -10,6 +10,7 @@ from typing import Any
 from app.logger import json_for_log, logger
 from models.generation import TaskSpec
 from services.template_generation.engine.advanced.content_selectors import (
+    bluetooth_device_overview_template_focus,
     extract_battery_overview_facts,
     extract_bluetooth_device_overview_facts,
 )
@@ -571,7 +572,9 @@ def _composition_rules(ux_layout_root: bool) -> tuple[str, ...]:
             'Action 只允许 PillAction({"actionId":"批准ID","icon":"可选批准素材"})、'
             'IconAction({"actionId":"批准ID","icon":"必填批准素材"}) 或 '
             'ActionTile({"actionId":"批准ID","icon":"可选批准素材"})。',
-            "2x2 的主 Action 优先 PillAction；天气、拨号等仅图标入口可用 IconAction；"
+            "2x2 的主 Action 通常使用 PillAction，但这是通用默认而非业务覆盖规则；"
+            "BatteryOverview 的省电动作在 size=2x2 时必须使用末尾唯一 IconAction，禁止 PillAction；"
+            "size=2x4 才允许该 Battery 动作使用 PillAction；天气、拨号等仅图标入口可用 IconAction；"
             "ActionTile 默认只用于 2x4，2x2 仅 ActionMatrixLayout 可用。"
             "禁止标准 Button、事件对象和 Action 局部 Template。",
         )
@@ -950,6 +953,11 @@ def _provider_variant_matches_trusted_state(
             return variant_name == expected
         if task_spec.size == "2x4":
             return variant_name == "earbudsDynamicWide"
+        focus = bluetooth_device_overview_template_focus(task_spec.userQuery)
+        if focus == "connection":
+            return variant_name == "connection"
+        if focus == "case":
+            return variant_name == "earbuds"
         has_left = facts.left_battery_level is not None
         has_right = facts.right_battery_level is not None
         has_case = facts.case_battery_level is not None

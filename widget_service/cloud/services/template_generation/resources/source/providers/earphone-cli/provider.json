@@ -16,7 +16,7 @@
     {
       "templateId": "BluetoothDeviceOverview@1",
       "entry": "templates/bluetooth-device-overview.cardtpl",
-      "digest": "sha256:2cab1e534714abb81fb35a2269bcba1403f6947c9bb6d43fb7225c14d4856cda"
+      "digest": "sha256:83865e685a44d571371cb30af223552b3cc419c8d41182fc67328f4cbc93a995"
     }
   ],
   "compatibility": {

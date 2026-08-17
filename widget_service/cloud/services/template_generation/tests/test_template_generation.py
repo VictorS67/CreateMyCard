@@ -6,9 +6,10 @@ import json
 from typing import Any
 
 import pytest
+
 from api.schemas import GenerateWidgetCardRequest
 from core.errors import GenerationStatus
-from models.generation import CandidateDataBinding, TaskSpec
+from models.generation import CandidateDataBinding, EventAction, TaskSpec
 from models.service import ArtifactSaveResult
 from services.artifact_store import ArtifactStore
 from services.generation_pipeline import (
@@ -34,11 +35,17 @@ from services.template_generation.engine.advanced.scope_planner import (
     TemplateRouteNotApplicable,
     validate_template_request_coverage,
 )
+from services.template_generation.engine.cardplan.compiler import (
+    _inject_resource_battery_title,
+    _provider_layout_action_background,
+)
+from services.template_generation.engine.cardplan.models import HybridBodyContract, HybridLimits
 from services.template_generation.engine.cardplan.registry import get_cardplan_registry
 from services.template_generation.engine.pipeline import (
     TemplateGenerationError,
     generate_template_a2ui,
 )
+from services.template_generation.engine.terse_dsl_nested2_converter import Nested2Node
 from services.widget_generation_service import WidgetGenerationService
 
 _WEATHER_BODY = (
@@ -62,15 +69,133 @@ def test_all_provider_templates_are_loaded_from_the_isolated_directory():
         "AppUsageOverview@1",
         "BatteryOverview@1",
         "BluetoothDeviceOverview@1",
+        "CountdownOverview@1",
         "DateOverview@1",
         "HeartRateOverview@1",
         "ResourceUsageOverview@1",
         "ScheduleOverview@1",
         "SleepOverview@1",
         "WeatherOverview@1",
-        "WorkoutCountdown@1",
         "WorkoutOverview@1",
     }
+
+
+def _template_node_options(node: Any) -> dict[str, Any]:
+    value = node.values[-1]
+    assert value.kind == "object"
+    return {
+        key: item.value
+        for key, item in value.properties.items()
+        if item.kind == "literal"
+    }
+
+
+def _template_nodes(node: Any, component: str) -> list[Any]:
+    matches = [node] if node.component == component else []
+    for child in node.children:
+        matches.extend(_template_nodes(child, component))
+    return matches
+
+
+def test_pr6_bluetooth_action_background_is_owned_by_cardtpl_metadata():
+    registry = get_cardplan_registry()
+    definition = registry.require_template("BluetoothDeviceOverview@1")
+    assert definition.layout_action_style is not None
+    assert definition.layout_action_style.background_opacity == 0.1
+    contract = HybridBodyContract(
+        theme_profile_id="audio-product-neutral-violet",
+        allowed_components=(),
+        allowed_design_tokens=(),
+        allowed_layout_tokens=(),
+        allowed_template_ids=("BluetoothDeviceOverview@1",),
+        required_template_groups=(("BluetoothDeviceOverview@1",),),
+        allowed_asset_sources=(),
+        trusted_literals=(),
+        trusted_numbers=(),
+        required_literals=(),
+        protected_literals=(),
+        limits=HybridLimits(
+            max_raw_components=8,
+            max_expanded_components=64,
+            max_nesting_depth=8,
+            vertical_budget_vp=128,
+        ),
+    )
+
+    assert _provider_layout_action_background(
+        contract,
+        registry,
+        foreground="#FF64BB5C",
+        default="#FFFFFFFF",
+    ) == "#1964BB5C"
+
+
+def test_pr7_visual_fixes_are_encoded_in_provider_cardtpl_variants():
+    registry = get_cardplan_registry()
+
+    countdown = registry.require_variant("CountdownOverview@1", "countdown").root
+    assert _template_node_options(countdown)["justifyContent"] == "start"
+    assert _template_node_options(countdown.children[1])["justifyContent"] == "center"
+    assert _template_node_options(countdown.children[1].children[0])["justifyContent"] == "center"
+
+    app_usage = registry.require_variant("AppUsageOverview@1", "singleApp").root
+    assert _template_node_options(app_usage)["justifyContent"] == "start"
+    duration_region = app_usage.children[1]
+    assert _template_node_options(duration_region)["justifyContent"] == "end"
+    assert "itemMargin" not in _template_node_options(duration_region)
+
+    battery = registry.require_variant("BatteryOverview@1", "normal").root
+    assert _template_node_options(battery.children[1])["fontColor"] == "#99000000"
+    battery_peer = registry.require_variant("BatteryOverview@1", "normalPeer").root
+    assert _template_node_options(battery_peer)["justifyContent"] == "end"
+    assert _template_node_options(_template_nodes(battery_peer, "Image")[0])["width"] == 20
+
+    resource_peer = registry.require_variant(
+        "ResourceUsageOverview@1",
+        "memoryPeer",
+    ).root
+    assert _template_node_options(resource_peer)["justifyContent"] == "end"
+    assert _template_node_options(_template_nodes(resource_peer, "Image")[0])["width"] == 20
+    percent_row = resource_peer.children[1]
+    assert _template_node_options(percent_row.children[0])["fontWeight"] == 700
+    assert not _template_nodes(resource_peer.children[0], "Text")
+
+
+def test_pr7_resource_battery_outer_title_keeps_the_reviewed_subtext_style():
+    registry = get_cardplan_registry()
+    contract = HybridBodyContract(
+        theme_profile_id="device-clean-blue-teal",
+        allowed_components=(),
+        allowed_design_tokens=(),
+        allowed_layout_tokens=(),
+        allowed_template_ids=("BatteryOverview@1", "ResourceUsageOverview@1"),
+        required_template_groups=(
+            ("BatteryOverview@1",),
+            ("ResourceUsageOverview@1",),
+        ),
+        allowed_asset_sources=(),
+        trusted_literals=("设备资源",),
+        trusted_numbers=(),
+        required_literals=(),
+        protected_literals=(),
+        limits=HybridLimits(
+            max_raw_components=8,
+            max_expanded_components=64,
+            max_nesting_depth=8,
+            vertical_budget_vp=128,
+        ),
+    )
+    result = _inject_resource_battery_title(
+        Nested2Node("Row", ("between", {}), ()),
+        "设备资源",
+        contract,
+        registry,
+        size="2x2",
+    )
+
+    title_options = result.children[0].values[2]
+    assert title_options["fontWeight"] == 400
+    assert title_options["fontColor"] == "#99182431"
 
 
 @pytest.mark.asyncio
@@ -84,7 +209,7 @@ async def test_derived_parameter_source_field_is_counted_as_template_coverage():
 
     registry = get_cardplan_registry()
     task_spec = TaskSpec(
-        userQuery="看看抖音今天用了多久",
+        userQuery="帮我做个应用时长卡片，可以查看抖音应用用了多久",
         size="2x2",
         eventCandidates=[],
         assetCandidates=[],
@@ -94,21 +219,28 @@ async def test_derived_parameter_source_field_is_counted_as_template_coverage():
                     "appUsage": {
                         "appName": field("示例应用"),
                         "durationText": field("1小时20分钟"),
-                    },
-                    "updatedAt": field("今天 12:00"),
+                    }
                 }
             }
         },
     )
     task_spec = apply_content_selectors(task_spec, {"GetAppUsageDuration"})
     assert app_usage_overview_is_eligible(task_spec, {"GetAppUsageDuration"})
+    for query in (
+        "帮我做个防沉迷卡片，看看抖音应用今天用了多久",
+        "帮我做个应用时长卡片，可以查看抖音应用用了多久",
+        "帮我做个应用时长卡片，可以查看抖音今天用了多久",
+    ):
+        assert app_usage_overview_is_eligible(
+            task_spec.model_copy(update={"userQuery": query}),
+            {"GetAppUsageDuration"},
+        )
     binding = CandidateDataBinding(
         capabilityId="GetAppUsageDuration",
         writeResultTo="/data/appUsageStats",
         candidateOutputFields=[
             "/appUsage/appName",
             "/appUsage/durationText",
-            "/updatedAt",
         ],
     )
     scope = AdvancedScopeBrief(
@@ -165,6 +297,7 @@ async def test_derived_parameter_source_field_is_counted_as_template_coverage():
         ["durationPrimaryValueText"]["sampleValue"]
         == "1"
     )
+    assert "/updatedAt" not in output.a2ui
 
 
 def test_placeholder_app_name_still_rejects_an_obvious_multi_app_query():
@@ -172,6 +305,237 @@ def test_placeholder_app_name_still_rejects_an_obvious_multi_app_query():
         "看看抖音和微信今天用了多久",
         "示例应用",
     )
+
+
+def _provider_field(value: Any, field_type: str) -> dict[str, Any]:
+    return {
+        "type": field_type,
+        "description": "trusted provider field",
+        "sampleValue": value,
+    }
+
+
+class _FixedTemplateModel:
+    def __init__(
+        self,
+        *,
+        theme_id: str,
+        component_id: str,
+        capability_id: str,
+        required_fields: tuple[str, ...],
+        body: str,
+    ) -> None:
+        self.theme_id = theme_id
+        self.component_id = component_id
+        self.capability_id = capability_id
+        self.required_fields = required_fields
+        self.body = body
+
+    async def generate_json(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "routeVersion": "template-route-decision/2",
+            "templateUsable": True,
+            "themeId": self.theme_id,
+            "advancedComponentIds": [self.component_id],
+            "requiredOutputFieldsByCapability": {
+                self.capability_id: list(self.required_fields),
+            },
+        }
+
+    async def generate(self, *_args: Any, **_kwargs: Any) -> str:
+        return self.body
+
+
+def _bluetooth_task(query: str) -> TaskSpec:
+    return TaskSpec(
+        userQuery=query,
+        size="2x2",
+        eventCandidates=[],
+        assetCandidates=[],
+        dataModelSchema={
+            "data": {
+                "earphone": {
+                    "isConnected": _provider_field(True, "boolean"),
+                    "earphoneName": _provider_field("示例耳机", "string"),
+                    "batteryLevel": _provider_field(80, "integer"),
+                    "leftBatteryLevel": _provider_field(76, "integer"),
+                    "rightBatteryLevel": _provider_field(78, "integer"),
+                }
+            }
+        },
+    )
+
+
+def _bluetooth_card_spec() -> dict[str, Any]:
+    return {
+        "title": "耳机",
+        "description": "耳机连接与电量",
+        "suggestSize": "2x2",
+        "dataBindings": [
+            {
+                "capabilityId": "GetEarphoneInfo",
+                "arguments": {},
+                "writeResultTo": "/data/earphone",
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "required_fields", "variant", "expected_path"),
+    [
+        (
+            "看一下耳机的连接状态是否为已连接",
+            ("/isConnected",),
+            "connection",
+            "isConnected",
+        ),
+        (
+            "看看我的蓝牙耳机连上没有，用电量环显示耳机盒还剩多少电",
+            ("/isConnected", "/batteryLevel"),
+            "earbuds",
+            "batteryLevel",
+        ),
+    ],
+)
+async def test_bluetooth_connection_and_case_queries_have_honest_template_coverage(
+    query: str,
+    required_fields: tuple[str, ...],
+    variant: str,
+    expected_path: str,
+):
+    binding = CandidateDataBinding(
+        capabilityId="GetEarphoneInfo",
+        writeResultTo="/data/earphone",
+        candidateOutputFields=[
+            "/isConnected",
+            "/earphoneName",
+            "/batteryLevel",
+            "/leftBatteryLevel",
+            "/rightBatteryLevel",
+        ],
+    )
+    model = _FixedTemplateModel(
+        theme_id="audio-product-neutral-violet",
+        component_id="BluetoothDeviceOverview",
+        capability_id="GetEarphoneInfo",
+        required_fields=required_fields,
+        body=(
+            'SingleFocusLayout(Template("BluetoothDeviceOverview@1","'
+            + variant
+            + '",{}));'
+        ),
+    )
+
+    output = await generate_template_a2ui(
+        _bluetooth_task(query),
+        _bluetooth_card_spec(),
+        (binding,),
+        model,
+    )
+
+    assert output.template_ids == ("BluetoothDeviceOverview@1",)
+    assert "isConnected" in output.a2ui
+    assert expected_path in output.a2ui
+    assert "已连接" in output.a2ui and "未连接" in output.a2ui
+
+
+@pytest.mark.asyncio
+async def test_bluetooth_layout_action_uses_cardtpl_foreground_opacity():
+    binding = CandidateDataBinding(
+        capabilityId="GetEarphoneInfo",
+        writeResultTo="/data/earphone",
+        candidateOutputFields=[
+            "/isConnected",
+            "/earphoneName",
+            "/batteryLevel",
+            "/leftBatteryLevel",
+            "/rightBatteryLevel",
+        ],
+    )
+    task_spec = _bluetooth_task(
+        "看看蓝牙耳机充电盒电量并打开每日推荐",
+    ).model_copy(
+        update={
+            "eventCandidates": [
+                EventAction(
+                    id="event.open.music.daily",
+                    displayLabel="每日推荐",
+                    call="clickToIntent",
+                    args={"intentName": "event.open.music.daily"},
+                )
+            ]
+        }
+    )
+    model = _FixedTemplateModel(
+        theme_id="audio-product-neutral-violet",
+        component_id="BluetoothDeviceOverview",
+        capability_id="GetEarphoneInfo",
+        required_fields=("/isConnected", "/batteryLevel"),
+        body=(
+            'HeroActionLayout(Template("BluetoothDeviceOverview@1","earbuds",{}),'
+            'PillAction({"actionId":"event.open.music.daily"}));'
+        ),
+    )
+
+    output = await generate_template_a2ui(
+        task_spec,
+        _bluetooth_card_spec(),
+        (binding,),
+        model,
+    )
+
+    assert "#1964BB5C" in output.a2ui
+
+
+@pytest.mark.asyncio
+async def test_generic_countdown_query_uses_countdown_overview_without_workout_semantics():
+    task_spec = TaskSpec(
+        userQuery="做一张日程倒数卡片，我想看看高考还剩下多少天",
+        size="2x2",
+        eventCandidates=[],
+        assetCandidates=[],
+        dataModelSchema={
+            "data": {
+                "countdown": {
+                    "countdownDays": _provider_field(294, "integer"),
+                }
+            }
+        },
+    )
+    card_spec = {
+        "title": "高考倒计时",
+        "description": "高考剩余天数",
+        "suggestSize": "2x2",
+        "dataBindings": [
+            {
+                "capabilityId": "GetCountdownDays",
+                "arguments": {"targetDate": "2027-06-07"},
+                "writeResultTo": "/data/countdown",
+            }
+        ],
+    }
+    binding = CandidateDataBinding(
+        capabilityId="GetCountdownDays",
+        arguments={"targetDate": "2027-06-07"},
+        writeResultTo="/data/countdown",
+        candidateOutputFields=["/countdownDays"],
+    )
+    model = _FixedTemplateModel(
+        theme_id="meeting-paper-neutral",
+        component_id="CountdownOverview",
+        capability_id="GetCountdownDays",
+        required_fields=("/countdownDays",),
+        body='SingleFocusLayout(Template("CountdownOverview@1","countdown",{}));',
+    )
+
+    output = await generate_template_a2ui(task_spec, card_spec, (binding,), model)
+
+    assert output.template_ids == ("CountdownOverview@1",)
+    assert "countdownDays" in output.a2ui
+    assert "倒计时" in output.a2ui
+    assert "运动倒计时" not in output.a2ui
 
 
 class WeatherTemplateModel:

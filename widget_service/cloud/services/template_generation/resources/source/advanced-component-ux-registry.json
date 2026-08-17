@@ -352,7 +352,7 @@
     {
       "name": "AppUsageOverview",
       "domainId": "app-usage",
-      "description": "由可信 TerseDSL 构造器展开的单应用今日使用时长。仅当 GetAppUsageDuration 可用、用户明确指定一个应用并请求当日使用时长、同一可信数据树中的 appName/durationText/updatedAt 均为非空 string，且 durationText 可按小时/分钟无损解析时可选；0分钟合法，纯秒或含秒不可选。当前只启用 singleApp；总屏幕时间、多应用、排行、每日限额、超限、剩余时长、比例/进度、趋势/历史和分类汇总均不可选，不画进度条。2x2/2x4 的小时和分钟必须位于同一 Row。管控动作仅使用语义闭环的 event.open.settings.parentControl；应用图标和动作图标只从本轮 TaskSpec 素材选择，缺失时省略。与 SystemModeOverview 组合时必须同时存在可信模式状态，当前无可信 SystemMode 数据时禁止组合和占位文案。",
+      "description": "由 GetAppUsageDuration Provider CardTemplate 展开的单应用今日使用时长。用户需明确指定一个应用并请求使用时长，当日口径由 Provider 能力定义；同一可信数据树中的 appName/durationText 均为非空 string，且 durationText 可按小时/分钟无损解析时可选。updatedAt 可选，存在时展示，用户明确请求更新时间时才必须提供。0分钟合法，纯秒或含秒不可选。当前只启用 singleApp；总屏幕时间、多应用、排行、每日限额、超限、剩余时长、比例/进度、趋势/历史和分类汇总均不可选，不画进度条。2x2/2x4 的小时和分钟必须位于同一 Row。管控动作仅使用语义闭环的 event.open.settings.parentControl；应用图标和动作图标只从本轮 TaskSpec 素材选择，缺失时省略。与 SystemModeOverview 组合时必须同时存在可信模式状态，当前无可信 SystemMode 数据时禁止组合和占位文案。",
       "variants": ["singleApp", "dailyLimit", "overLimit", "topApps"],
       "supportedCardSizes": ["2x2", "2x4"],
       "minRegion": "compact",
@@ -386,8 +386,8 @@
     {
       "name": "WorkoutOverview",
       "domainId": "workout",
-      "description": "由可信 TerseDSL 构造器展开的最近运动或纯剩余天数倒计时。latest 要求运动类型、时长和热量三项完整，暂无运动为空态；countdownDays 为非负整数且 0 有效。planned/ongoing、实时状态、距离、配速、轨迹、心率区间、赛事名、训练计划、总里程和完成率当前禁用。无分母时不画进度；动作仅使用批准的运动健康锻炼入口。",
-      "variants": ["planned", "ongoing", "latest", "countdown"],
+      "description": "由 GetHealthAndSportSummary Provider CardTemplate 展开的最近运动概览。latest 要求运动类型、时长和热量三项完整，暂无运动为空态。planned/ongoing、实时状态、距离、配速、轨迹、心率区间、赛事名、训练计划、总里程和完成率当前禁用。动作仅使用批准的运动健康锻炼入口。",
+      "variants": ["planned", "ongoing", "latest"],
       "supportedCardSizes": ["2x2", "2x4"],
       "minRegion": "compact",
       "roles": ["hero"],
@@ -395,10 +395,27 @@
       "supportedLayouts": ["SingleFocusLayout", "HeroActionLayout", "HeroSupportLayout", "HeroSupportActionLayout"],
       "supportsAction": true,
       "paletteScenes": ["generic", "sport.action"],
-      "detectionTerms": ["workout", "training", "run", "运动", "训练", "跑步", "健身", "倒计时"],
-      "dataCapabilityIds": ["GetHealthAndSportSummary", "GetCountdownDays"],
-      "enabledVariantsByCapability": {"GetHealthAndSportSummary": ["latest"], "GetCountdownDays": ["countdown"]},
-      "localTemplateIds": ["WorkoutOverview@1", "WorkoutCountdown@1"]
+      "detectionTerms": ["workout", "training", "run", "运动", "训练", "跑步", "健身"],
+      "dataCapabilityIds": ["GetHealthAndSportSummary"],
+      "enabledVariantsByCapability": {"GetHealthAndSportSummary": ["latest"]},
+      "localTemplateIds": ["WorkoutOverview@1"]
+    },
+    {
+      "name": "CountdownOverview",
+      "domainId": "countdown",
+      "description": "由 GetCountdownDays Provider CardTemplate 展开的通用事件倒计时。仅消费非负整数 countdownDays，0 天有效；可表达高考、考试、节日、纪念日、旅行或赛事等通用剩余天数，不补造事件名、目标日期或进度。",
+      "variants": ["countdown"],
+      "supportedCardSizes": ["2x2", "2x4"],
+      "minRegion": "compact",
+      "roles": ["hero"],
+      "maxItemsBySize": {"2x2": 1, "2x4": 1},
+      "supportedLayouts": ["SingleFocusLayout"],
+      "supportsAction": false,
+      "paletteScenes": ["generic", "office.schedule"],
+      "detectionTerms": ["countdown", "days until", "remaining days", "倒计时", "倒数", "还剩", "剩余天数", "还有几天", "高考"],
+      "dataCapabilityIds": ["GetCountdownDays"],
+      "enabledVariantsByCapability": {"GetCountdownDays": ["countdown"]},
+      "localTemplateIds": ["CountdownOverview@1"]
     },
     {
       "name": "HeartRateOverview",

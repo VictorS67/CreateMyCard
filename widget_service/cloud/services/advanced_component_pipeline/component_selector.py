@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+from app.logger import json_for_log, logger
+
 from .component_registry import component_specs
 from .models import CandidateScore, ComponentSelection, DataShape, SelectionConstraints, UIBrief
 
@@ -147,7 +149,28 @@ def select_component(
             )
         )
     candidates.sort(key=lambda item: (-item.score, item.component_id))
+    top_candidates = [
+        {
+            "id": item.component_id,
+            "score": item.score,
+            "penalties": item.penalties[:4],
+        }
+        for item in candidates[:5]
+    ]
+    logger.info(
+        "[Advanced Component Selector] candidates_scored "
+        f"size={constraints.size} field_count={len(data_shape.fields)} "
+        f"metric_count={data_shape.metric_count} duration_count={data_shape.duration_count} "
+        f"action_count={constraints.action_count} asset_count={constraints.asset_count} "
+        f"domain={brief.domain} scenario={brief.scenario} layout={brief.layout_archetype} "
+        f"top={json_for_log(top_candidates)}"
+    )
     if not candidates or candidates[0].score < 1.0:
+        logger.warning(
+            "[Advanced Component Selector] no_component_selected "
+            f"candidate_count={len(candidates)} "
+            f"best_score={candidates[0].score if candidates else 'none'}"
+        )
         return None
     margin = candidates[0].score - (candidates[1].score if len(candidates) > 1 else 0.0)
     confidence = 1.0 / (1.0 + math.exp(-margin / 2.5))

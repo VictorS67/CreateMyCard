@@ -222,6 +222,15 @@ class AdvancedComponentPipeline:
         )
         task_spec = apply_content_selectors(task_spec, effective_capability_ids)
         data_shape = extract_data_shape(task_spec)
+        logger.info(
+            f"{_MODULE} input_normalized size={task_spec.size} "
+            f"query_chars={len(task_spec.userQuery)} "
+            f"candidate_capability_count={len(available_capability_ids or ())} "
+            f"effective_capability_ids={json_for_log(effective_capability_ids)} "
+            f"field_count={len(data_shape.fields)} metric_count={data_shape.metric_count} "
+            f"duration_count={data_shape.duration_count} percentage_count={data_shape.percentage_count} "
+            f"action_count={len(task_spec.eventCandidates)} asset_count={len(task_spec.assetCandidates)}"
+        )
 
         async def generate_json(
             prompt: list[dict[str, str]],
@@ -233,8 +242,16 @@ class AdvancedComponentPipeline:
                 f"data_admission_bypass={str(data_admission_bypass).lower()}"
             )
             response = await model_client.generate_json(prompt, phase=phase)
+            if not isinstance(response, dict):
+                raise ValueError(
+                    "structured model response must be an object, "
+                    f"got {type(response).__name__}"
+                )
             logger.info(
-                f"{_MODULE} model_response_received phase={phase} field_count={len(response)}"
+                f"{_MODULE} model_response_received phase={phase} field_count={len(response)} "
+                f"theme_id={json_for_log(response.get('themeId'))} "
+                "advanced_component_ids="
+                f"{json_for_log(response.get('advancedComponentIds'))}"
             )
             return response
 
@@ -260,6 +277,11 @@ class AdvancedComponentPipeline:
                 available_capability_ids,
             )
             logger.warning(f"{_MODULE} advanced_scope_fallback exception_type={type(exc).__name__}")
+        logger.info(
+            f"{_MODULE} advanced_scope_resolved mode={planner_mode} "
+            f"theme_id={scope.theme_id} "
+            f"component_ids={json_for_log(scope.advanced_component_ids)}"
+        )
         mixed_task_spec = project_content_component_facts(
             task_spec,
             effective_capability_ids,
@@ -471,6 +493,11 @@ class AdvancedComponentPipeline:
                     f"prompt_chars={sum(len(item['content']) for item in prompt)}"
                 )
             response = await model_client.generate_json(prompt, phase=phase)
+            if not isinstance(response, dict):
+                raise ValueError(
+                    "structured model response must be an object, "
+                    f"got {type(response).__name__}"
+                )
             logger.info(
                 f"{_MODULE} model_response_received phase={phase} field_count={len(response)}"
             )
@@ -622,6 +649,13 @@ class AdvancedComponentPipeline:
             )
 
         if selection is None:
+            logger.warning(
+                f"{_MODULE} no_presentable_template "
+                f"reason=component_selection_none size={task_spec.size} "
+                f"domain={ui_brief.domain} scenario={ui_brief.scenario} "
+                f"layout={ui_brief.layout_archetype} "
+                f"template_ids={json_for_log(ui_brief.local_template_ids)}"
+            )
             return None
 
         style_id, _tokens = select_style(ui_brief)
@@ -648,6 +682,10 @@ class AdvancedComponentPipeline:
                 logger.warning(
                     f"{_MODULE} invocation_fallback_failed "
                     f"exception_type={type(exc).__name__} fallback=terse"
+                )
+                logger.warning(
+                    f"{_MODULE} no_presentable_template "
+                    f"reason=invocation_mapping_failed component_id={selection.component_id}"
                 )
                 return None
             logger.warning(f"{_MODULE} invocation_fallback exception_type={type(exc).__name__}")

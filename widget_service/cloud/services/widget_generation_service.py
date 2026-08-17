@@ -666,6 +666,15 @@ class WidgetGenerationService:
                 f"template_call_count={advanced_output.template_call_count} "
                 f"expanded_component_count={advanced_output.expanded_component_count}"
             )
+        else:
+            logger.warning(
+                f"{_MODULE} advanced_route_empty "
+                f"size={task_spec.size} query_chars={len(task_spec.userQuery)} "
+                f"data_schema_root_count={len(task_spec.dataModelSchema)} "
+                f"event_count={len(task_spec.eventCandidates)} "
+                f"asset_count={len(task_spec.assetCandidates)} "
+                "reason=advanced_pipeline_returned_none"
+            )
         advanced_source_format = (
             getattr(advanced_output, "source_format", "terse")
             if advanced_output is not None

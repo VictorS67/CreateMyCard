@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.logger import json_for_log, logger
 from models.generation import TaskSpec, WidgetSize
 from services.cardplan_template.registry import CardPlanRegistry
 
@@ -62,7 +63,18 @@ def build_advanced_scope_prompt(
     )
     component_candidates = _component_candidates(task_spec, data_shape, registry, effective_ids)
     if not component_candidates:
+        logger.warning(
+            "[Advanced Scope Planner] no_provider_backed_candidates "
+            f"size={task_spec.size} query_chars={len(task_spec.userQuery)} "
+            f"effective_capability_ids={json_for_log(effective_ids)} "
+            f"field_count={len(data_shape.fields)}"
+        )
         raise ValueError("no provider-backed UX Business Component candidate")
+    logger.info(
+        "[Advanced Scope Planner] candidates_built "
+        f"count={len(component_candidates)} "
+        f"ids={json_for_log([item.name for item in component_candidates])}"
+    )
     candidate_ids = {item.name for item in component_candidates}
     admission_relaxed = advanced_component_data_admission_is_bypassed()
     user_payload = {

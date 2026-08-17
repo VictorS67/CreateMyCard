@@ -1295,8 +1295,22 @@ _APP_USAGE_CONTROL_QUERY_TERMS = (
     "管控时间",
     "管控使用时间",
     "设置使用时长",
+    "设置限制",
+    "限制设置",
+    "设限时间",
+    "进入健康使用",
     "家长控制",
     "健康使用app",
+)
+_APP_USAGE_PLACEHOLDER_NAMES = frozenset(
+    {
+        "app",
+        "application",
+        "exampleapp",
+        "sampleapp",
+        "应用",
+        "示例应用",
+    }
 )
 
 
@@ -2143,7 +2157,9 @@ def app_usage_overview_query_is_supported(query: str, app_name: str) -> bool:
     if unsupported or not requests_today or not requests_duration:
         return False
     if not normalized_app or normalized_app not in compact:
-        return False
+        if normalized_app not in _APP_USAGE_PLACEHOLDER_NAMES:
+            return False
+        return not _query_names_multiple_apps_without_reference(compact)
     return not _query_names_multiple_apps(compact, normalized_app)
 
 
@@ -2169,6 +2185,17 @@ def _query_names_multiple_apps(compact_query: str, compact_app_name: str) -> boo
     backward = rf"(?:今天|今日|today)[^，,。；;]{{0,20}}(?:和|与|及|、|,|，){escaped}"
     return re.search(forward, compact_query) is not None or re.search(
         backward,
+        compact_query,
+    ) is not None
+
+
+def _query_names_multiple_apps_without_reference(compact_query: str) -> bool:
+    """Reject an obvious app list when the Provider schema only has a placeholder name."""
+    duration = r"(?:使用时长|使用时间|用了多久|用多久|使用多久|usagetime|usageduration)"
+    chinese = rf"[^，,。；;]{{1,20}}(?:和|与|及|、)[^，,。；;]{{1,20}}{duration}"
+    english = rf"[^,.;]{{1,20}}\band\b[^,.;]{{1,20}}{duration}"
+    return re.search(chinese, compact_query) is not None or re.search(
+        english,
         compact_query,
     ) is not None
 

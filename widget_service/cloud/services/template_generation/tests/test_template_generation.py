@@ -25,6 +25,8 @@ from services.template_generation import (
     route_legacy_python_terse_generation,
 )
 from services.template_generation.engine.advanced.content_selectors import (
+    app_usage_overview_is_eligible,
+    app_usage_overview_query_is_supported,
     apply_content_selectors,
 )
 from services.template_generation.engine.advanced.models import AdvancedScopeBrief
@@ -71,7 +73,8 @@ def test_all_provider_templates_are_loaded_from_the_isolated_directory():
     }
 
 
-def test_derived_parameter_source_field_is_counted_as_template_coverage():
+@pytest.mark.asyncio
+async def test_derived_parameter_source_field_is_counted_as_template_coverage():
     def field(value: str) -> dict[str, Any]:
         return {
             "type": "string",
@@ -89,7 +92,7 @@ def test_derived_parameter_source_field_is_counted_as_template_coverage():
             "data": {
                 "appUsageStats": {
                     "appUsage": {
-                        "appName": field("抖音"),
+                        "appName": field("示例应用"),
                         "durationText": field("1小时20分钟"),
                     },
                     "updatedAt": field("今天 12:00"),
@@ -98,6 +101,7 @@ def test_derived_parameter_source_field_is_counted_as_template_coverage():
         },
     )
     task_spec = apply_content_selectors(task_spec, {"GetAppUsageDuration"})
+    assert app_usage_overview_is_eligible(task_spec, {"GetAppUsageDuration"})
     binding = CandidateDataBinding(
         capabilityId="GetAppUsageDuration",
         writeResultTo="/data/appUsageStats",
@@ -131,6 +135,42 @@ def test_derived_parameter_source_field_is_counted_as_template_coverage():
         (binding,),
         {"GetAppUsageDuration": ("/appUsage/durationText",)},
         card_spec,
+    )
+
+    class AppUsageTemplateModel:
+        async def generate_json(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "routeVersion": "template-route-decision/2",
+                "templateUsable": True,
+                "themeId": "digital-wellbeing-neutral-dark",
+                "advancedComponentIds": ["AppUsageOverview"],
+                "requiredOutputFieldsByCapability": {
+                    "GetAppUsageDuration": ["/appUsage/durationText"],
+                },
+            }
+
+        async def generate(self, *_args: Any, **_kwargs: Any) -> str:
+            return 'SingleFocusLayout(Template("AppUsageOverview@1","singleApp",{}));'
+
+    output = await generate_template_a2ui(
+        task_spec,
+        card_spec,
+        (binding,),
+        AppUsageTemplateModel(),
+    )
+    projected_data = output.projected_task_spec.dataModelSchema["data"]
+    assert "AppUsageOverview" not in projected_data
+    assert (
+        projected_data["appUsageStats"]["_templateProjection"]["AppUsageOverview"]
+        ["durationPrimaryValueText"]["sampleValue"]
+        == "1"
+    )
+
+
+def test_placeholder_app_name_still_rejects_an_obvious_multi_app_query():
+    assert not app_usage_overview_query_is_supported(
+        "看看抖音和微信今天用了多久",
+        "示例应用",
     )
 
 

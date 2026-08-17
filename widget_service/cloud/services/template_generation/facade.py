@@ -78,6 +78,7 @@ async def route_compact_generation(
         except (TemplateArchiveError, TemplateGenerationError) as exc:
             logger.error(
                 f"{_MODULE} selected_route_failed exception_type={type(exc).__name__} "
+                f"detail={json_for_log(str(exc))} "
                 "fallback=disabled"
             )
             return GenerateWidgetCardResponse(
@@ -128,6 +129,7 @@ async def route_terse_nested2_generation(
     except (TemplateArchiveError, TemplateGenerationError) as exc:
         logger.error(
             f"{_MODULE} terse_route_failed exception_type={type(exc).__name__} "
+            f"detail={json_for_log(str(exc))} "
             "fallback=disabled"
         )
         return _template_failure_response(request, "卡片模板生成失败，请稍后再试。")
@@ -224,12 +226,16 @@ async def _try_generate_template_artifact(
         tuple(effective_bindings),
         model_client,
     )
+    projected_task_spec = engine_output.projected_task_spec.model_dump(
+        mode="json",
+        exclude_none=True,
+    )
     archive = await _build_route_archive(
         policy,
         engine_output,
         size=card_spec.suggestSize,
         card_spec=card_spec.model_dump(mode="json", exclude_none=True),
-        task_spec=task_spec.model_dump(mode="json", exclude_none=True),
+        task_spec=projected_task_spec,
         protocol_profile=protocol_profile,
         design_protocol_profile=design_protocol_profile,
         design_profile_id=policy.design_profile_id or policy.model_profile_id,
@@ -239,7 +245,7 @@ async def _try_generate_template_artifact(
     artifact = host._build_artifact(
         archive.a2ui,
         card_spec.model_dump(mode="json", exclude_none=True),
-        task_spec.model_dump(mode="json", exclude_none=True),
+        projected_task_spec,
         data_capabilities,
         effective_events,
         asset_candidates,

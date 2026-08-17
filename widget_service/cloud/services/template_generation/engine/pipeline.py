@@ -9,7 +9,10 @@ from typing import Any
 
 from app.logger import logger
 from models.generation import CandidateDataBinding, TaskSpec
-from services.protocol_registry import TERSE_DSL_NESTED2_PROFILE_ID, A2UIProtocolRegistry
+from services.protocol_registry import (
+    TERSE_DSL_NESTED2_PROFILE_ID,
+    A2UIProtocolRegistry,
+)
 from services.template_generation.engine.advanced.content_selectors import (
     apply_content_selectors,
     project_content_component_facts,
@@ -48,6 +51,7 @@ class TemplateGenerationError(RuntimeError):
 class TemplateEngineOutput:
     a2ui: str
     terse_dsl_nested2: str
+    projected_task_spec: TaskSpec
     template_ids: tuple[str, ...]
     trusted_internal_asset_sources: tuple[str, ...]
     expanded_component_count: int
@@ -93,7 +97,9 @@ async def generate_template_a2ui(
     except TemplateRouteNotApplicable:
         raise
     except (RuntimeError, ValueError) as exc:
-        raise TemplateRouteNotApplicable("template first-layer decision failed") from exc
+        raise TemplateRouteNotApplicable(
+            f"template first-layer decision failed: {exc}"
+        ) from exc
 
     try:
         return await _generate_selected_templates(
@@ -194,6 +200,7 @@ async def _generate_selected_templates(
     return TemplateEngineOutput(
         a2ui=compilation.a2ui,
         terse_dsl_nested2=compilation.effective_output,
+        projected_task_spec=projected_task_spec,
         template_ids=tuple(compilation.stats.template_used_ids),
         trusted_internal_asset_sources=trusted_sources,
         expanded_component_count=compilation.stats.expanded_component_count,
@@ -241,6 +248,16 @@ def _with_provider_template_binding_projection(
             root = _provider_binding_root(card_spec, definition.capability_id)
             if root is None:
                 continue
+            data = schema.get("data")
+            component_projection = (
+                data.pop(component_id, None) if isinstance(data, dict) else None
+            )
+            if isinstance(component_projection, dict):
+                projection_path = (
+                    f"{root.rstrip('/')}/_templateProjection/{component_id}"
+                )
+                _set_pointer_value(schema, projection_path, component_projection)
+                changed = True
             for binding in definition.bindings.values():
                 path = f"{root.rstrip('/')}{binding.path}"
                 value = _pointer_value(source.dataModelSchema, path)

@@ -10,10 +10,14 @@
     wakeup: { path: "/wakeupTimeText", type: "string" }
   },
   params: {
-    sleepDurationPrimaryValueText: { type: "string", required: true },
-    sleepDurationPrimaryUnitText: { type: "string", required: true },
-    sleepDurationSecondaryValueText: { type: "string" },
-    sleepDurationSecondaryUnitText: { type: "string" },
+    sleepDurationPrimaryValueText: {
+      type: "string", required: true, sourcePaths: ["/nightSleepDurationText"]
+    },
+    sleepDurationPrimaryUnitText: {
+      type: "string", required: true, sourcePaths: ["/nightSleepDurationText"]
+    },
+    sleepDurationSecondaryValueText: { type: "string", sourcePaths: ["/nightSleepDurationText"] },
+    sleepDurationSecondaryUnitText: { type: "string", sourcePaths: ["/nightSleepDurationText"] },
     sourceIcon: { type: "string", kind: "asset", semanticTags: ["sleep"] }
   },
   limits: { maxNodes: 28, maxDepth: 7 }

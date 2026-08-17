@@ -6,7 +6,6 @@ import json
 from typing import Any
 
 import pytest
-
 from api.schemas import GenerateWidgetCardRequest
 from core.errors import GenerationStatus
 from models.generation import CandidateDataBinding, TaskSpec
@@ -25,8 +24,13 @@ from services.template_generation import (
     facade,
     route_legacy_python_terse_generation,
 )
+from services.template_generation.engine.advanced.content_selectors import (
+    apply_content_selectors,
+)
+from services.template_generation.engine.advanced.models import AdvancedScopeBrief
 from services.template_generation.engine.advanced.scope_planner import (
     TemplateRouteNotApplicable,
+    validate_template_request_coverage,
 )
 from services.template_generation.engine.cardplan.registry import get_cardplan_registry
 from services.template_generation.engine.pipeline import (
@@ -38,6 +42,13 @@ from services.widget_generation_service import WidgetGenerationService
 _WEATHER_BODY = (
     'SingleFocusLayout(Template("WeatherOverview@1","heroIcon",'
     '{"conditionIcon":"resources/base/media/icon_weather1.svg"}));'
+)
+_WEATHER_TEMPLATE_FIELDS = (
+    "/location/districtName",
+    "/current/temperatureText",
+    "/current/condition",
+    "/current/airQuality",
+    "/daily/0/temperatureRangeText",
 )
 
 
@@ -60,16 +71,86 @@ def test_all_provider_templates_are_loaded_from_the_isolated_directory():
     }
 
 
+def test_derived_parameter_source_field_is_counted_as_template_coverage():
+    def field(value: str) -> dict[str, Any]:
+        return {
+            "type": "string",
+            "description": "trusted app usage field",
+            "sampleValue": value,
+        }
+
+    registry = get_cardplan_registry()
+    task_spec = TaskSpec(
+        userQuery="看看抖音今天用了多久",
+        size="2x2",
+        eventCandidates=[],
+        assetCandidates=[],
+        dataModelSchema={
+            "data": {
+                "appUsageStats": {
+                    "appUsage": {
+                        "appName": field("抖音"),
+                        "durationText": field("1小时20分钟"),
+                    },
+                    "updatedAt": field("今天 12:00"),
+                }
+            }
+        },
+    )
+    task_spec = apply_content_selectors(task_spec, {"GetAppUsageDuration"})
+    binding = CandidateDataBinding(
+        capabilityId="GetAppUsageDuration",
+        writeResultTo="/data/appUsageStats",
+        candidateOutputFields=[
+            "/appUsage/appName",
+            "/appUsage/durationText",
+            "/updatedAt",
+        ],
+    )
+    scope = AdvancedScopeBrief(
+        themeId="digital-wellbeing-neutral-dark",
+        advancedComponentIds=["AppUsageOverview"],
+    )
+    card_spec = {
+        "title": "应用时长",
+        "description": "今日使用情况",
+        "suggestSize": "2x2",
+        "dataBindings": [
+            {
+                "capabilityId": "GetAppUsageDuration",
+                "arguments": {},
+                "writeResultTo": "/data/appUsageStats",
+            }
+        ],
+    }
+
+    validate_template_request_coverage(
+        scope,
+        task_spec,
+        registry,
+        (binding,),
+        {"GetAppUsageDuration": ("/appUsage/durationText",)},
+        card_spec,
+    )
+
+
 class WeatherTemplateModel:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        required_fields: tuple[str, ...] = _WEATHER_TEMPLATE_FIELDS,
+    ) -> None:
         self.body_called = False
+        self.required_fields = required_fields
 
     async def generate_json(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return {
-            "routeVersion": "template-route-decision/1",
+            "routeVersion": "template-route-decision/2",
             "templateUsable": True,
             "themeId": "family-weather-care-blue",
             "advancedComponentIds": ["WeatherOverview"],
+            "requiredOutputFieldsByCapability": {
+                "ViewWeather": list(self.required_fields),
+            },
         }
 
     async def generate(self, *_args: Any, **_kwargs: Any) -> str:
@@ -272,7 +353,7 @@ async def test_weather_template_generates_a2ui_and_terse_artifact(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_uncovered_requested_field_rejects_template_before_body_generation():
-    model = WeatherTemplateModel()
+    model = WeatherTemplateModel(("/current/humidityPercent",))
     binding = CandidateDataBinding(
         capabilityId="ViewWeather",
         arguments={"districtName": "青浦区"},
@@ -284,6 +365,58 @@ async def test_uncovered_requested_field_rejects_template_before_body_generation
     )
 
     with pytest.raises(TemplateRouteNotApplicable, match="do not cover every"):
+        await generate_template_a2ui(
+            _weather_task_spec(),
+            _weather_card_spec(),
+            (binding,),
+            model,
+        )
+
+    assert model.body_called is False
+
+
+@pytest.mark.asyncio
+async def test_unused_candidate_fields_do_not_block_query_required_weather_fields():
+    model = WeatherTemplateModel(
+        (
+            "/current/temperatureText",
+            "/current/condition",
+        )
+    )
+    binding = CandidateDataBinding(
+        capabilityId="ViewWeather",
+        arguments={"districtName": "青浦区"},
+        writeResultTo="/data/weather",
+        candidateOutputFields=[
+            *_WEATHER_TEMPLATE_FIELDS,
+            "/current/humidityPercent",
+            "/current/windDirection",
+            "/current/uvIndex",
+        ],
+    )
+
+    output = await generate_template_a2ui(
+        _weather_task_spec(),
+        _weather_card_spec(),
+        (binding,),
+        model,
+    )
+
+    assert output.template_ids == ("WeatherOverview@1",)
+    assert model.body_called is True
+
+
+@pytest.mark.asyncio
+async def test_query_required_fields_must_come_from_candidates():
+    model = WeatherTemplateModel(("/current/airQuality",))
+    binding = CandidateDataBinding(
+        capabilityId="ViewWeather",
+        arguments={"districtName": "青浦区"},
+        writeResultTo="/data/weather",
+        candidateOutputFields=["/current/condition"],
+    )
+
+    with pytest.raises(TemplateRouteNotApplicable, match="selected from candidateOutputFields"):
         await generate_template_a2ui(
             _weather_task_spec(),
             _weather_card_spec(),

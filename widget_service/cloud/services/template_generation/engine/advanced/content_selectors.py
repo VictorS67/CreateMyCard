@@ -1334,6 +1334,16 @@ def apply_content_selectors(
         if battery_facts is not None:
             selectors["battery"] = battery_facts.as_selector()
 
+    if "GetAppUsageDuration" in capability_ids:
+        app_usage_facts = extract_app_usage_overview_facts(schema)
+        if app_usage_facts is not None:
+            selectors["appUsage"] = app_usage_facts.as_selector()
+
+    if "GetHealthAndSportSummary" in capability_ids:
+        sleep_facts = extract_sleep_overview_facts(schema)
+        if sleep_facts is not None:
+            selectors["sleep"] = sleep_facts.as_selector()
+
     if not selectors:
         return task_spec
     data = schema.setdefault("data", {})

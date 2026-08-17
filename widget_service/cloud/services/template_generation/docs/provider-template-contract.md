@@ -37,12 +37,26 @@ Text(Expr(`${condition}|${airQuality}`))
 模板文件不是可执行 Python，不允许任意函数、文件访问、网络访问或动态 import。解析器只接受白名单 AST，
 并拒绝 `__proto__`、`prototype` 和 `constructor` 等危险键。
 
+由上游字段确定性派生的模板参数必须声明来源，例如：
+
+```text
+durationPrimaryValueText: {
+  type: "string",
+  required: true,
+  sourcePaths: ["/appUsage/durationText"]
+}
+```
+
+`sourcePaths` 只允许指向本能力 `outputSchema` 的叶子字段；素材参数不允许声明。模板覆盖集合等于 Variant
+直接绑定路径与其参数来源路径的并集。
+
 ## 完整覆盖要求
 
 第一层 LLM 只能提出候选，服务端必须再次确认：
 
 - 每个 `candidateDataBinding.capabilityId` 都有可用 Provider 模板。
-- 每个 `candidateOutputFields` 路径都被所选一个或多个模板覆盖。
+- 第一层输出的 query 必显字段非空，且全部属于对应能力的 `candidateOutputFields`。
+- 每个 query 必显字段都被所选一个或多个模板直接绑定或作为派生参数来源消费。
 - 所选 Variant 的必需绑定能从 TaskSpec 与 CardSpec 唯一解析。
 - 模板参数只来自可信事实、批准事件和批准素材。
 - 任一字段不满足时，整个模板判断失败，不能用模板只展示一部分后继续。

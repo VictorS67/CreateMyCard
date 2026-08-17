@@ -9,10 +9,14 @@
     updatedAt: { path: "/updatedAt", type: "string" }
   },
   params: {
-    durationPrimaryValueText: { type: "string", required: true },
-    durationPrimaryUnitText: { type: "string", required: true },
-    durationSecondaryValueText: { type: "string" },
-    durationSecondaryUnitText: { type: "string" },
+    durationPrimaryValueText: {
+      type: "string", required: true, sourcePaths: ["/appUsage/durationText"]
+    },
+    durationPrimaryUnitText: {
+      type: "string", required: true, sourcePaths: ["/appUsage/durationText"]
+    },
+    durationSecondaryValueText: { type: "string", sourcePaths: ["/appUsage/durationText"] },
+    durationSecondaryUnitText: { type: "string", sourcePaths: ["/appUsage/durationText"] },
     appIcon: { type: "string", kind: "asset", semanticTags: ["app"] }
   },
   limits: { maxNodes: 18, maxDepth: 6 }

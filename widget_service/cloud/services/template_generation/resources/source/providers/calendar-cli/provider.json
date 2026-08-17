@@ -16,12 +16,12 @@
     {
       "templateId": "DateOverview@1",
       "entry": "templates/date-overview.cardtpl",
-      "digest": "sha256:7a035a89715c51b03afc86709d44b199db52ac2a10e56ed84d1b3bd049638ca1"
+      "digest": "sha256:4f0d755749936faf189abde26a99627e87068033259a4ab239f26a95512e3593"
     },
     {
       "templateId": "ScheduleOverview@1",
       "entry": "templates/schedule-overview.cardtpl",
-      "digest": "sha256:2e08fd0ba0a81e2384e503114e57b12199dea0d4ec3d35363c2eb7891f0ce272"
+      "digest": "sha256:aa1f7c1aa15e69ac39e8b23ae668ac47336dbfa7a74aef45fb2890a5a958c5ab"
     }
   ],
   "compatibility": {

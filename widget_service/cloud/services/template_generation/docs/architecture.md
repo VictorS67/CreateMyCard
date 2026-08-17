@@ -15,9 +15,9 @@ generateWidgetCardCompactDsl
        │    └─ 原始 Compact 流程
        └─ create
             ├─ 准备 dev 能力裁决、CardSpec、TaskSpec
-            ├─ 第一层 LLM：选择 Theme 和一个或多个业务模板
+            ├─ 第一层 LLM：从候选字段中提取 query 必显字段，选择 Theme 和业务模板
             ├─ 服务端完整覆盖校验
-            │    ├─ 未覆盖任一 candidateOutputField → 原始 Compact 流程
+            │    ├─ 必显字段不属于候选或模板未消费任一必显字段 → 原始 Compact 流程
             │    └─ 全部覆盖 → 锁定模板路由
             ├─ 第二层 LLM：只生成受限布局和模板调用
             ├─ 服务端解析、参数校验、模板展开
@@ -33,7 +33,7 @@ generateWidgetCardTerseDslNested2
   └─ route_terse_nested2_generation
        ├─ edit → failed
        └─ create
-            ├─ 第一层 LLM 和服务端完整覆盖校验
+            ├─ 第一层 LLM 提取 query 必显字段并执行服务端完整覆盖校验
             │    └─ 未匹配、字段未完整覆盖或模型不可用 → failed
             ├─ 第二层 LLM、参数校验和模板展开
             │    └─ 任一失败 → failed
@@ -67,6 +67,10 @@ generateWidgetCardTerseDslNested2
 | 确定性覆盖失败 | 原始流程 | 任一用户选定字段无法由模板表达 |
 | 第二层或模板编译失败 | 返回 failed | 模板路由已经锁定，禁止静默换实现 |
 | Compact 归档或 Validator 失败 | 返回 failed | 禁止保存无法稳定编辑的半成品 |
+
+`candidateOutputFields` 是可用候选集合，不是强制展示集合。第一层只能从候选集合中输出 query 实际要求的
+必显字段；服务端随后证明这些字段被所选模板直接绑定或作为派生参数来源消费。模板可以为了保持原始视觉
+额外展示其必需事实，但不得遗漏 query 必显事实。
 
 `before_model_call` 由门面包装为单次通知。第一层已经触发通知时，即使回退原始模型，也不会重复下发开始事件。
 

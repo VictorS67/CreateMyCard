@@ -73,7 +73,7 @@ async def route_compact_generation(
         except (TemplateModelUnavailable, TemplateRouteNotApplicable) as exc:
             logger.info(
                 f"{_MODULE} route_fallback reason={type(exc).__name__} "
-                "fallback=original_compact_flow"
+                f"detail={json_for_log(str(exc))} fallback=original_compact_flow"
             )
         except (TemplateArchiveError, TemplateGenerationError) as exc:
             logger.error(
@@ -122,7 +122,7 @@ async def route_terse_nested2_generation(
     except (TemplateModelUnavailable, TemplateRouteNotApplicable) as exc:
         logger.info(
             f"{_MODULE} terse_route_rejected reason={type(exc).__name__} "
-            "fallback=disabled"
+            f"detail={json_for_log(str(exc))} fallback=disabled"
         )
         return _template_failure_response(request, "当前需求没有可完整呈现的模板。")
     except (TemplateArchiveError, TemplateGenerationError) as exc:

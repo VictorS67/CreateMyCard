@@ -13,11 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator
-from pydantic import Field
-
 from config.config import get_settings
+from jsonschema import Draft202012Validator
 from models.generation import TaskSpec
+from pydantic import Field
 
 from .models import (
     StrictModel,
@@ -200,7 +199,7 @@ def compile_card_template(
         raise ValueError(f"Provider Template capability mismatch: {wire_id}")
 
     bindings = _compile_bindings(header.get("bindings"), output_schema)
-    parameters = _compile_parameters(header.get("params", {}))
+    parameters = _compile_parameters(header.get("params", {}), output_schema)
     name_overlap = set(bindings) & set(parameters.schema["properties"])
     if name_overlap:
         raise ValueError(
@@ -555,6 +554,7 @@ def _compile_bindings(
 
 def _compile_parameters(
     payload: Any,
+    output_schema: dict[str, Any],
 ) -> _CompiledParameters:
     if not isinstance(payload, dict):
         raise ValueError("Provider Template params must be an object")
@@ -570,13 +570,18 @@ def _compile_parameters(
         kind = parameter.pop("kind", "value")
         tags = parameter.pop("semanticTags", [])
         is_required = parameter.pop("required", False)
+        source_paths = parameter.get("sourcePaths")
         if kind not in {"value", "asset"}:
             raise ValueError(f"unsupported Provider Template parameter kind: {kind}")
         if kind == "asset":
+            if source_paths is not None:
+                raise ValueError(f"Provider Template asset cannot declare sourcePaths: {name}")
             parameter["type"] = "string"
             if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
                 raise ValueError(f"invalid Provider Template asset tags: {name}")
             asset_tags[name] = tuple(tags)
+        elif source_paths is not None:
+            _validate_parameter_source_paths(name, source_paths, output_schema)
         if parameter.get("type") not in {"string", "integer", "number", "boolean"}:
             raise ValueError(f"invalid Provider Template parameter type: {name}")
         properties[name] = parameter
@@ -592,6 +597,24 @@ def _compile_parameters(
     }
     Draft202012Validator.check_schema(schema)
     return _CompiledParameters(schema, asset_tags, tuple(required))
+
+
+def _validate_parameter_source_paths(
+    name: str,
+    source_paths: Any,
+    output_schema: dict[str, Any],
+) -> None:
+    if not isinstance(source_paths, list) or not source_paths:
+        raise ValueError(f"Provider Template parameter sourcePaths must be non-empty: {name}")
+    if any(not isinstance(source_path, str) for source_path in source_paths):
+        raise ValueError(f"Provider Template parameter sourcePaths must be strings: {name}")
+    if len(source_paths) != len(set(source_paths)):
+        raise ValueError(f"Provider Template parameter sourcePaths must be unique: {name}")
+    for source_path in source_paths:
+        if not _binding_pointer_is_encodable(source_path):
+            raise ValueError(f"Provider Template parameter sourcePath is invalid: {name}")
+        if _schema_leaf(output_schema, source_path) is None:
+            raise ValueError(f"Provider Template parameter sourcePath is invalid: {name}")
 
 
 def _binding_pointer_is_encodable(pointer: str) -> bool:

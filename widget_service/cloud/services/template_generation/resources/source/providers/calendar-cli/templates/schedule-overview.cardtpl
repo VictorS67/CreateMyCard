@@ -9,7 +9,9 @@
     location: { path: "/events/0/eventLocation", type: "string" }
   },
   params: {
-    timeText: { type: "string", required: true },
+    timeText: {
+      type: "string", required: true, sourcePaths: ["/events/0/dtStart", "/events/0/dtEnd"]
+    },
     sourceIcon: { type: "string", kind: "asset", semanticTags: ["calendar", "schedule"] },
     timeIcon: { type: "string", kind: "asset", semanticTags: ["time"] },
     locationIcon: { type: "string", kind: "asset", semanticTags: ["location"] }

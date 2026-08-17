@@ -6,8 +6,12 @@
   allowedParentComponents: ["Column", "Row", "List", "Stack"],
   bindings: {},
   params: {
-    date: { type: "string", required: true },
-    weekday: { type: "string", required: true }
+    date: {
+      type: "string", required: true, sourcePaths: ["/events/0/startDate", "/updatedAt"]
+    },
+    weekday: {
+      type: "string", required: true, sourcePaths: ["/events/0/startDate", "/updatedAt"]
+    }
   },
   limits: { maxNodes: 6, maxDepth: 3 }
 })

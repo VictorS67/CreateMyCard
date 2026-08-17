@@ -276,8 +276,8 @@ class AdvancedScopeBrief(StrictModel):
 class TemplateRouteDecision(StrictModel):
     """第四接口 create 路由的首层模板完整覆盖判断。"""
 
-    route_version: Literal["template-route-decision/1"] = Field(
-        default="template-route-decision/1",
+    route_version: Literal["template-route-decision/2"] = Field(
+        default="template-route-decision/2",
         alias="routeVersion",
     )
     template_usable: bool = Field(alias="templateUsable")
@@ -287,16 +287,42 @@ class TemplateRouteDecision(StrictModel):
         alias="advancedComponentIds",
         max_length=4,
     )
+    required_output_fields_by_capability: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict,
+        alias="requiredOutputFieldsByCapability",
+    )
+
+    @field_validator("required_output_fields_by_capability")
+    @classmethod
+    def valid_required_output_fields(
+        cls,
+        values: dict[str, tuple[str, ...]],
+    ) -> dict[str, tuple[str, ...]]:
+        pointer_pattern = re.compile(r"^/(?:[^/~]|~[01])+(?:/(?:[^/~]|~[01])+)*$")
+        for capability_id, paths in values.items():
+            if not capability_id.strip() or not paths:
+                raise ValueError("required output field groups must be non-empty")
+            if len(paths) != len(set(paths)):
+                raise ValueError("required output fields must be unique")
+            if any(pointer_pattern.fullmatch(path) is None for path in paths):
+                raise ValueError("required output fields must be JSON Pointers")
+        return values
 
     @model_validator(mode="after")
     def route_fields_match_decision(self) -> TemplateRouteDecision:
         if len(self.advanced_component_ids) != len(set(self.advanced_component_ids)):
             raise ValueError("advancedComponentIds must be unique")
         has_template_scope = bool(self.theme_id and self.advanced_component_ids)
-        if self.template_usable and not has_template_scope:
-            raise ValueError("usable Template route requires themeId and advancedComponentIds")
-        if not self.template_usable and (self.theme_id or self.advanced_component_ids):
-            raise ValueError("rejected Template route must not include a partial scope")
+        has_required_fields = bool(self.required_output_fields_by_capability)
+        if self.template_usable and not (has_template_scope and has_required_fields):
+            raise ValueError("usable Template route requires scope and query-required fields")
+        rejected_has_route_data = bool(
+            self.theme_id
+            or self.advanced_component_ids
+            or self.required_output_fields_by_capability
+        )
+        if not self.template_usable and rejected_has_route_data:
+            raise ValueError("rejected Template route must not include route data")
         return self
 
 

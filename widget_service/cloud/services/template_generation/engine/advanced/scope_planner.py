@@ -8,10 +8,11 @@ from collections.abc import Awaitable, Callable
 from itertools import combinations, product
 from typing import Any
 
-from pydantic import ValidationError
-
 from models.generation import CandidateDataBinding, TaskSpec, WidgetSize
-from services.template_generation.engine.cardplan.prompt import admitted_provider_template_variants
+from pydantic import ValidationError
+from services.template_generation.engine.cardplan.prompt import (
+    admitted_provider_template_variants,
+)
 from services.template_generation.engine.cardplan.registry import CardPlanRegistry
 
 from . import content_selectors as _content_selectors
@@ -65,7 +66,7 @@ def build_advanced_scope_prompt(
     available_capability_ids: tuple[str, ...] | None = None,
     *,
     template_route_decision: bool = False,
-    requested_output_fields: dict[str, tuple[str, ...]] | None = None,
+    candidate_output_fields: dict[str, tuple[str, ...]] | None = None,
     card_spec: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """构造不含 Template、布局源码和整卡置信度信息的新第一层 Prompt。"""
@@ -117,16 +118,19 @@ def build_advanced_scope_prompt(
         "temporaryDataAdmissionBypass": admission_relaxed,
     }
     if template_route_decision:
-        user_payload["requiredOutputFieldsByCapability"] = requested_output_fields or {}
+        user_payload["candidateOutputFieldsByCapability"] = candidate_output_fields or {}
         schema = TemplateRouteDecision.model_json_schema(by_alias=True)
         scope_instruction = (
             "你是第四接口的首层模板路由判断器。只输出 JSON；routeVersion 固定为"
-            " template-route-decision/1。先逐项核对 userQuery 中要求呈现的数据和"
-            " requiredOutputFieldsByCapability。只有一个或多个 advancedComponents 的"
-            " templateCoverageByCapability 能完整覆盖全部数据，而且不存在任何模板外数据需求时，"
-            "templateUsable 才能为 true，并同时输出 themeId 与 advancedComponentIds。只要有一个"
-            "数据无法由所选模板呈现，或存在歧义、缺字段、缺模板，必须输出 templateUsable=false、"
-            "themeId=null、advancedComponentIds=[]。不得让标准组件、静态文案、推测值或后续模型"
+            " template-route-decision/2。candidateOutputFieldsByCapability 是本轮可用候选，不是"
+            "全部必显字段。先逐项识别 userQuery 明确要求呈现的数据，再把对应 JSON Pointer "
+            "按能力写入 requiredOutputFieldsByCapability；不得纳入 query 未要求的候选字段，也不得"
+            "输出候选以外的路径。只有一个或多个 advancedComponents 的"
+            " templateCoverageByCapability 能完整覆盖全部必显数据，而且不存在任何模板外数据需求时，"
+            "templateUsable 才能为 true，并同时"
+            "输出 themeId 与 advancedComponentIds。只要有一个数据无法映射或呈现，或存在歧义、"
+            "缺字段、缺模板，必须输出 templateUsable=false、themeId=null、advancedComponentIds=[]、"
+            "requiredOutputFieldsByCapability={}。不得让标准组件、静态文案、推测值或后续模型"
             "补齐模板不支持的数据。不得输出理由或额外字段。"
         )
     else:
@@ -288,12 +292,16 @@ def _component_template_coverage_options(
             card_spec,
         ):
             binding_names = (*variant.required_bindings, *variant.optional_bindings)
-            paths = frozenset(
+            paths = {
                 definition.bindings[name].path
                 for name in binding_names
                 if name in definition.bindings
-            )
-            options.append({capability_id: paths})
+            }
+            for parameter_schema in variant.parameters_schema.get("properties", {}).values():
+                if not isinstance(parameter_schema, dict):
+                    continue
+                paths.update(parameter_schema.get("sourcePaths", ()))
+            options.append({capability_id: frozenset(paths)})
     return tuple(options)
 
 
@@ -335,6 +343,7 @@ def validate_template_request_coverage(
     task_spec: TaskSpec,
     registry: CardPlanRegistry,
     coverage_bindings: tuple[CandidateDataBinding, ...],
+    required_output_fields: dict[str, tuple[str, ...]],
     card_spec: dict[str, Any] | None,
 ) -> None:
     """证明每个 query 筛选字段都可由所选组件的某组模板 Variant 覆盖。"""
@@ -343,14 +352,15 @@ def validate_template_request_coverage(
     capability_ids = [binding.capabilityId for binding in coverage_bindings]
     if len(capability_ids) != len(set(capability_ids)):
         raise ValueError("Template route requires one binding root per data capability")
-    requested = _requested_output_fields_by_capability(coverage_bindings)
-    missing_field_evidence = [
-        capability_id
-        for capability_id, fields in requested.items()
-        if not fields
-    ]
-    if missing_field_evidence:
-        raise ValueError("Template route requires candidateOutputFields for every capability")
+    candidates = _requested_output_fields_by_capability(coverage_bindings)
+    if not required_output_fields:
+        raise ValueError("Template route requires query-selected data fields")
+    for capability_id, fields in required_output_fields.items():
+        candidate_fields = set(candidates.get(capability_id, ()))
+        if not candidate_fields:
+            raise ValueError("query-required capability has no candidateOutputFields")
+        if not set(fields).issubset(candidate_fields):
+            raise ValueError("query-required fields must be selected from candidateOutputFields")
     effective_ids = resolve_available_capability_ids(task_spec, registry, tuple(capability_ids))
     component_options = []
     for component_id in scope.advanced_component_ids:
@@ -375,7 +385,7 @@ def validate_template_request_coverage(
                 covered.setdefault(capability_id, set()).update(paths)
         has_full_coverage = all(
             set(fields).issubset(covered.get(capability_id, set()))
-            for capability_id, fields in requested.items()
+            for capability_id, fields in required_output_fields.items()
         )
         if has_full_coverage:
             return
@@ -452,14 +462,14 @@ async def plan_template_route_with_llm(
     card_spec: dict[str, Any] | None = None,
 ) -> AdvancedScopeBrief:
     """由首层 LLM 决定模板路由，并用 Provider 契约做确定性完整覆盖复核。"""
-    requested_fields = _requested_output_fields_by_capability(coverage_bindings)
+    candidate_fields = _requested_output_fields_by_capability(coverage_bindings)
     prompt = build_advanced_scope_prompt(
         task_spec,
         data_shape,
         registry,
         available_capability_ids,
         template_route_decision=True,
-        requested_output_fields=requested_fields,
+        candidate_output_fields=candidate_fields,
         card_spec=card_spec,
     )
     raw = await generate_json(prompt, "template-route-decision")
@@ -487,6 +497,7 @@ async def plan_template_route_with_llm(
             task_spec,
             registry,
             coverage_bindings,
+            decision.required_output_fields_by_capability,
             card_spec,
         )
     except ValueError as exc:

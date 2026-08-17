@@ -16,7 +16,7 @@
     {
       "templateId": "AppUsageOverview@1",
       "entry": "templates/app-usage-overview.cardtpl",
-      "digest": "sha256:d6a327a67ae26ab9168c0858caa2086ea8f48e176e1f2ffa6ea50f0ea0356d65"
+      "digest": "sha256:94726580917facc7bc67b75debdd0ff94093c96da7a3657b1d60c27fa06c0d53"
     }
   ],
   "compatibility": {

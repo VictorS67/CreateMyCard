@@ -28,7 +28,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.profile = {
             "version": "v0.9",
-            "catalogId": "ohos.a2ui.extended.catalog",
+            "catalogId": "ohos.a2ui.extended.catalog.form",
             "sizes": {
                 "2x2": {"width": 140, "height": 140},
                 "2x4": {"width": 300, "height": 140},
@@ -548,7 +548,7 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
         event = data_model["data"]["calendar"]["events"][0]
         self.assertEqual(event["title"], "产品评审")
 
-    def test_always_uses_extended_catalog_id(self) -> None:
+    def test_always_uses_form_catalog_id(self) -> None:
         profile = dict(self.profile)
         profile["catalogId"] = "ohos.a2ui.extended.catalog"
 
@@ -561,8 +561,29 @@ class CompactDslA2uiConverterTest(unittest.TestCase):
 
         self.assertEqual(
             create_surface["catalogId"],
-            "ohos.a2ui.extended.catalog",
+            "ohos.a2ui.extended.catalog.form",
         )
+
+    def test_preserves_supported_interpolation_expression(self) -> None:
+        expression = (
+            "{{ ${/data/weather/current/condition} + '｜' + "
+            "${/data/weather/current/airQuality} }}"
+        )
+        compact_dsl = _serialize(
+            [
+                ["root", "Column", {"width": 160, "height": 160}, ["summary"]],
+                ["summary", "Text", {"content": expression}],
+            ]
+        )
+
+        a2ui = convert_compact_dsl_to_a2ui(
+            compact_dsl,
+            size="2x2",
+            protocol_profile=self.profile,
+        )
+        components = json.loads(a2ui.splitlines()[1])["updateComponents"]["components"]
+
+        self.assertEqual(components[1]["content"], expression)
 
     def test_accepts_one_genui_fence(self) -> None:
         fenced = f"```genui\n{self.compact_dsl}\n```"

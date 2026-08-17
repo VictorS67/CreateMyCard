@@ -1,6 +1,6 @@
 {
   "version": "v0.9",
-  "catalogId": "ohos.a2ui.extended.catalog",
+  "catalogId": "ohos.a2ui.extended.catalog.form",
   "sizes": {
     "2x2": {
       "width": 140,

@@ -4571,7 +4571,7 @@ def _a2ui_genui_with_image(
                     "version": "v0.9",
                     "createSurface": {
                         "surfaceId": "card",
-                        "catalogId": "ohos.a2ui.extended.catalog",
+                        "catalogId": "ohos.a2ui.extended.catalog.form",
                     },
                 },
                 separators=(",", ":"),

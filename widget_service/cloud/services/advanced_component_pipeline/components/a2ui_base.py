@@ -11,7 +11,7 @@ from models.generation import TaskSpec
 from ..models import ActionRef, BindingRef
 from .base import sample_data
 
-CATALOG_ID = "ohos.a2ui.extended.catalog"
+CATALOG_ID = "ohos.a2ui.extended.catalog.form"
 
 
 def binding_expression(binding: BindingRef) -> str:

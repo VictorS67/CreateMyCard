@@ -1091,7 +1091,7 @@ def _reject_forbidden_keys(value: Any) -> None:
 def _validate_compatibility(compatibility: ProviderCompatibility) -> None:
     if compatibility.template_language != "cardtpl/1":
         raise ValueError("unsupported Provider Template language")
-    if compatibility.catalog_id != "ohos.a2ui.extended.catalog":
+    if compatibility.catalog_id != "ohos.a2ui.extended.catalog.form":
         raise ValueError("Provider Bundle Catalog mismatch")
     if compatibility.a2ui_wire_version != "v0.9":
         raise ValueError("Provider Bundle A2UI wire version mismatch")

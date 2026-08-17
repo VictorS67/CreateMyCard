@@ -89,7 +89,7 @@ class A2UIProtocolRegistry:
             "catalogId": self._extract_quoted_value(
                 protocol_md,
                 "catalogId",
-                "ohos.a2ui.extended.catalog",
+                "ohos.a2ui.extended.catalog.form",
             ),
             "minRomVersion": "6.0",
             "sizes": {

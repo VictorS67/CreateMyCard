@@ -18,9 +18,13 @@ from services.generation_pipeline import (
 )
 from services.protocol_registry import (
     A2UI_FORM_PROTOCOL_PROFILE_ID,
+    TERSE_DSL_NESTED2_PROFILE_ID,
     A2UIProtocolRegistry,
 )
-from services.template_generation import facade
+from services.template_generation import (
+    facade,
+    route_legacy_python_terse_generation,
+)
 from services.template_generation.engine.advanced.scope_planner import (
     TemplateRouteNotApplicable,
 )
@@ -83,6 +87,22 @@ def _policy() -> GenerationRoutePolicy:
         model_profile_id="design-compact-dsl",
         model_format="compact-dsl",
         design_profile_id="design-compact-dsl",
+        validation_failure_blocking=True,
+        stores_design_token=True,
+    )
+
+
+def _terse_policy() -> GenerationRoutePolicy:
+    return GenerationRoutePolicy(
+        operation="generateWidgetCardTerseDslNested2",
+        protocol_profile_id=A2UI_FORM_PROTOCOL_PROFILE_ID,
+        backend="openai",
+        processor_kind=DslProcessorKind.TERSE_NESTED2,
+        source_format=TERSE_DSL_NESTED2_PROFILE_ID,
+        model_profile_id=TERSE_DSL_NESTED2_PROFILE_ID,
+        model_format=TERSE_DSL_NESTED2_PROFILE_ID,
+        design_profile_id=TERSE_DSL_NESTED2_PROFILE_ID,
+        supports_dynamic_capabilities=True,
         validation_failure_blocking=True,
         stores_design_token=True,
     )
@@ -216,6 +236,41 @@ async def test_weather_template_generates_a2ui_and_compact_artifact(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_weather_template_generates_a2ui_and_terse_artifact(monkeypatch):
+    model = WeatherTemplateModel()
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        facade,
+        "create_template_model_client",
+        lambda _runtime, _context: model,
+    )
+
+    async def save(store: ArtifactStore, artifact: Any) -> ArtifactSaveResult:
+        captured["artifact"] = artifact
+        captured["terse"] = store.design_token
+        return ArtifactSaveResult(
+            artifactUrl="https://artifact.test/weather-template-terse",
+            artifactDigest="sha256:weather-template-terse",
+        )
+
+    monkeypatch.setattr(ArtifactStore, "save", save)
+    response = await WidgetGenerationService(
+        model_runtime=object(),
+    ).generate_widget_card_terse_dsl_nested2(_weather_request())
+
+    assert response.status == GenerationStatus.SUCCESS
+    assert response.artifactUrl == "https://artifact.test/weather-template-terse"
+    assert captured["terse"]
+    assert "Column(" in captured["terse"]
+    assert "Template(" not in captured["terse"]
+    messages = [json.loads(line) for line in captured["artifact"].genui.splitlines()]
+    protocol_profile = A2UIProtocolRegistry(A2UI_FORM_PROTOCOL_PROFILE_ID).get_profile()
+    assert messages[0]["createSurface"]["catalogId"] == protocol_profile["catalogId"]
+    assert captured["artifact"].effectiveCapabilities["data"] == ["ViewWeather"]
+
+
+@pytest.mark.asyncio
 async def test_uncovered_requested_field_rejects_template_before_body_generation():
     model = WeatherTemplateModel()
     binding = CandidateDataBinding(
@@ -322,3 +377,83 @@ async def test_first_layer_rejection_falls_back_and_notifies_model_start_once(mo
 
     assert response == "original"
     assert notifications == ["2x2"]
+
+
+@pytest.mark.asyncio
+async def test_terse_template_mismatch_returns_failed_without_original_flow(monkeypatch):
+    original_called = False
+
+    class Host:
+        async def _generate_widget_card_with_policy(self, *_args: Any, **_kwargs: Any) -> Any:
+            nonlocal original_called
+            original_called = True
+            return object()
+
+    async def rejected(*_args: Any, **_kwargs: Any) -> Any:
+        raise TemplateRouteNotApplicable("LLM rejected template route")
+
+    monkeypatch.setattr(facade, "_try_generate_template_artifact", rejected)
+    response = await facade.route_terse_nested2_generation(
+        Host(),
+        _weather_request(),
+        _terse_policy(),
+    )
+
+    assert response.status == GenerationStatus.FAILED
+    assert original_called is False
+
+
+@pytest.mark.asyncio
+async def test_terse_edit_returns_failed_without_template_or_original_flow(monkeypatch):
+    request = _weather_request().model_copy(
+        update={"sourceArtifactUrl": "https://artifact.test/source.md"}
+    )
+    request.model_fields_set.add("sourceArtifactUrl")
+
+    class Host:
+        async def _generate_widget_card_with_policy(self, *_args: Any, **_kwargs: Any) -> Any:
+            pytest.fail("Terse edit must not enter the original flow")
+
+    async def unexpected_attempt(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("Terse edit must not attempt template generation")
+
+    monkeypatch.setattr(facade, "_try_generate_template_artifact", unexpected_attempt)
+    response = await facade.route_terse_nested2_generation(
+        Host(),
+        request,
+        _terse_policy(),
+    )
+
+    assert response.status == GenerationStatus.FAILED
+    assert response.errorCode == "A2UI_GENERATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_legacy_python_terse_entry_is_explicit_and_delegates_to_original():
+    expected = object()
+    observed_callback: Any = None
+
+    class Host:
+        async def _generate_widget_card_with_policy(
+            self,
+            _request: Any,
+            _policy_value: Any,
+            *,
+            before_model_call: Any,
+        ) -> Any:
+            nonlocal observed_callback
+            observed_callback = before_model_call
+            return expected
+
+    async def notify(_size: str) -> None:
+        return None
+
+    response = await route_legacy_python_terse_generation(
+        Host(),
+        _weather_request(),
+        _terse_policy(),
+        before_model_call=notify,
+    )
+
+    assert response is expected
+    assert observed_callback is notify

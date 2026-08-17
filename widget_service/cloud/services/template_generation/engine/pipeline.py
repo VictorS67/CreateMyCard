@@ -47,6 +47,7 @@ class TemplateGenerationError(RuntimeError):
 @dataclass(frozen=True)
 class TemplateEngineOutput:
     a2ui: str
+    terse_dsl_nested2: str
     template_ids: tuple[str, ...]
     trusted_internal_asset_sources: tuple[str, ...]
     expanded_component_count: int
@@ -192,6 +193,7 @@ async def _generate_selected_templates(
     )
     return TemplateEngineOutput(
         a2ui=compilation.a2ui,
+        terse_dsl_nested2=compilation.effective_output,
         template_ids=tuple(compilation.stats.template_used_ids),
         trusted_internal_asset_sources=trusted_sources,
         expanded_component_count=compilation.stats.expanded_component_count,

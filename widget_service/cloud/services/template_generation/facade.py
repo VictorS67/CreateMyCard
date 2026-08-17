@@ -1,4 +1,4 @@
-"""generateWidgetCardCompactDsl 的单一模板路由入口。"""
+"""Compact/TerseDSL-Nested-2 的模板路由入口。"""
 
 from __future__ import annotations
 
@@ -9,18 +9,19 @@ from typing import Any
 from api.schemas import GenerateWidgetCardResponse
 from app.logger import json_for_log, logger
 from core.errors import ErrorCode, GenerationStatus
-from models.generation import WidgetSize
+from models.generation import DEFAULT_WIDGET_SIZE, WidgetSize
 from services.artifact_store import ArtifactStore
 from services.card_spec_builder import CardSpecBuilder
 from services.device_capability_resolver import DeviceCapabilityResolver
 from services.edit_request_normalizer import EditRequestNormalizer
-from services.generation_pipeline import GenerationRoutePolicy
+from services.generation_pipeline import DslProcessorKind, GenerationRoutePolicy
 from services.protocol_registry import A2UIProtocolRegistry
 from services.response_planner import ResponsePlanner
 from services.task_spec_builder import TaskSpecBuilder
 from services.template_generation.archive import (
     TemplateArchiveError,
     build_template_archive,
+    build_terse_template_archive,
 )
 from services.template_generation.engine.advanced.scope_planner import (
     TemplateRouteNotApplicable,
@@ -89,12 +90,75 @@ async def route_compact_generation(
             if response is not None:
                 return response
 
+    return await _call_original_generation(
+        host,
+        request,
+        policy,
+        before_model_call,
+        notify_model_start,
+    )
+
+
+async def route_terse_nested2_generation(
+    host: Any,
+    request: Any,
+    policy: GenerationRoutePolicy,
+    *,
+    before_model_call: ModelStartCallback | None = None,
+) -> Any:
+    """Terse create 只允许模板成功；edit、未匹配和模板错误均明确失败。"""
+    if "sourceArtifactUrl" in request.model_fields_set:
+        logger.info(f"{_MODULE} terse_route_rejected reason=edit_not_supported")
+        return _template_failure_response(request, "模板路线暂不支持二次更新。")
+
+    notify_model_start = _ModelStartOnce(before_model_call)
+    try:
+        response = await _try_generate_template_artifact(
+            host,
+            request,
+            policy,
+            notify_model_start,
+        )
+    except (TemplateModelUnavailable, TemplateRouteNotApplicable) as exc:
+        logger.info(
+            f"{_MODULE} terse_route_rejected reason={type(exc).__name__} "
+            "fallback=disabled"
+        )
+        return _template_failure_response(request, "当前需求没有可完整呈现的模板。")
+    except (TemplateArchiveError, TemplateGenerationError) as exc:
+        logger.error(
+            f"{_MODULE} terse_route_failed exception_type={type(exc).__name__} "
+            "fallback=disabled"
+        )
+        return _template_failure_response(request, "卡片模板生成失败，请稍后再试。")
+    if response is None:
+        logger.info(f"{_MODULE} terse_route_rejected reason=capability_not_applicable")
+        return _template_failure_response(request, "当前需求没有可完整呈现的模板。")
+    return response
+
+
+async def _call_original_generation(
+    host: Any,
+    request: Any,
+    policy: GenerationRoutePolicy,
+    before_model_call: ModelStartCallback | None,
+    notify_model_start: _ModelStartOnce,
+) -> Any:
     if before_model_call is None:
         return await host._generate_widget_card_with_policy(request, policy)
     return await host._generate_widget_card_with_policy(
         request,
         policy,
         before_model_call=notify_model_start,
+    )
+
+
+def _template_failure_response(request: Any, message: str) -> GenerateWidgetCardResponse:
+    return GenerateWidgetCardResponse(
+        status=GenerationStatus.FAILED,
+        suggestSize=request.size or DEFAULT_WIDGET_SIZE,
+        message=message,
+        errorCode=ErrorCode.A2UI_GENERATION_FAILED.value,
     )
 
 
@@ -160,8 +224,9 @@ async def _try_generate_template_artifact(
         tuple(effective_bindings),
         model_client,
     )
-    archive = await build_template_archive(
-        engine_output.a2ui,
+    archive = await _build_route_archive(
+        policy,
+        engine_output,
         size=card_spec.suggestSize,
         card_spec=card_spec.model_dump(mode="json", exclude_none=True),
         task_spec=task_spec.model_dump(mode="json", exclude_none=True),
@@ -201,7 +266,7 @@ async def _try_generate_template_artifact(
         raise TemplateArchiveError("template artifact validation failed")
 
     try:
-        save_result = ArtifactStore(design_token=archive.compact_dsl).save(artifact)
+        save_result = ArtifactStore(design_token=archive.design_token).save(artifact)
         if inspect.isawaitable(save_result):
             save_result = await save_result
     except (OSError, RuntimeError) as exc:
@@ -227,6 +292,21 @@ async def _try_generate_template_artifact(
         errorCode=plan.errorCode,
         effectiveCapabilities=artifact.effectiveCapabilities,
     )
+
+
+async def _build_route_archive(
+    policy: GenerationRoutePolicy,
+    engine_output: Any,
+    **kwargs: Any,
+) -> Any:
+    if policy.processor_kind == DslProcessorKind.TERSE_NESTED2:
+        terse_kwargs = dict(kwargs)
+        terse_kwargs.pop("protocol_profile")
+        return await build_terse_template_archive(
+            engine_output.terse_dsl_nested2,
+            **terse_kwargs,
+        )
+    return await build_template_archive(engine_output.a2ui, **kwargs)
 
 
 def _with_internal_template_assets(artifact: Any, sources: tuple[str, ...]) -> Any:

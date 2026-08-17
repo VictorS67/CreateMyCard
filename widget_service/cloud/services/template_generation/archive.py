@@ -26,7 +26,7 @@ class TemplateArchiveError(RuntimeError):
 @dataclass(frozen=True)
 class TemplateArchive:
     a2ui: str
-    compact_dsl: str
+    design_token: str
 
 
 async def build_template_archive(
@@ -57,15 +57,61 @@ async def build_template_archive(
         data_capabilities=data_capabilities,
         event_candidates=event_candidates,
     )
-    processor = get_dsl_processor(DslProcessorKind.DESIGN_COMPACT)
-    result = await to_thread.run_sync(processor.process, compact_dsl, context)
+    standard_a2ui = await _process_design_token(
+        compact_dsl,
+        DslProcessorKind.DESIGN_COMPACT,
+        context,
+        label="Compact",
+    )
+    return TemplateArchive(a2ui=standard_a2ui, design_token=compact_dsl)
+
+
+async def build_terse_template_archive(
+    terse_dsl_nested2: str,
+    *,
+    size: str,
+    card_spec: dict[str, Any],
+    task_spec: dict[str, Any],
+    design_protocol_profile: dict[str, Any],
+    design_profile_id: str,
+    data_capabilities: list[Any],
+    event_candidates: list[Any],
+) -> TemplateArchive:
+    """用原始 Terse Processor 回转一次，保证归档 Token 可用于一致性校验。"""
+    context = DslProcessingContext(
+        size=size,
+        card_spec=card_spec,
+        task_spec=task_spec,
+        protocol_profile=design_protocol_profile,
+        design_profile_id=design_profile_id,
+        data_capabilities=data_capabilities,
+        event_candidates=event_candidates,
+    )
+    standard_a2ui = await _process_design_token(
+        terse_dsl_nested2,
+        DslProcessorKind.TERSE_NESTED2,
+        context,
+        label="TerseDSL-Nested-2",
+    )
+    return TemplateArchive(a2ui=standard_a2ui, design_token=terse_dsl_nested2)
+
+
+async def _process_design_token(
+    source_dsl: str,
+    processor_kind: DslProcessorKind,
+    context: DslProcessingContext,
+    *,
+    label: str,
+) -> str:
+    processor = get_dsl_processor(processor_kind)
+    result = await to_thread.run_sync(processor.process, source_dsl, context)
     if result.errors:
         messages = "; ".join(item.repair_message() for item in result.errors)
-        raise TemplateArchiveError(f"template Compact archive is invalid: {messages}")
+        raise TemplateArchiveError(f"template {label} archive is invalid: {messages}")
     if not result.standard_dsl.strip():
-        raise TemplateArchiveError("template Compact archive produced empty A2UI")
+        raise TemplateArchiveError(f"template {label} archive produced empty A2UI")
     _parse_three_messages(result.standard_dsl)
-    return TemplateArchive(a2ui=result.standard_dsl, compact_dsl=compact_dsl)
+    return result.standard_dsl
 
 
 def _adapt_to_dev_profile(

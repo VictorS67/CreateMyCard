@@ -1,9 +1,10 @@
-# 模板路由与双协议产物设计
+# Compact/Terse 模板路由与双产物设计
 
 ## 设计目标
 
-模板是 `generateWidgetCardCompactDsl` create 场景的内部生成方式，不新增外部协议，也不改变原始 dev
-失败、降级、OBS 或多轮编辑契约。原始入口只负责构造既有 `GenerationRoutePolicy`，随后调用模板路由门面。
+模板是 Compact 和 TerseDSL-Nested-2 create 场景的内部生成方式，不新增外部协议。原始入口只负责构造
+既有 `GenerationRoutePolicy`，随后调用对应模板路由门面。Compact 保留 dev 原有回退契约；Terse 使用严格
+模板契约。
 
 ## 路由状态机
 
@@ -25,6 +26,20 @@ generateWidgetCardCompactDsl
             ├─ dev Compact Processor → 最终 A2UI
             ├─ dev ArtifactValidator
             └─ ArtifactStore 保存 genui + designcompactdsl
+```
+
+```text
+generateWidgetCardTerseDslNested2
+  └─ route_terse_nested2_generation
+       ├─ edit → failed
+       └─ create
+            ├─ 第一层 LLM 和服务端完整覆盖校验
+            │    └─ 未匹配、字段未完整覆盖或模型不可用 → failed
+            ├─ 第二层 LLM、参数校验和模板展开
+            │    └─ 任一失败 → failed
+            ├─ 展开后的 TerseDSL-Nested-2 → 原始 Terse Processor → 最终 A2UI
+            ├─ dev ArtifactValidator
+            └─ ArtifactStore 保存 genui + 展开后的 TerseDSL-Nested-2
 ```
 
 ## 为什么先归档 Compact 再确定最终 A2UI
@@ -55,8 +70,11 @@ generateWidgetCardCompactDsl
 
 `before_model_call` 由门面包装为单次通知。第一层已经触发通知时，即使回退原始模型，也不会重复下发开始事件。
 
+Terse 路线没有回退分支：create 模板不匹配时返回 `failed`，edit 也直接返回 `failed`。旧 Python 模板
+流水线仅通过 `legacy_python.route_legacy_python_terse_generation(...)` 作为问题定位入口保留；生产默认入口
+不引用该函数，`widget_generation_service.py` 中的切换点注释用于需要时进行临时对照。
+
 ## 对原始 dev 的修改边界
 
-`widget_generation_service.py` 只增加公共入口 import，并把 Compact 路由末尾的原始调用替换成一次
-`route_compact_generation(...)` 调用。A2UI Form、TerseDSL-Nested-2、能力注册、API、配置、日志和批量接口
-均不需要为模板功能修改。
+`widget_generation_service.py` 只增加公共入口 import，并将 Compact、Terse 两个入口分别收敛为一次门面调用。
+A2UI Form、能力注册、API、配置、日志和批量接口均不需要为模板功能修改。

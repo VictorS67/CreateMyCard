@@ -8,8 +8,9 @@ from collections.abc import Awaitable, Callable
 from itertools import combinations, product
 from typing import Any
 
-from models.generation import CandidateDataBinding, TaskSpec, WidgetSize
 from pydantic import ValidationError
+
+from models.generation import CandidateDataBinding, TaskSpec, WidgetSize
 from services.template_generation.engine.cardplan.prompt import (
     admitted_provider_template_variants,
 )
@@ -30,6 +31,8 @@ from .content_selectors import (
     battery_overview_is_eligible,
     bluetooth_device_overview_is_eligible,
     bluetooth_device_overview_variants,
+    countdown_overview_is_eligible,
+    countdown_overview_variants,
     date_overview_is_eligible,
     date_overview_query_is_supported,
     heart_rate_overview_is_eligible,
@@ -186,8 +189,10 @@ def build_advanced_scope_prompt(
                 "趋势、历史曲线或仅请求 freeMemText 时不得选择；不得从百分比推断内存不足、"
                 "正常或告警。一键清理只在用户明确请求且存在 event.clean.memory 候选时可用。"
                 "AppUsageOverview 当前只允许 singleApp：必须有 GetAppUsageDuration，用户明确"
-                "指定一个应用并请求该应用今日使用时长，同一可信数据树中的 appName、"
-                "durationText、updatedAt 均为非空字符串，且 durationText 可由服务端按小时/分钟"
+                "指定一个应用并请求该应用使用时长，当日口径由 Provider 能力定义；同一"
+                "可信数据树中的 appName 和"
+                "durationText 均为非空字符串，updatedAt 可选且只在存在时展示；明确请求更新时间时"
+                "updatedAt 才必须存在。durationText 需可由服务端按小时/分钟"
                 "无损解析。总屏幕时间、多应用、排行、限额、超限、剩余时长、比例/进度、趋势/"
                 "历史和分类汇总均不得选择；纯秒或含秒时长也不得选择。dailyLimit、overLimit、"
                 "topApps 虽在 Registry 声明但当前 capability 未启用。管控动作只在用户明确请求且"
@@ -199,8 +204,10 @@ def build_advanced_scope_prompt(
                 "热量或距离时对应事实必须存在；缺项只有需求仍仅为步数时才能降为 steps。目标步数、"
                 "达成率、目标环/进度、活动分钟、站立小时、趋势、单独 calories/exercise 均不得选择，"
                 "也不得生成 Ring 或 Progress。Activity 无动作。"
-                "WorkoutOverview 当前只开放 latest 和 countdown。latest 要求运动类型、时长、热量"
-                "三个非空可信字符串，暂无运动视为空态；countdown 只接受非负整数剩余天数，0 天有效。"
+                "WorkoutOverview 当前只开放 latest，要求运动类型、时长、热量三个非空可信"
+                "字符串，暂无运动视为空态。CountdownOverview 只表达 GetCountdownDays 的非负整数"
+                "剩余天数，0 天有效；适用于高考、考试、节日、纪念日、旅行或赛事等通用倒计时，"
+                "不得补造事件名或目标日期。"
                 "实时/计划状态、距离、配速、轨迹、心率区间、赛事名、训练计划、总里程和完成率均不得"
                 "选择；倒计时不得生成进度或补造名称。运动动作只有用户请求动作且本轮存在批准的"
                 " event.open.health.sport 时可用。"
@@ -986,6 +993,10 @@ def _component_candidates(
                     or workout_overview_is_eligible(task_spec, available_capability_ids)
                 )
                 and (
+                    item.name != "CountdownOverview"
+                    or countdown_overview_is_eligible(task_spec, available_capability_ids)
+                )
+                and (
                     item.name != "HeartRateOverview"
                     or heart_rate_overview_is_eligible(task_spec, available_capability_ids)
                 )
@@ -1086,6 +1097,8 @@ def _effective_candidate_variants(
         return activity_overview_variants(task_spec, capability_ids)
     if capability.name == "WorkoutOverview":
         return workout_overview_variants(task_spec, capability_ids)
+    if capability.name == "CountdownOverview":
+        return countdown_overview_variants(task_spec, capability_ids)
     if capability.name == "SleepOverview":
         return sleep_overview_variants(task_spec, capability_ids)
     if capability.name == "BluetoothDeviceOverview":

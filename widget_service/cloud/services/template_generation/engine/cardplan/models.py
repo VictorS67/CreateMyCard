@@ -121,6 +121,12 @@ class RecommendedVariantLayout(StrictModel):
     inline_layout_token: str = Field(alias="inlineLayoutToken")
 
 
+class TemplateLayoutActionStyle(StrictModel):
+    """Provider-owned style override for an enclosing layout Action."""
+
+    background_opacity: float = Field(alias="backgroundOpacity", ge=0, le=1)
+
+
 class TemplateDefinition(StrictModel):
     template_id: str = Field(alias="templateId")
     version: int = Field(gt=0)
@@ -141,6 +147,10 @@ class TemplateDefinition(StrictModel):
     )
     allowed_parent_components: tuple[str, ...] = Field(alias="allowedParentComponents")
     action_policy: Literal["none", "optional", "required"] = Field(alias="actionPolicy")
+    layout_action_style: TemplateLayoutActionStyle | None = Field(
+        default=None,
+        alias="layoutActionStyle",
+    )
     supported_sizes: tuple[str, ...] = Field(alias="supportedSizes")
     allowed_design_tokens: tuple[str, ...] = Field(alias="allowedDesignTokens")
     allowed_layout_tokens: tuple[str, ...] = Field(alias="allowedLayoutTokens")

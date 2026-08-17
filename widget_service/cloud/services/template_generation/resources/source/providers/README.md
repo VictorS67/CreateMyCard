@@ -13,12 +13,16 @@
 - `app-usage-cli`：`GetAppUsageDuration` → `AppUsageOverview@1`
 - `health-sport-cli`：`GetHealthAndSportSummary` → `ActivityOverview@1`、
   `WorkoutOverview@1`、`HeartRateOverview@1`、`SleepOverview@1`
-- `countdown-cli`：`GetCountdownDays` → `WorkoutCountdown@1`
+- `countdown-cli`：`GetCountdownDays` → `CountdownOverview@1`
 - `earphone-cli`：`GetEarphoneInfo` → `BluetoothDeviceOverview@1`
 
 除 `GetSystemMemInfo` 使用 Bundle 本地 Schema 外，
 其余能力均只读引用正式能力注册表。新增或修改 `.cardtpl` 后必须更新对应 SHA-256，
 再重建 CardPlan 清单并运行 Provider Template 测试。
+
+Provider 若需要覆盖外层布局 Action 的底托透明度，可在 `#Template` 中声明
+`layoutActionStyle: { backgroundOpacity: 0.1 }`。运行时仅在该 Provider Template 独占业务区时，
+以主题 Action 前景色的 RGB 和声明透明度生成底托色；多业务组合仍使用主题默认 Action 样式。
 
 ```bash
 .venv/bin/python scripts/build_cardplan_bundle.py

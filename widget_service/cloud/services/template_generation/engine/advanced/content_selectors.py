@@ -10,7 +10,7 @@ from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from config.config import get_settings
 from models.generation import TaskSpec
@@ -91,6 +91,7 @@ _PROVIDER_COMPONENT_FIELDS: dict[str, tuple[str, ...]] = {
         "rightBatteryLevel",
         "batteryLevel",
     ),
+    "CountdownOverview": ("countdownDays",),
 }
 
 
@@ -245,14 +246,13 @@ class DurationSegments:
 class AppUsageOverviewFacts:
     app_name: str
     duration_text: str
-    updated_at: str
+    updated_at: str | None
     duration: DurationSegments
 
     def as_selector(self) -> dict[str, dict[str, Any]]:
         selected = {
             "appName": _field(self.app_name, "可信单应用名称"),
             "durationText": _field(self.duration_text, "可信单应用今日使用时长原文"),
-            "updatedAt": _field(self.updated_at, "可信应用使用时长更新时间"),
             "durationPrimaryValueText": _field(
                 self.duration.primary_value,
                 "从可信使用时长无损解析的主数值",
@@ -262,6 +262,11 @@ class AppUsageOverviewFacts:
                 "从可信使用时长无损解析的主单位",
             ),
         }
+        if self.updated_at is not None:
+            selected["updatedAt"] = _field(
+                self.updated_at,
+                "可信应用使用时长更新时间",
+            )
         if self.duration.secondary_value is not None:
             selected["durationSecondaryValueText"] = _field(
                 self.duration.secondary_value,
@@ -792,17 +797,6 @@ _WORKOUT_LATEST_QUERY_TERMS = (
     "锻炼记录",
     "最近训练",
 )
-_WORKOUT_COUNTDOWN_QUERY_TERMS = (
-    "workout countdown",
-    "training countdown",
-    "race countdown",
-    "days until workout",
-    "运动倒计时",
-    "训练倒计时",
-    "赛事倒计时",
-    "比赛倒计时",
-    "还有几天",
-)
 _WORKOUT_GENERIC_QUERY_TERMS = (
     "workout",
     "exercise",
@@ -811,6 +805,18 @@ _WORKOUT_GENERIC_QUERY_TERMS = (
     "锻炼",
     "训练",
     "健身",
+)
+_COUNTDOWN_QUERY_TERMS = (
+    "countdown",
+    "days until",
+    "remaining days",
+    "days left",
+    "倒计时",
+    "倒数",
+    "还剩",
+    "剩余天数",
+    "还有几天",
+    "多少天",
 )
 _WORKOUT_ACTION_QUERY_TERMS = (
     "start workout",
@@ -1150,6 +1156,17 @@ _BLUETOOTH_LEFT_QUERY_TERMS = ("left ear", "left earbud", "左耳")
 _BLUETOOTH_RIGHT_QUERY_TERMS = ("right ear", "right earbud", "右耳")
 _BLUETOOTH_BOTH_EARS_QUERY_TERMS = ("both earbuds", "both ears", "双耳", "左右耳")
 _BLUETOOTH_CASE_QUERY_TERMS = ("charging case", "earbud case", "case battery", "充电盒", "耳机盒")
+_BLUETOOTH_CONNECTION_QUERY_TERMS = (
+    "connection status",
+    "connected",
+    "connect",
+    "连接状态",
+    "已连接",
+    "连上",
+    "连没连",
+    "是否连接",
+)
+_BLUETOOTH_BATTERY_QUERY_TERMS = ("battery", "电量", "剩余电")
 _BLUETOOTH_DAILY_MUSIC_QUERY_TERMS = ("daily recommendation", "每日推荐")
 _BLUETOOTH_FAVORITE_MUSIC_QUERY_TERMS = (
     "favorite playlist",
@@ -1222,14 +1239,6 @@ _MEMORY_CLEAN_QUERY_TERMS = (
     "一键清理",
 )
 
-_APP_USAGE_TODAY_QUERY_TERMS = (
-    "today",
-    "today's",
-    "today’s",
-    "今天",
-    "今日",
-    "本日",
-)
 _APP_USAGE_DURATION_QUERY_TERMS = (
     "app usage duration",
     "usage duration",
@@ -1408,10 +1417,10 @@ def project_content_component_facts(
                 latest_facts = extract_workout_latest_facts(schema)
                 if latest_facts is not None:
                     selected.update(latest_facts.as_selector())
-            if "countdown" in workout_variants:
-                countdown_facts = extract_workout_countdown_facts(schema)
-                if countdown_facts is not None:
-                    selected.update(countdown_facts.as_selector())
+        elif component_id == "CountdownOverview":
+            countdown_facts = extract_countdown_overview_facts(schema)
+            if countdown_facts is not None:
+                selected = countdown_facts.as_selector()
         elif component_id == "HeartRateOverview":
             heart_rate_facts = extract_heart_rate_overview_facts(schema)
             if heart_rate_facts is not None:
@@ -1477,8 +1486,6 @@ def _provider_fields(component_id: str, capability_ids: set[str]) -> tuple[str, 
     fields: list[str] = []
     if "GetHealthAndSportSummary" in capability_ids:
         fields.extend(("exerciseTypeName", "exerciseDurationText", "exerciseCalorieText"))
-    if "GetCountdownDays" in capability_ids:
-        fields.append("countdownDays")
     return tuple(fields)
 
 
@@ -1646,11 +1653,6 @@ def relaxed_workout_overview_variants(
         and extract_workout_latest_facts(task_spec.dataModelSchema) is not None
     ):
         variants.append("latest")
-    if (
-        "GetCountdownDays" in capability_ids
-        and extract_workout_countdown_facts(task_spec.dataModelSchema) is not None
-    ):
-        variants.append("countdown")
     return tuple(variants)
 
 
@@ -1666,12 +1668,7 @@ def workout_overview_variants(
         compact,
         _WORKOUT_LATEST_QUERY_TERMS,
     )
-    requests_countdown = _contains_query_term(
-        normalized,
-        compact,
-        _WORKOUT_COUNTDOWN_QUERY_TERMS,
-    )
-    if not requests_latest and not requests_countdown:
+    if not requests_latest:
         requests_latest = _contains_query_term(
             normalized,
             compact,
@@ -1681,10 +1678,36 @@ def workout_overview_variants(
     if requests_latest and "GetHealthAndSportSummary" in capability_ids:
         if extract_workout_latest_facts(task_spec.dataModelSchema) is not None:
             variants.append("latest")
-    if requests_countdown and "GetCountdownDays" in capability_ids:
-        if extract_workout_countdown_facts(task_spec.dataModelSchema) is not None:
-            variants.append("countdown")
     return tuple(variants)
+
+
+def countdown_overview_is_eligible(
+    task_spec: TaskSpec,
+    capability_ids: set[str],
+) -> bool:
+    return bool(countdown_overview_variants(task_spec, capability_ids))
+
+
+def relaxed_countdown_overview_variants(
+    task_spec: TaskSpec,
+    capability_ids: set[str],
+) -> tuple[str, ...]:
+    if (
+        "GetCountdownDays" in capability_ids
+        and extract_countdown_overview_facts(task_spec.dataModelSchema) is not None
+    ):
+        return ("countdown",)
+    return ()
+
+
+def countdown_overview_variants(
+    task_spec: TaskSpec,
+    capability_ids: set[str],
+) -> tuple[str, ...]:
+    normalized, compact = _normalized_query(task_spec.userQuery)
+    if not _contains_query_term(normalized, compact, _COUNTDOWN_QUERY_TERMS):
+        return ()
+    return relaxed_countdown_overview_variants(task_spec, capability_ids)
 
 
 def approved_workout_action_ids(task_spec: TaskSpec) -> tuple[str, ...]:
@@ -1853,6 +1876,26 @@ def bluetooth_device_overview_variants(
     if requests_case and facts.case_battery_level is None:
         return ()
     return ("earbuds",)
+
+
+def bluetooth_device_overview_template_focus(query: str) -> Literal["connection", "case", "all"]:
+    """Return the deterministic 2x2 Provider Template focus requested by the user."""
+    normalized, compact = _normalized_query(query)
+    requests_left = _contains_query_term(normalized, compact, _BLUETOOTH_LEFT_QUERY_TERMS)
+    requests_right = _contains_query_term(normalized, compact, _BLUETOOTH_RIGHT_QUERY_TERMS)
+    requests_both = _contains_query_term(normalized, compact, _BLUETOOTH_BOTH_EARS_QUERY_TERMS)
+    requests_case = _contains_query_term(normalized, compact, _BLUETOOTH_CASE_QUERY_TERMS)
+    requests_battery = _contains_query_term(normalized, compact, _BLUETOOTH_BATTERY_QUERY_TERMS)
+    requests_connection = _contains_query_term(
+        normalized,
+        compact,
+        _BLUETOOTH_CONNECTION_QUERY_TERMS,
+    )
+    if requests_connection and not requests_battery:
+        return "connection"
+    if requests_case and not any((requests_left, requests_right, requests_both)):
+        return "case"
+    return "all"
 
 
 def approved_bluetooth_music_action_ids(task_spec: TaskSpec) -> tuple[str, ...]:
@@ -2136,17 +2179,12 @@ def app_usage_overview_is_eligible(
 
 
 def app_usage_overview_query_is_supported(query: str, app_name: str) -> bool:
-    """Accept only one named app's current-day duration intent."""
+    """Accept one named app's duration intent; the Provider defines the current-day window."""
     normalized, compact = _normalized_query(query)
     unsupported = _contains_query_term(
         normalized,
         compact,
         _UNSUPPORTED_APP_USAGE_QUERY_TERMS,
-    )
-    requests_today = _contains_query_term(
-        normalized,
-        compact,
-        _APP_USAGE_TODAY_QUERY_TERMS,
     )
     requests_duration = _contains_query_term(
         normalized,
@@ -2154,7 +2192,7 @@ def app_usage_overview_query_is_supported(query: str, app_name: str) -> bool:
         _APP_USAGE_DURATION_QUERY_TERMS,
     )
     normalized_app = re.sub(r"[\s_./:-]+", "", app_name.casefold())
-    if unsupported or not requests_today or not requests_duration:
+    if unsupported or not requests_duration:
         return False
     if not normalized_app or normalized_app not in compact:
         if normalized_app not in _APP_USAGE_PLACEHOLDER_NAMES:
@@ -2559,7 +2597,7 @@ def _projected_resource_usage_facts(
 def extract_app_usage_overview_facts(
     schema: dict[str, Any],
 ) -> AppUsageOverviewFacts | None:
-    """Extract one named app, its lossless duration, and sibling update time."""
+    """Extract one named app, its lossless duration, and optional update time."""
     data = schema.get("data")
     if isinstance(data, dict):
         projected = data.get("AppUsageOverview")
@@ -2579,7 +2617,7 @@ def extract_app_usage_overview_facts(
         facts = _projected_app_usage_facts(candidate)
         if facts is not None:
             return facts
-    for provider in _direct_field_objects(schema.get("data", {}), ("appUsage", "updatedAt")):
+    for provider in _direct_field_objects(schema.get("data", {}), ("appUsage",)):
         app_usage = provider.get("appUsage")
         if not isinstance(app_usage, dict):
             continue
@@ -2599,7 +2637,7 @@ def _projected_app_usage_facts(value: dict[str, Any]) -> AppUsageOverviewFacts |
     app_name = _trusted_string(value.get("appName"))
     duration_text = _trusted_string(value.get("durationText"))
     updated_at = _trusted_string(value.get("updatedAt"))
-    if app_name is None or duration_text is None or updated_at is None:
+    if app_name is None or duration_text is None:
         return None
     duration = parse_duration_text(duration_text)
     if duration is None:
@@ -2692,15 +2730,29 @@ def extract_workout_latest_facts(
 def extract_workout_countdown_facts(
     schema: dict[str, Any],
 ) -> WorkoutCountdownFacts | None:
-    """Extract a non-negative countdown; zero is a valid boundary value."""
+    """Compatibility entry for legacy diagnostics; new routing uses CountdownOverview."""
+    return extract_countdown_overview_facts(schema)
+
+
+def extract_countdown_overview_facts(
+    schema: dict[str, Any],
+) -> WorkoutCountdownFacts | None:
+    """Extract a generic non-negative countdown; zero is a valid boundary value."""
     for candidate in _direct_or_provider_candidates(
         schema,
-        "WorkoutOverview",
+        "CountdownOverview",
         "GetCountdownDays",
     ):
         countdown_days = _trusted_nonnegative_integer(candidate.get("countdownDays"))
         if countdown_days is not None:
             return WorkoutCountdownFacts(countdown_days=countdown_days)
+    data = schema.get("data")
+    if isinstance(data, dict):
+        legacy = data.get("WorkoutOverview")
+        if isinstance(legacy, dict):
+            countdown_days = _trusted_nonnegative_integer(legacy.get("countdownDays"))
+            if countdown_days is not None:
+                return WorkoutCountdownFacts(countdown_days=countdown_days)
     return None
 
 
@@ -2799,6 +2851,7 @@ def _direct_or_provider_candidates(
             if provider_id == "GetHealthAndSportSummary"
             else ("countdownDays",)
         ),
+        "CountdownOverview": ("countdownDays",),
         "HeartRateOverview": ("exerciseHeartRateAvg",),
         "SleepOverview": ("nightSleepDurationText",),
     }.get(component_id, ())

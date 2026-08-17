@@ -13,10 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from config.config import get_settings
 from jsonschema import Draft202012Validator
-from models.generation import TaskSpec
 from pydantic import Field
+
+from config.config import get_settings
+from models.generation import TaskSpec
 
 from .models import (
     StrictModel,
@@ -253,6 +254,7 @@ def compile_card_template(
             "compatibleThemeProfileIds": compatible_themes,
             "allowedParentComponents": allowed_parents,
             "actionPolicy": "none",
+            "layoutActionStyle": header.get("layoutActionStyle"),
             "supportedSizes": tuple(variant_names),
             "allowedDesignTokens": [],
             "allowedLayoutTokens": [],
@@ -836,6 +838,7 @@ def _validate_header_keys(header: dict[str, Any]) -> None:
         "domainTags",
         "compatibleThemeProfileIds",
         "allowedParentComponents",
+        "layoutActionStyle",
         "bindings",
         "params",
         "limits",

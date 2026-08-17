@@ -12,6 +12,12 @@ from typing import Any, Literal, TypeGuard
 ThemeMode = Literal["light", "dark"]
 
 _A2UI_EXTENDED_CATALOG_ID = "ohos.a2ui.extended.catalog.form"
+_SUPPORTED_A2UI_EXTENDED_CATALOG_IDS = frozenset(
+    {
+        "ohos.a2ui.extended.catalog",
+        "ohos.a2ui.extended.catalog.form",
+    }
+)
 _A2UI_ICON_BUTTON_LABEL = "\u200b"
 _COMPONENT_TYPES = frozenset(
     {
@@ -709,7 +715,7 @@ def _validate_a2ui_archive_envelope(
     }
     if len(surface_ids) != 1 or not all(isinstance(item, str) and item for item in surface_ids):
         raise CompactDslConversionError("A2UI archive surfaceId values must match.")
-    if create_surface.get("catalogId") != _A2UI_EXTENDED_CATALOG_ID:
+    if create_surface.get("catalogId") not in _SUPPORTED_A2UI_EXTENDED_CATALOG_IDS:
         raise CompactDslConversionError("A2UI archive catalogId is unsupported.")
     root_id = update_components.get("root")
     if root_id != "root":

@@ -16,7 +16,10 @@ from services.generation_pipeline import (
     DslProcessorKind,
     GenerationRoutePolicy,
 )
-from services.protocol_registry import A2UI_FORM_PROTOCOL_PROFILE_ID
+from services.protocol_registry import (
+    A2UI_FORM_PROTOCOL_PROFILE_ID,
+    A2UIProtocolRegistry,
+)
 from services.template_generation import facade
 from services.template_generation.engine.advanced.scope_planner import (
     TemplateRouteNotApplicable,
@@ -201,9 +204,8 @@ async def test_weather_template_generates_a2ui_and_compact_artifact(monkeypatch)
     assert captured["compact"]
     assert "{{ ${/data/weather/current/condition}" in captured["compact"]
     messages = [json.loads(line) for line in captured["artifact"].genui.splitlines()]
-    assert messages[0]["createSurface"]["catalogId"] == (
-        "ohos.a2ui.extended.catalog.form"
-    )
+    protocol_profile = A2UIProtocolRegistry(A2UI_FORM_PROTOCOL_PROFILE_ID).get_profile()
+    assert messages[0]["createSurface"]["catalogId"] == protocol_profile["catalogId"]
     root = next(
         item
         for item in messages[1]["updateComponents"]["components"]

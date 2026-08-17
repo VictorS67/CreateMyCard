@@ -1392,19 +1392,37 @@ def _workout_countdown_overview(
                 "width": "matchParent",
                 "height": "matchParent",
                 "itemMargin": registry.ux_tokens["denseInnerGap"],
-                "justifyContent": "spaceBetween",
+                "justifyContent": "start",
                 "alignItems": "start",
                 "constraintSize": {"minWidth": 0, "minHeight": 0},
             },
         ),
         (
             _overview_header("运动倒计时", source_icon, registry),
-            _overview_value_row(
-                str(facts.countdown_days),
-                "天",
-                accent="#FFFFFFFF",
-                registry=registry,
-                hero=True,
+            Nested2Node(
+                "Column",
+                (
+                    "compact",
+                    {
+                        "width": "matchParent",
+                        "layoutWeight": 1,
+                        "justifyContent": "center",
+                        "alignItems": "center",
+                        "constraintSize": {"minWidth": 0, "minHeight": 0},
+                    },
+                ),
+                (
+                    _merge_node_options(
+                        _overview_value_row(
+                            str(facts.countdown_days),
+                            "天",
+                            accent="#FFFFFFFF",
+                            registry=registry,
+                            hero=True,
+                        ),
+                        {"justifyContent": "center"},
+                    ),
+                ),
             ),
         ),
     )
@@ -2238,6 +2256,7 @@ def _battery_compact_overview(
                 12,
                 400,
                 max_lines=2,
+                font_color="#99000000",
             ),
             bottom_region,
         ),
@@ -2324,7 +2343,7 @@ def _battery_peer_overview(
         children.append(_battery_text("设备电量", "subtitle", 12, 500))
     children.extend(
         (
-            _battery_ring(facts, battery_icon, registry),
+            _battery_ring(facts, battery_icon, registry, icon_size=20),
             _battery_text(
                 facts.level_text,
                 "compact-title",
@@ -2357,7 +2376,7 @@ def _battery_peer_overview(
                 "width": "matchParent",
                 "height": "matchParent",
                 "itemMargin": 2,
-                "justifyContent": "center",
+                "justifyContent": "end",
                 "alignItems": "center",
                 "clip": True,
                 "constraintSize": {"minWidth": 0, "minHeight": 0},
@@ -2401,6 +2420,7 @@ def _battery_ring(
     registry: CardPlanRegistry,
     *,
     ring_size: int | None = None,
+    icon_size: int | None = None,
 ) -> Nested2Node:
     size = ring_size or registry.ux_tokens["ringDefaultSize"]
     ring_color = _WARNING_DATA_COLOR
@@ -2423,7 +2443,7 @@ def _battery_ring(
         )
     ]
     if isinstance(battery_icon, str):
-        icon_size = registry.ux_tokens["ringHeroIconSize"]
+        resolved_icon_size = icon_size or registry.ux_tokens["ringHeroIconSize"]
         children.append(
             Nested2Node(
                 "Image",
@@ -2431,8 +2451,8 @@ def _battery_ring(
                     battery_icon,
                     "icon",
                     {
-                        "width": icon_size,
-                        "height": icon_size,
+                        "width": resolved_icon_size,
+                        "height": resolved_icon_size,
                         "objectFit": "contain",
                         "fillColor": _ICON_SECONDARY,
                     },
@@ -2527,12 +2547,13 @@ def _battery_text(
     *,
     max_lines: int = 1,
     text_align: str | None = None,
+    font_color: str | None = None,
 ) -> Nested2Node:
     options: dict[str, Any] = {
         "width": "matchParent",
         "fontSize": font_size,
         "fontWeight": font_weight,
-        "fontColor": "#E6000000" if font_size >= 12 else "#99000000",
+        "fontColor": font_color or ("#E6000000" if font_size >= 12 else "#99000000"),
         "maxLines": max_lines,
         "textOverflow": "ellipsis",
         "constraintSize": {"minWidth": 0, "minHeight": 0},
@@ -2936,8 +2957,7 @@ def _expand_app_usage_overview_call(
                 "compact",
                 {
                     "layoutWeight": 1,
-                    "itemMargin": registry.ux_tokens["denseInnerGap"],
-                    "justifyContent": "center",
+                    "justifyContent": "end",
                     "alignItems": "start",
                     "clip": True,
                     "constraintSize": {"minWidth": 0, "minHeight": 0},
@@ -2953,8 +2973,8 @@ def _expand_app_usage_overview_call(
                     "_advancedComponent": "AppUsageOverview",
                     "width": "matchParent",
                     "height": "matchParent",
-                    "itemMargin": registry.ux_tokens["denseInnerGap"],
-                    "justifyContent": "spaceBetween",
+                    "itemMargin": 4,
+                    "justifyContent": "start",
                     "alignItems": "start",
                     "clip": True,
                     "constraintSize": {"minWidth": 0, "minHeight": 0},
@@ -3186,7 +3206,7 @@ def _expand_resource_usage_overview_call(
         facts,
         ring_size=ring_size,
         icon=icon,
-        show_center_percent=not isinstance(icon, str),
+        show_center_percent=not compact_peer and not isinstance(icon, str),
     )
     if role == "peer":
         children: list[Nested2Node] = []
@@ -3200,11 +3220,12 @@ def _expand_resource_usage_overview_call(
                 )
             )
         children.append(ring)
-        if isinstance(icon, str):
+        if compact_peer or isinstance(icon, str):
             children.append(
                 _resource_usage_percent_row(
                     facts,
                     font_size=14,
+                    font_weight=700 if compact_peer else 600,
                     width="matchParent",
                     justify_content="center",
                 )
@@ -3238,7 +3259,7 @@ def _expand_resource_usage_overview_call(
                     "width": "matchParent",
                     "height": "matchParent",
                     "itemMargin": 2,
-                    "justifyContent": "center",
+                    "justifyContent": "end",
                     "alignItems": "center",
                     "clip": True,
                     "constraintSize": {"minWidth": 0, "minHeight": 0},
@@ -3349,8 +3370,8 @@ def _resource_usage_ring(
                     icon,
                     "icon",
                     {
-                        "width": 24,
-                        "height": 24,
+                        "width": 20,
+                        "height": 20,
                         "objectFit": "contain",
                         "fillColor": _ICON_SECONDARY,
                     },
@@ -3386,6 +3407,7 @@ def _resource_usage_percent_row(
     facts: ResourceUsageOverviewFacts,
     *,
     font_size: int,
+    font_weight: int = 600,
     width: int | str | None = None,
     justify_content: str = "start",
 ) -> Nested2Node:
@@ -3409,7 +3431,7 @@ def _resource_usage_percent_row(
                 number,
                 "body",
                 font_size=font_size,
-                font_weight=600,
+                font_weight=font_weight,
             ),
             _resource_usage_text("%", "subtitle", font_size=10, font_weight=400),
         ),
@@ -3484,6 +3506,7 @@ def _resource_usage_text(
     font_weight: int,
     fill_width: bool = False,
     text_align: str | None = None,
+    font_color: str | None = None,
 ) -> Nested2Node:
     options: dict[str, Any] = {
         "fontSize": font_size,
@@ -3497,6 +3520,8 @@ def _resource_usage_text(
         options["width"] = "matchParent"
     if text_align is not None:
         options["textAlign"] = text_align
+    if font_color is not None:
+        options["fontColor"] = font_color
     return Nested2Node(
         "Text",
         (
@@ -6217,7 +6242,8 @@ def _inject_resource_battery_title(
         title,
         "compact-title",
         font_size=12,
-        font_weight=600,
+        font_weight=400,
+        font_color="#99182431",
     )
     body = _with_flex_weight(node, 1, axis="vertical")
     return Nested2Node(

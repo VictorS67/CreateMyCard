@@ -538,7 +538,9 @@ def _composition_rules(ux_layout_root: bool) -> tuple[str, ...]:
             'Action 只允许 PillAction({"actionId":"批准ID","icon":"可选批准素材"})、'
             'IconAction({"actionId":"批准ID","icon":"必填批准素材"}) 或 '
             'ActionTile({"actionId":"批准ID","icon":"可选批准素材"})。',
-            "2x2 的主 Action 优先 PillAction；天气、拨号等仅图标入口可用 IconAction；"
+            "2x2 的主 Action 通常使用 PillAction，但这是通用默认而非业务覆盖规则；"
+            "BatteryOverview 的省电动作在 size=2x2 时必须使用末尾唯一 IconAction，禁止 PillAction；"
+            "size=2x4 才允许该 Battery 动作使用 PillAction；天气、拨号等仅图标入口可用 IconAction；"
             "ActionTile 默认只用于 2x4，2x2 仅 ActionMatrixLayout 可用。"
             "禁止标准 Button、事件对象和 Action 局部 Template。",
         )

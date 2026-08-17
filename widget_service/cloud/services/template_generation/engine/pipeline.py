@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -65,6 +66,13 @@ async def generate_template_a2ui(
     model_client: Any,
 ) -> TemplateEngineOutput:
     """先做 LLM 全量覆盖判断，再用受信模板确定性展开为 A2UI。"""
+    task_spec_payload = task_spec.model_dump(mode="json")
+    task_spec_message = (
+        f"{_MODULE} task_spec_received "
+        f"payload={json.dumps(task_spec_payload, ensure_ascii=False, separators=(',', ':'))}"
+    )
+    print(task_spec_message, flush=True)
+    logger.info(task_spec_message)
     try:
         registry = get_cardplan_registry()
         available_capability_ids = _card_spec_capability_ids(card_spec)
@@ -75,6 +83,12 @@ async def generate_template_a2ui(
         )
         selected_task_spec = apply_content_selectors(task_spec, effective_capability_ids)
         data_shape = extract_data_shape(selected_task_spec)
+        selected_task_spec_message = (
+            f"{_MODULE} task_spec_after_content_selectors "
+            f"payload={json.dumps(selected_task_spec.model_dump(mode='json'), ensure_ascii=False, separators=(',', ':'))}"
+        )
+        print(selected_task_spec_message, flush=True)
+        logger.info(selected_task_spec_message)
     except ValueError as exc:
         raise TemplateRouteNotApplicable("template registry is unavailable") from exc
 

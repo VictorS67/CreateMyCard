@@ -264,6 +264,22 @@ _COLOR_TOKENS = {
     "mask_fifth": "#19000000",
     "mask_sixth": "#0C000000",
 }
+
+
+def _opacity_10_percent(color: str) -> str:
+    """Compute 10% opacity version of an ARGB color string."""
+    if not color.startswith("#") or len(color) != 9:
+        return color  # Not a valid ARGB color, return as-is
+    # Extract RGB components (positions 3-8 in #AARRGGBB)
+    rgb = color[3:]  # Get RRGGBB part
+    # 10% opacity = 25.5 ≈ 25 = 0x19
+    return f"#19{rgb}"
+
+
+# Add computed color tokens for 10% opacity backgrounds
+_COLOR_TOKENS["font_emphasize_10"] = _opacity_10_percent(_COLOR_TOKENS["font_emphasize"])
+
+
 _TEXT_DESIGNS: dict[str, dict[str, Any]] = {
     "display-l": {"fontSize": 56, "fontWeight": 300},
     "display-m": {"fontSize": 48, "fontWeight": 300},

@@ -310,6 +310,7 @@ async def _build_route_archive(
         terse_kwargs.pop("protocol_profile")
         return await build_terse_template_archive(
             engine_output.terse_dsl_nested2,
+            template_a2ui=engine_output.a2ui,
             **terse_kwargs,
         )
     return await build_template_archive(engine_output.a2ui, **kwargs)

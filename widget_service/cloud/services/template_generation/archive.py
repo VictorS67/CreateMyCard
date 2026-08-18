@@ -69,6 +69,7 @@ async def build_template_archive(
 async def build_terse_template_archive(
     terse_dsl_nested2: str,
     *,
+    template_a2ui: str,
     size: str,
     card_spec: dict[str, Any],
     task_spec: dict[str, Any],
@@ -77,23 +78,9 @@ async def build_terse_template_archive(
     data_capabilities: list[Any],
     event_candidates: list[Any],
 ) -> TemplateArchive:
-    """用原始 Terse Processor 回转一次，保证归档 Token 可用于一致性校验。"""
-    context = DslProcessingContext(
-        size=size,
-        card_spec=card_spec,
-        task_spec=task_spec,
-        protocol_profile=design_protocol_profile,
-        design_profile_id=design_profile_id,
-        data_capabilities=data_capabilities,
-        event_candidates=event_candidates,
-    )
-    standard_a2ui = await _process_design_token(
-        terse_dsl_nested2,
-        DslProcessorKind.TERSE_NESTED2,
-        context,
-        label="TerseDSL-Nested-2",
-    )
-    return TemplateArchive(a2ui=standard_a2ui, design_token=terse_dsl_nested2)
+    """归档模板引擎已经编译并校验通过的 Terse A2UI。"""
+    _parse_three_messages(template_a2ui)
+    return TemplateArchive(a2ui=template_a2ui, design_token=terse_dsl_nested2)
 
 
 async def _process_design_token(

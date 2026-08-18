@@ -22,6 +22,7 @@ from services.protocol_registry import (
     A2UIProtocolRegistry,
 )
 from services.template_generation import (
+    archive,
     facade,
     route_legacy_python_terse_generation,
 )
@@ -724,6 +725,11 @@ async def test_weather_template_generates_a2ui_and_compact_artifact(monkeypatch)
 async def test_weather_template_generates_a2ui_and_terse_artifact(monkeypatch):
     model = WeatherTemplateModel()
     captured: dict[str, Any] = {}
+
+    def fail_if_archive_processor_is_used(_kind: DslProcessorKind) -> Any:
+        pytest.fail("Terse template archive must reuse the engine-generated A2UI")
+
+    monkeypatch.setattr(archive, "get_dsl_processor", fail_if_archive_processor_is_used)
 
     monkeypatch.setattr(
         facade,

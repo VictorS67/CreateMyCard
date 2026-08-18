@@ -7,6 +7,7 @@ from typing import Any
 
 import json_repair
 
+from app.logger import logger
 from config.config import get_settings
 from custom.model_runtime import ModelExecutionRuntime
 from custom.unified_model_client import UnifiedModelClient
@@ -59,6 +60,13 @@ class TemplateModelClient:
         prompt: list[dict[str, str]],
         phase: str,
     ) -> str:
+        prompt_message = (
+            "[Template Model] request_sent "
+            f"phase={phase} backend={self._backend} "
+            f"messages={json.dumps(prompt, ensure_ascii=False, separators=(',', ':'))}"
+        )
+        print(prompt_message, flush=True)
+        logger.info(prompt_message)
         return await self._client.generate(
             self._backend,
             prompt,

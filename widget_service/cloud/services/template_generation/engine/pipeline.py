@@ -184,6 +184,14 @@ async def _generate_selected_templates(
             )
             break
         except TerseDslNested2ConversionError as exc:
+            validation_message = (
+                f"{_MODULE} template_body_validation_failed "
+                f"repair_count={repair_count} "
+                f"exception_type={type(exc).__name__} "
+                f"detail={exc} raw_output={raw_output}"
+            )
+            print(validation_message, flush=True)
+            logger.error(validation_message)
             if repair_count >= _MAX_BODY_REPAIRS:
                 raise TemplateGenerationError("template body validation failed") from exc
             repair_count += 1
@@ -280,7 +288,21 @@ def _with_provider_template_binding_projection(
                 _set_pointer_value(schema, path, deepcopy(value))
                 changed = True
     if not changed:
+        projection_message = (
+            f"{_MODULE} provider_binding_projection_unchanged "
+            f"component_ids={json.dumps(component_ids, ensure_ascii=False)} "
+            f"schema={json.dumps(projected.dataModelSchema, ensure_ascii=False, separators=(',', ':'))}"
+        )
+        print(projection_message, flush=True)
+        logger.info(projection_message)
         return projected
+    projection_message = (
+        f"{_MODULE} provider_binding_projection_applied "
+        f"component_ids={json.dumps(component_ids, ensure_ascii=False)} "
+        f"schema={json.dumps(schema, ensure_ascii=False, separators=(',', ':'))}"
+    )
+    print(projection_message, flush=True)
+    logger.info(projection_message)
     return projected.model_copy(update={"dataModelSchema": schema})
 
 

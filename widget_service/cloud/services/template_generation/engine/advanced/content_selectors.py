@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
+from app.logger import logger
 from config.config import get_settings
 from models.generation import TaskSpec
 
@@ -1464,7 +1465,15 @@ def project_content_component_facts(
             projected[component_id] = selected
     if not projected:
         raise ValueError("Selected advanced components have no renderable provider facts")
-    return task_spec.model_copy(update={"dataModelSchema": {"data": projected}})
+    projected_schema = {"data": projected}
+    message = (
+        "[Template Generation] task_spec_schema_projected "
+        f"component_ids={json.dumps(component_ids, ensure_ascii=False)} "
+        f"schema={json.dumps(projected_schema, ensure_ascii=False, separators=(',', ':'))}"
+    )
+    print(message, flush=True)
+    logger.info(message)
+    return task_spec.model_copy(update={"dataModelSchema": projected_schema})
 
 
 def _provider_fields(component_id: str, capability_ids: set[str]) -> tuple[str, ...]:

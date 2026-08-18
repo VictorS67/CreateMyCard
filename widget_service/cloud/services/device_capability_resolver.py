@@ -12,6 +12,7 @@ from models.capability import (
     AssetCapability,
     DataCapability,
     EventCapability,
+    FieldDependency,
     RemovedCapability,
 )
 from models.generation import CandidateDataBinding, DeviceContext
@@ -153,12 +154,18 @@ class DeviceCapabilityResolver:
             if write_parts is None or len(write_parts) < 2 or write_parts[0] != "data":
                 removed.append(self._removed(binding.capabilityId, ErrorCode.INVALID_ARGUMENTS))
                 continue
+
+            # Apply field dependencies to auto-include related fields
+            enriched_fields = self._apply_field_dependencies(
+                binding.candidateOutputFields or [], capability
+            )
+
             effective_bindings.append(
                 CandidateDataBinding(
                     capabilityId=binding.capabilityId,
                     arguments=binding.arguments,
                     writeResultTo=write_result_to,
-                    candidateOutputFields=binding.candidateOutputFields,
+                    candidateOutputFields=enriched_fields,
                     previewData=binding.previewData,
                 )
             )
@@ -256,3 +263,50 @@ class DeviceCapabilityResolver:
             reason=reason.value,
             userReadableReason=readable,
         )
+
+    def _apply_field_dependencies(
+        self,
+        requested_fields: list[str],
+        capability: DataCapability,
+    ) -> list[str]:
+        """根据字段依赖规则自动包含相关字段。
+
+        当用户请求某些字段时，自动包含模板需要的依赖字段。
+        例如：用户请求 batterySOCText 时自动包含 batterySOC 用于图表渲染。
+        """
+        if not capability.fieldDependencies:
+            return requested_fields
+
+        requested_set = set(requested_fields)
+        # Also check for fields with leading slash
+        requested_with_slash = {f"/{f}" if not f.startswith("/") else f for f in requested_fields}
+        requested_set.update(requested_with_slash)
+
+        enriched = set(requested_fields)
+
+        for dependency in capability.fieldDependencies:
+            # Check if any trigger field is requested
+            trigger_matches = any(
+                self._field_matches(trigger, requested_set)
+                for trigger in dependency.triggerFields
+            )
+
+            if trigger_matches:
+                # Add all auto-include fields
+                for field in dependency.autoIncludeFields:
+                    if not any(self._field_matches(field, {existing}) for existing in enriched):
+                        # Add with leading slash to match the format of requested fields
+                        field_with_slash = field if field.startswith("/") else f"/{field}"
+                        enriched.add(field_with_slash)
+                        logger.info(
+                            f"{_MODULE} auto_included_field capabilityId={capability.id} "
+                            f"triggerFields={dependency.triggerFields} "
+                            f"autoIncluded={field_with_slash}"
+                        )
+
+        return list(enriched)
+
+    def _field_matches(self, field: str, field_set: set[str]) -> bool:
+        """检查字段是否匹配（支持带斜杠和不带斜杠的形式）。"""
+        normalized = field.lstrip("/")
+        return normalized in field_set or f"/{normalized}" in field_set

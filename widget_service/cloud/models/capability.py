@@ -37,6 +37,12 @@ class Dependencies(BaseModel):
     requiredPackages: list[RequiredPackage] = Field(default_factory=list)
 
 
+class FieldDependency(BaseModel):
+    """字段依赖规则：当请求了 triggerFields 时自动包含 autoIncludeFields。"""
+    triggerFields: list[str]
+    autoIncludeFields: list[str]
+
+
 class DataCapability(BaseModel):
     id: str
     type: Literal["data"] = "data"
@@ -49,6 +55,9 @@ class DataCapability(BaseModel):
     dataModelSkeleton: dict[str, Any] = Field(default_factory=dict)
     # 未声明依赖等价于不需要额外安装包，避免无依赖能力因缺字段而加载失败。
     dependencies: Dependencies = Field(default_factory=Dependencies)
+    # 字段依赖规则：当用户请求某些字段时，自动包含相关依赖字段。
+    # 例如用户请求 batterySOCText 时，自动包含 batterySOC 用于图表渲染。
+    fieldDependencies: list[FieldDependency] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_output_leaf_metadata(self) -> "DataCapability":

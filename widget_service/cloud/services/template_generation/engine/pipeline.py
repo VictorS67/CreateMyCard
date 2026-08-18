@@ -259,6 +259,12 @@ def _with_provider_template_binding_projection(
 ) -> TaskSpec:
     schema = deepcopy(projected.dataModelSchema)
     changed = False
+    start_message = (
+        f"{_MODULE} provider_binding_projection_started "
+        f"component_ids={json.dumps(component_ids, ensure_ascii=False)}"
+    )
+    print(start_message, flush=True)
+    logger.info(start_message)
     for component_id in component_ids:
         capability = registry.require_ux_business_component(component_id)
         if capability.implementation != "template":
@@ -268,6 +274,13 @@ def _with_provider_template_binding_projection(
             if definition.source_format != "cardtpl/1" or not definition.capability_id:
                 continue
             root = _provider_binding_root(card_spec, definition.capability_id)
+            root_message = (
+                f"{_MODULE} provider_binding_root_resolved "
+                f"component_id={component_id} capability_id={definition.capability_id} "
+                f"root={root!r}"
+            )
+            print(root_message, flush=True)
+            logger.info(root_message)
             if root is None:
                 continue
             data = schema.get("data")
@@ -283,10 +296,19 @@ def _with_provider_template_binding_projection(
             for binding in definition.bindings.values():
                 path = f"{root.rstrip('/')}{binding.path}"
                 value = _pointer_value(source.dataModelSchema, path)
+                binding_message = (
+                    f"{_MODULE} provider_binding_path_checked "
+                    f"component_id={component_id} path={path!r} found={value is not None}"
+                )
+                print(binding_message, flush=True)
+                logger.info(binding_message)
                 if value is None:
                     continue
                 _set_pointer_value(schema, path, deepcopy(value))
                 changed = True
+    result_message = f"{_MODULE} provider_binding_projection_finished changed={changed}"
+    print(result_message, flush=True)
+    logger.info(result_message)
     if not changed:
         projection_message = (
             f"{_MODULE} provider_binding_projection_unchanged "

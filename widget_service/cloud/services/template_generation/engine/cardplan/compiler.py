@@ -404,6 +404,7 @@ def compile_ux_layout_card(
         raise TerseDslNested2ConversionError("UX Layout cannot repeat the same Action.")
     expanded = _append_missing_required_literals_to_ux_layout(expanded, contract)
     expanded = _inject_ux_business_title(expanded, business_title, contract)
+    expanded = _remove_activityoverview_duplicate_title(expanded)
     expanded = _normalize_weather_condition_icons(expanded, contract)
     card_tap_action = _weather_card_tap_action(expanded, contract)
     content = _lower_ux_layout_root(
@@ -1351,6 +1352,174 @@ def _activity_hero_overview(
             (header, metric, _inline_overview_facts(secondary.children, registry)),
         )
     return _mark_advanced_component(root, "ActivityOverview")
+
+
+def _activity_detailed_hero_overview(
+    facts: ActivityOverviewFacts,
+    icons: dict[str, Any],
+    registry: CardPlanRegistry,
+    *,
+    wide: bool = False,
+) -> Nested2Node:
+    """Generate detailed activity card with progress bar and metrics section.
+
+    This creates the improved design matching activity-card.terse:
+    - Top decorative spacer row (gray background)
+    - Large steps display
+    - Progress bar showing goal completion
+    - Metrics section at bottom (distance, calories)
+    """
+    # Calculate progress percentage (assuming 10000 step goal)
+    step_value = facts.daily_steps
+    progress_value = min(int((step_value / 10000) * 100), 100) if step_value else 0
+
+    # Create the detailed layout
+    inner_children: list[Nested2Node] = []
+
+    # 1. Top decorative spacer row (gray background, 20px height)
+    spacer_row = Nested2Node(
+        "Row",
+        (
+            None,  # No layout preset
+            {
+                "width": "matchParent",
+                "height": 20,
+                "justifyContent": "spaceBetween",
+                "alignItems": "top",
+                "backgroundColor": "#C4C4C4C4",
+            },
+        ),
+        (),  # Empty children
+    )
+    inner_children.append(spacer_row)
+
+    # 2. Steps display row (large number + unit, bottom aligned)
+    steps_row = Nested2Node(
+        "Row",
+        (
+            None,  # No layout preset
+            {
+                "width": "matchParent",
+                "alignItems": "bottom",
+            },
+        ),
+        (
+            Nested2Node("Text", (str(step_value), None, {"fontSize": 30, "fontWeight": 800, "maxLines": 1}), ()),
+            Nested2Node("Text", ("步", None, {"fontSize": 12, "fontWeight": 500, "maxLines": 1}), ()),
+        ),
+    )
+    inner_children.append(steps_row)
+
+    # 3. Progress bar (20% completion styling)
+    progress_bar = Nested2Node(
+        "Progress",
+        (
+            None,  # No layout preset
+            {
+                "value": progress_value,
+                "total": 100,
+                "color": "#000000",
+                "backgroundColor": "#1A000000",
+                "strokeWidth": 8,
+                "height": 12,
+                "width": "matchParent",
+            },
+        ),
+        (),
+    )
+    inner_children.append(progress_bar)
+
+    # 4. Metrics section (conditional on data availability)
+    metrics_children: list[Nested2Node] = []
+
+    # Distance row
+    if facts.distance_text is not None:
+        # Parse distance text to extract value and unit
+        distance_text = facts.distance_text
+        distance_value = distance_text  # Full text like "4.60 公里"
+
+        distance_row = Nested2Node(
+            "Row",
+            (
+                None,
+                {
+                    "width": "matchParent",
+                    "alignItems": "center",
+                },
+            ),
+            (
+                Nested2Node("Text", ("运动距离", None, {"fontSize": 12, "maxLines": 1, "fontColor": "#FF000000"}), ()),
+                Nested2Node("Text", (distance_value, None, {"fontSize": 12, "fontWeight": 800, "maxLines": 1, "fontColor": "#FF000000"}), ()),
+                Nested2Node("Text", ("公里", None, {"fontSize": 12, "maxLines": 1, "fontColor": "#FF000000"}), ()),
+            ),
+        )
+        metrics_children.append(distance_row)
+
+    # Calories row
+    if facts.calories_text is not None:
+        calories_text = facts.calories_text
+
+        calories_row = Nested2Node(
+            "Row",
+            (
+                None,
+                {
+                    "width": "matchParent",
+                    "alignItems": "center",
+                },
+            ),
+            (
+                Nested2Node("Text", ("消耗热量", None, {"fontSize": 12, "maxLines": 1, "fontColor": "#FF000000"}), ()),
+                Nested2Node("Text", (calories_text, None, {"fontSize": 12, "fontWeight": 800, "maxLines": 1, "fontColor": "#FF000000"}), ()),
+                Nested2Node("Text", ("千卡", None, {"fontSize": 12, "maxLines": 1, "fontColor": "#FF000000"}), ()),
+            ),
+        )
+        metrics_children.append(calories_row)
+
+    # Only add metrics section if we have data
+    if metrics_children:
+        metrics_section = Nested2Node(
+            "Column",
+            (
+                None,
+                {
+                    "justifyContent": "end",
+                    "width": "matchParent",
+                },
+            ),
+            tuple(metrics_children),
+        )
+        inner_children.append(metrics_section)
+
+    # Create the main content column
+    content_column = Nested2Node(
+        "Column",
+        (
+            "compact",
+            {
+                "margin": 4,
+                "justifyContent": "spaceBetween",
+            },
+        ),
+        tuple(inner_children),
+    )
+
+    # Create the outer wrapper column
+    outer_column = Nested2Node(
+        "Column",
+        (
+            None,
+            {
+                "margin": 4,
+                "justifyContent": "start",
+                "alignItems": "start",
+                "clip": True,
+            },
+        ),
+        (content_column,),
+    )
+
+    return _mark_advanced_component(outer_column, "ActivityOverview")
 
 
 def _activity_support_overview(
@@ -6682,6 +6851,14 @@ def _inject_ux_business_title(
         return node
     if not isinstance(title, str) or not title.strip() or title not in contract.trusted_literals:
         return node
+    # Skip injection if template already has a compact-title (e.g., ActivityOverview with internal title)
+    has_existing_title = any(
+        len(descendant.values) > 1 and descendant.values[1] == "compact-title"
+        for descendant in _walk_nodes(node)
+        if descendant.component_type == "Text" and len(descendant.values) > 1
+    )
+    if has_existing_title:
+        return node
     normalized_title = _semantic_text_fragment(title)
     visible = tuple(
         descendant.values[0]
@@ -6718,6 +6895,46 @@ def _inject_ux_business_title(
     else:
         first = Nested2Node("Column", ("compact",), (title_node, first))
     return Nested2Node(node.component_type, node.values, (first, *content[1:], *actions))
+
+
+def _remove_activityoverview_duplicate_title(node: Nested2Node) -> Nested2Node:
+    """Remove duplicate title when ActivityOverview template is used.
+
+    ActivityOverview has its own internal title ("今日活动" with compact-title role).
+    If the LLM generates a separate title section (e.g., "步数记录"), we need to remove it.
+    """
+    # Check if ActivityOverview is present in the tree
+    has_activity_overview = any(
+        any(
+            isinstance(value, dict) and value.get("_advancedComponent") == "ActivityOverview"
+            for value in item.values
+        )
+        for item in _walk_nodes(node)
+    )
+    if not has_activity_overview:
+        return node
+
+    # Check if this node is a Column that needs processing
+    if node.component_type == "Column" and node.values and node.children:
+        values = list(node.values)
+        # Check for "compact" layout with first child being a Text title
+        if len(values) > 0 and values[0] == "compact":
+            if len(node.children) > 0 and node.children[0].component_type == "Text":
+                text_node = node.children[0]
+                # Check if the Text has a title role
+                if len(text_node.values) > 1 and text_node.values[1] in {"title", "compact-title"}:
+                    # Remove this Text child by returning a new node without it
+                    new_children = node.children[1:]
+                    # Recursively process the remaining children
+                    processed_children = tuple(
+                        _remove_activityoverview_duplicate_title(child)
+                        for child in new_children
+                    )
+                    return Nested2Node(node.component_type, node.values, processed_children)
+
+    # Recursively process children
+    children = tuple(_remove_activityoverview_duplicate_title(child) for child in node.children)
+    return Nested2Node(node.component_type, node.values, children)
 
 
 def _inject_phone_earphone_title(

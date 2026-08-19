@@ -26,7 +26,7 @@
     {
       "templateId": "WorkoutOverview@1",
       "entry": "templates/workout-overview.cardtpl",
-      "digest": "sha256:f649f82ae9b7f415143ad9c80e417f068dc043a948c601d9ce68436eac002e4b"
+      "digest": "sha256:3258697ac44bd7460c09aa6fb8ad55d68017e20fb990d5540c7865c5eddbf8cc"
     },
     {
       "templateId": "HeartRateOverview@1",

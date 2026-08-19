@@ -386,7 +386,7 @@
     {
       "name": "WorkoutOverview",
       "domainId": "workout",
-      "description": "由 GetHealthAndSportSummary Provider CardTemplate 展开的最近运动概览。latest 要求运动类型、时长和热量三项完整，暂无运动为空态。planned/ongoing、实时状态、距离、配速、轨迹、心率区间、赛事名、训练计划、总里程和完成率当前禁用。动作仅使用批准的运动健康锻炼入口。",
+      "description": "由 GetHealthAndSportSummary Provider CardTemplate 展开的最近运动概览。latest 要求运动热量、运动时长和运动结束时间三项完整，暂无运动为空态。planned/ongoing、实时状态、运动类型、距离、配速、轨迹、心率区间、赛事名、训练计划、总里程和完成率当前禁用。动作仅使用批准的运动健康锻炼入口。",
       "variants": ["planned", "ongoing", "latest"],
       "supportedCardSizes": ["2x2", "2x4"],
       "minRegion": "compact",

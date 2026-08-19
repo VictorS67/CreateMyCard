@@ -20,18 +20,38 @@
 #Variant("steps", { sizes: ["2x2", "2x4"], roles: ["hero"], requires: ["steps"] })
 Column("compact", {
   _advancedComponent: "ActivityOverview", width: "matchParent", height: "matchParent",
-  itemMargin: 4, justifyContent: "spaceBetween", alignItems: "start",
-  constraintSize: { minWidth: 0, minHeight: 0 }
+  itemMargin: 4, justifyContent: "start", alignItems: "start", clip: true
 },
-  Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "top", constraintSize: { minWidth: 0, minHeight: 0 } },
-    IfParam("stepsIcon",
-      Image(Asset("stepsIcon"), "icon", { width: 20, height: 20, objectFit: "contain", flexShrink: 0 })
+  Column("compact", { itemMargin: 4, justifyContent: "spaceBetween", width: "matchParent", height: "matchParent" },
+    Column("compact", { itemMargin: 4, justifyContent: "start", width: "matchParent" },
+      Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+        IfParam("stepsIcon",
+            Image(Asset("stepsIcon"), "icon", { width: 20, height: 20, objectFit: "contain", flexShrink: 0 })
+        ),
+        Text("今日活动", "compact-title", { fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1 })
+      ),
+      Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "bottom" },
+        Text(Bind("steps"), { fontSize: 30, fontColor: "#FFFF7A45", fontWeight: 800, maxLines: 1 }),
+        Text("步", { fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1 })
+      ),
+      Progress({ value: Bind("steps"), total: 10000, color: "#FFFF7A45", backgroundColor: "#1AFF7A45", strokeWidth: 8, height: 12, width: "matchParent" })
     ),
-    Text("今日活动", "subtitle", { width: "matchParent", fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 } })
-  ),
-  Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "bottom", constraintSize: { minWidth: 0, minHeight: 0 } },
-    Text(Bind("steps"), "title", { fontSize: 38, fontWeight: 800, fontColor: "#FFFF7A45", maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 } }),
-    Text("步", "subtitle", { fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 } })
+    Column("compact", { itemMargin: 4, justifyContent: "start", width: "matchParent" },
+      IfBind("distance",
+        Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+          Text("运动距离", { fontSize: 12, maxLines: 1 }),
+          Text(Bind("distance"), { fontSize: 12, fontWeight: 800, maxLines: 1 }),
+          Text("公里", { fontSize: 12, maxLines: 1 })
+        )
+      ),
+      IfBind("calories",
+        Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+          Text("消耗热量", { fontSize: 12, maxLines: 1 }),
+          Text(Bind("calories"), { fontSize: 12, fontWeight: 800, maxLines: 1 }),
+          Text("千卡", { fontSize: 12, maxLines: 1 })
+        )
+      )
+    )
   )
 )
 #EndVariant
@@ -58,31 +78,33 @@ Column("compact", {
 #Variant("dailySummary", { sizes: ["2x2"], roles: ["hero"], requires: ["steps", "calories", "distance"] })
 Column("compact", {
   _advancedComponent: "ActivityOverview", width: "matchParent", height: "matchParent",
-  itemMargin: 8, justifyContent: "spaceBetween", alignItems: "start",
-  constraintSize: { minWidth: 0, minHeight: 0 }
+  itemMargin: 4, justifyContent: "start", alignItems: "start", clip: true
 },
-  Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "top", constraintSize: { minWidth: 0, minHeight: 0 } },
-    IfParam("stepsIcon",
-      Image(Asset("stepsIcon"), "icon", { width: 20, height: 20, objectFit: "contain", flexShrink: 0 })
-    ),
-    Text("今日活动", "subtitle", { width: "matchParent", fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 } })
-  ),
-  Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "bottom", constraintSize: { minWidth: 0, minHeight: 0 } },
-    Text(Bind("steps"), "title", { fontSize: 38, fontWeight: 800, fontColor: "#FFFF7A45", maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 } }),
-    Text("步", "subtitle", { fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 } })
-  ),
-  Row("between", { width: "matchParent", itemMargin: 8, justifyContent: "spaceBetween", alignItems: "center", constraintSize: { minWidth: 0, minHeight: 0 } },
-    Row("between", { width: "matchParent", layoutWeight: 1, itemMargin: 4, justifyContent: "start", alignItems: "top", clip: true, constraintSize: { minWidth: 0, minHeight: 0 } },
-      IfParam("caloriesIcon",
-        Image(Asset("caloriesIcon"), "icon", { width: 16, height: 16, objectFit: "contain", flexShrink: 0 })
+  Column("compact", { itemMargin: 4, justifyContent: "spaceBetween", width: "matchParent", height: "matchParent" },
+    Column("compact", { itemMargin: 4, justifyContent: "start", width: "matchParent" },
+      Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+        IfParam("stepsIcon",
+            Image(Asset("stepsIcon"), "icon", { width: 20, height: 20, objectFit: "contain", flexShrink: 0 })
+        ),
+        Text("今日活动", "compact-title", { fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1 })
       ),
-      Text(Bind("calories"), "body", { width: "matchParent", fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 } })
-    ),
-    Row("between", { width: "matchParent", layoutWeight: 1, itemMargin: 4, justifyContent: "start", alignItems: "top", clip: true, constraintSize: { minWidth: 0, minHeight: 0 } },
-      IfParam("distanceIcon",
-        Image(Asset("distanceIcon"), "icon", { width: 16, height: 16, objectFit: "contain", flexShrink: 0 })
+      Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "bottom" },
+        Text(Bind("steps"), { fontSize: 30, fontWeight: 800, maxLines: 1 }),
+        Text("步", { fontSize: 12, fontWeight: 500, maxLines: 1 })
       ),
-      Text(Bind("distance"), "body", { width: "matchParent", fontSize: 12, fontWeight: 500, fontColor: "#E6000000", maxLines: 1, textOverflow: "ellipsis", constraintSize: { minWidth: 0, minHeight: 0 } })
+      Progress({ value: Bind("steps"), total: 10000, color: "#FFFF7A45", backgroundColor: "#1AFF7A45", strokeWidth: 8, height: 12, width: "matchParent" })
+    ),
+    Column("compact", { itemMargin: 4, justifyContent: "start", width: "matchParent" },
+      Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+        Text("运动距离", { fontSize: 12, maxLines: 1 }),
+        Text(Bind("distance"), { fontSize: 12, fontWeight: 800, maxLines: 1 }),
+        Text("公里", { fontSize: 12, maxLines: 1 })
+      ),
+      Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+        Text("消耗热量", { fontSize: 12, maxLines: 1 }),
+        Text(Bind("calories"), { fontSize: 12, fontWeight: 800, maxLines: 1 }),
+        Text("千卡", { fontSize: 12, maxLines: 1 })
+      )
     )
   )
 )

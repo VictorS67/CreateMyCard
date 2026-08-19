@@ -21,7 +21,7 @@
     {
       "templateId": "ActivityOverview@1",
       "entry": "templates/activity-overview.cardtpl",
-      "digest": "sha256:12268d05542021bcb6da5af19618626a656edcd483c53f9917adb2c6c5a7d42b"
+      "digest": "sha256:deef1298d4a3a22b1dddc22037c18c8b88ff65acd50dbbf56951758a30c6229e"
     },
     {
       "templateId": "WorkoutOverview@1",

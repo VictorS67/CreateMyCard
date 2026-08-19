@@ -27,8 +27,8 @@
     "providers/countdown-cli/templates/countdown-overview.cardtpl": "sha256:8ac73f6d8dd1a23ffa1aa4556a41c32d31fe2d581f961d86398e2464868a8a76",
     "providers/earphone-cli/provider.json": "sha256:3c9766930e6b914602620795e87d55083ce747964fb3dcf0dff9cd44d8782bb8",
     "providers/earphone-cli/templates/bluetooth-device-overview.cardtpl": "sha256:83865e685a44d571371cb30af223552b3cc419c8d41182fc67328f4cbc93a995",
-    "providers/health-sport-cli/provider.json": "sha256:26e5222cdb90aad9c161f362c0dff738ab923d222a26f52695547adfabfdb447",
-    "providers/health-sport-cli/templates/activity-overview.cardtpl": "sha256:12268d05542021bcb6da5af19618626a656edcd483c53f9917adb2c6c5a7d42b",
+    "providers/health-sport-cli/provider.json": "sha256:3c1f1f7b8d3d6eb252d55f80d9cfa70b097b73d73bebbe49cc58d137a5e36e2d",
+    "providers/health-sport-cli/templates/activity-overview.cardtpl": "sha256:deef1298d4a3a22b1dddc22037c18c8b88ff65acd50dbbf56951758a30c6229e",
     "providers/health-sport-cli/templates/heart-rate-overview.cardtpl": "sha256:d09096b3144523b77b5e72169cb29c6ee4e30b3e34d5ce6f58007ae28876375e",
     "providers/health-sport-cli/templates/sleep-overview.cardtpl": "sha256:5d8453a3051d8e2b6cec03b1f07aa130b343e62937c40d4c1f8984882c374236",
     "providers/health-sport-cli/templates/workout-overview.cardtpl": "sha256:f649f82ae9b7f415143ad9c80e417f068dc043a948c601d9ce68436eac002e4b",
@@ -44,7 +44,7 @@
     "theme-profiles.json": "sha256:1f784dab57a867ba22dfcd0217f4fa34e2d9dedb5490915f5da617c6be7c83a2"
   },
   "promptSha256": {
-    "body": "990cf244ce30b6d70e71f5e9dbf387227384449422b931e69ee6367b031b5c4b",
+    "body": "fd7d33c5c450bc87759515b4a9f3a20e440459ab62cc3083ff82c93a303502f5",
     "selection": "78431eb8cc0c69f3a98dfd76344af908784de61abeb54be83ed2b32c171af8a3",
     "ux_mixed": "1bb604ad33f0db72ae2a0d5059b9d02e4afc2807f1380e9a57a158181a7de86c"
   },

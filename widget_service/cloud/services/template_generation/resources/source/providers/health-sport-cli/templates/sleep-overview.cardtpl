@@ -7,7 +7,8 @@
   bindings: {
     status: { path: "/sleepStatus", type: "string" },
     asleep: { path: "/fallAsleepTimeText", type: "string" },
-    wakeup: { path: "/wakeupTimeText", type: "string" }
+    wakeup: { path: "/wakeupTimeText", type: "string" },
+    score: { path: "/sleepScore", type: "integer" }
   },
   params: {
     sleepDurationPrimaryValueText: {
@@ -78,6 +79,49 @@ Column("compact", {
   )
 )
 #EndVariant
+
+#Variant("durationWithScore", { sizes: ["2x2"], roles: ["hero"], requires: ["score"], requiresParams: ["sleepDurationPrimaryValueText", "sleepDurationPrimaryUnitText", "sleepDurationSecondaryValueText", "sleepDurationSecondaryUnitText"] })
+Column("compact", {
+  _advancedComponent: "SleepOverview", width: "matchParent", height: "matchParent",
+  itemMargin: 4, justifyContent: "start", alignItems: "start", clip: true,
+  constraintSize: { minWidth: 0, minHeight: 0 }
+},
+  Column("compact", { width: "matchParent", height: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "start", clip: true },
+    Column("compact", { width: "matchParent", height: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "start", clip: true },
+      Column("compact", { itemMargin: 4, justifyContent: "spaceBetween", width: "matchParent", height: "matchParent" },
+        Column("compact", { itemMargin: 4, justifyContent: "start", width: "matchParent" },
+          Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+            IfParam("sourceIcon",
+              Image(Asset("sourceIcon"), "icon", { width: 20, height: 20, objectFit: "contain", flexShrink: 0 })
+            ),
+            Text("睡眠", "compact-title", { fontSize: 12, fontWeight: 500, maxLines: 1 })
+          ),
+          Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "bottom" },
+            Text(Param("sleepDurationPrimaryValueText"), "title", { fontSize: 30, fontWeight: 800, maxLines: 1 }),
+            Text(Param("sleepDurationPrimaryUnitText"), { fontSize: 12, fontWeight: 500, maxLines: 1 }),
+            Text(Param("sleepDurationSecondaryValueText"), "title", { fontSize: 30, fontWeight: 800, maxLines: 1 }),
+            Text(Param("sleepDurationSecondaryUnitText"), { fontSize: 12, fontWeight: 500, maxLines: 1 })
+          ),
+          Progress({ value: Bind("score"), total: 100, strokeWidth: 8, color: "#FFFFFFFF", backgroundColor: "#1AFFFFFF", height: 12, width: "matchParent" })
+        ),
+        Column("compact", { itemMargin: 4, justifyContent: "start", width: "matchParent" },
+          Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+            Text("睡眠评分", "subtitle", { fontSize: 12, maxLines: 1 }),
+            Text(Bind("score"), { fontSize: 12, fontWeight: 800, maxLines: 1 }),
+            Text("分", "subtitle", { fontSize: 12, maxLines: 1 })
+          ),
+          IfBind("status",
+            Row("between", { width: "matchParent", itemMargin: 4, justifyContent: "start", alignItems: "center" },
+              Text(Bind("status"), { fontSize: 12, maxLines: 1 })
+            )
+          )
+        )
+      )
+    )
+  )
+)
+#EndVariant
+
 
 #Variant("insufficient", { sizes: ["2x2", "2x4"], roles: ["hero"], requires: ["status"], requiresParams: ["sleepDurationPrimaryValueText", "sleepDurationPrimaryUnitText"] })
 Column("compact", {

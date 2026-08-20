@@ -364,6 +364,7 @@ class SleepOverviewFacts:
     status: str | None = None
     fall_asleep_time: str | None = None
     wakeup_time: str | None = None
+    score: int | None = None
 
     @property
     def explicitly_insufficient(self) -> bool:
@@ -416,6 +417,12 @@ class SleepOverviewFacts:
                 self.wakeup_time,
                 "可信醒来时刻原文",
             )
+        if self.score is not None:
+            selected["sleepScore"] = {
+                "type": "integer",
+                "description": "可信睡眠综合得分，取值范围 0-100",
+                "sampleValue": self.score,
+            }
         return selected
 
 
@@ -1769,11 +1776,16 @@ def sleep_overview_variants(
         compact,
         _EXTENDED_SLEEP_QUERY_TERMS,
     )
-    if requests_extended_projection and not relaxed:
-        return ()
-    sleep_terms = (*_SLEEP_QUERY_TERMS, *_EXTENDED_SLEEP_QUERY_TERMS)
-    if not _contains_query_term(normalized, compact, sleep_terms):
-        return ()
+    # Downgrade extended projection requests to duration variant instead of rejecting
+    downgrading_extended = requests_extended_projection and not relaxed
+    if downgrading_extended:
+        # For extended requests, only require basic sleep terms
+        if not _contains_query_term(normalized, compact, _SLEEP_QUERY_TERMS):
+            return ()
+    else:
+        sleep_terms = (*_SLEEP_QUERY_TERMS, *_EXTENDED_SLEEP_QUERY_TERMS)
+        if not _contains_query_term(normalized, compact, sleep_terms):
+            return ()
     facts = extract_sleep_overview_facts(task_spec.dataModelSchema)
     if facts is None:
         return ()
@@ -1804,6 +1816,10 @@ def sleep_overview_variants(
         variants.append("insufficient")
     if requests_schedule and task_spec.size == "2x4" and facts.has_schedule:
         variants.append("schedule")
+    # When downgrading extended requests, check if score data is available
+    if downgrading_extended and facts.score is not None:
+        print(f'score is obtained: {facts.score}')
+        variants.append("durationWithScore")
     return tuple(variants)
 
 
@@ -2786,12 +2802,14 @@ def extract_sleep_overview_facts(
         duration = parse_duration_text(duration_text)
         if duration is None:
             continue
+        score = _trusted_nonnegative_integer(candidate.get("sleepScore"))
         return SleepOverviewFacts(
             duration_text=duration_text,
             duration=_normalize_sleep_duration(duration),
             status=_trusted_string(candidate.get("sleepStatus")),
             fall_asleep_time=_trusted_clock_text(candidate.get("fallAsleepTimeText")),
             wakeup_time=_trusted_clock_text(candidate.get("wakeupTimeText")),
+            score=score,
         )
     return None
 

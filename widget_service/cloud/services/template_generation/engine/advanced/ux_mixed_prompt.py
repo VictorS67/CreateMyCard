@@ -668,11 +668,11 @@ def _business_component_line(
             "事件名、目标日期、进度或运动语义，不得输出旧 WorkoutOverview(...) 构造器。"
         )
     if component.name == "SleepOverview" and "SleepOverview@1" in templates:
+        variants = sleep_overview_variants(task_spec, capability_ids)
         return (
-            common + '; syntax=Template("SleepOverview@1",'
-            '"duration|durationDetailed|durationSupport|durationDetailedSupport|'
-            "insufficient|insufficientDetailed|schedule|scheduleDetailed|scheduleStatus|"
-            'scheduleDetailedStatus",params); '
+            common + '; syntax=Template("SleepOverview@1","'
+            + "|".join(variants)
+            + '",params); '
             "多业务按是否存在次时长分段使用 durationSupport 或 durationDetailedSupport；"
             "普通 Hero 存在可信状态时按时长分段使用 insufficient 或 insufficientDetailed；"
             "2x4 且入睡/醒来时间完整时，按状态和次时长分段选择对应 schedule* 变体；"

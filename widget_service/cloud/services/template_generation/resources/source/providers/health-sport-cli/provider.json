@@ -36,7 +36,7 @@
     {
       "templateId": "SleepOverview@1",
       "entry": "templates/sleep-overview.cardtpl",
-      "digest": "sha256:5d8453a3051d8e2b6cec03b1f07aa130b343e62937c40d4c1f8984882c374236"
+      "digest": "sha256:0aea2249e4b6ae0a9e8dd33ce5d18f25b1a04ea7474dd302290ef1651160bfd2"
     }
   ],
   "compatibility": {

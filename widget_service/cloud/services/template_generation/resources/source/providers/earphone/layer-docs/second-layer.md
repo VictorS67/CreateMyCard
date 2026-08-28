@@ -17,6 +17,7 @@
   - `BluetoothDeviceOverviewCompleteWideFull@1`：蓝牙耳机连接与电量摘要，可展示设备名、盒电量和左右耳电量。 组件形态：earbudsFullWide。 布局场景：完整 4x2；单独使用。主数据：/isConnected；次要数据：/earphoneName, /batteryLevel, /leftBatteryLevel, /rightBatteryLevel；可选数据：无。
   - `BluetoothDeviceOverviewEarbudPairPhoneCompact@1`：蓝牙耳机连接与电量摘要，可展示设备名、盒电量和左右耳电量。 组件形态：earbudPairPhone。 布局场景：约 2x1；用于双 Compact 组合，或单 Compact 加两个 PillAction。主数据：/isConnected；次要数据：/leftBatteryLevel, /rightBatteryLevel；可选数据：无。
   - `BluetoothDeviceOverviewCompletePhoneWideFull@1`：蓝牙耳机连接与电量摘要，可展示设备名、盒电量和左右耳电量。 组件形态：earbudsFullPhoneWide。 布局场景：完整 4x2；单独使用。主数据：/isConnected；次要数据：/earphoneName, /batteryLevel, /leftBatteryLevel, /rightBatteryLevel；可选数据：无。
+  - `BluetoothDeviceOverviewHero@1`：蓝牙耳机连接状态与耳机名 Hero；居中展示耳机连接状态和耳机名文本；底部按钮必须由第二层组合 `PillAction@1`。主数据：/isConnected，/earphoneName；次要数据：无；可选数据：无。应传入 `title` 文本属性展示耳机相关业务标题。
 - props 只能使用本次 Prompt 下发的可信文本、数值或素材；不得输出数据路径。
 - 选择能够完整表达用户显式要求字段且自身 `primaryData` 与 `secondaryData` 全部可用的模板。
 - 素材参数不绑定固定素材 ID，只在本轮素材候选中匹配，没有合适候选时省略：

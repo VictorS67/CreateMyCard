@@ -16,17 +16,17 @@ def test_template_preview_dataset_covers_all_business_templates(tmp_path):
     manifest = write_template_preview_dataset(tmp_path)
     cases = manifest["cases"]
 
-    assert manifest["templateCount"] == 78
+    assert manifest["templateCount"] == 79
     assert manifest["countsByLayout"] == {
         "Compact": 31,
-        "Hero": 10,
+        "Hero": 11,
         "Full": 24,
         "WideHero": 2,
         "WideFull": 11,
     }
-    assert manifest["countsBySize"] == {"2x2": 65, "2x4": 13}
-    assert len(cases) == 78
-    assert len({case["templateId"] for case in cases}) == 78
+    assert manifest["countsBySize"] == {"2x2": 66, "2x4": 13}
+    assert len(cases) == 79
+    assert len({case["templateId"] for case in cases}) == 79
     assert all((tmp_path / case["file"]).is_file() for case in cases)
 
 
@@ -76,3 +76,18 @@ def test_template_preview_manifest_data_tiers_are_disjoint():
         assert all(count == 1 for count in counts.values())
         assert case.primary_data
         assert json.dumps(case.messages, ensure_ascii=False)
+
+
+def test_earphone_hero_uses_title_parameter_without_title_binding():
+    case = next(
+        item
+        for item in build_template_preview_cases()
+        if item.template_id == "BluetoothDeviceOverviewHero@1"
+    )
+
+    assert case.primary_data == ("/isConnected", "/earphoneName")
+    assert case.secondary_data == ()
+    assert case.optional_data == ()
+    assert "耳机听歌入口" in json.dumps(case.messages, ensure_ascii=False)
+    data_model = case.messages[2]["updateDataModel"]["value"]["data"]["earphone"]
+    assert set(data_model) == {"isConnected", "earphoneName"}

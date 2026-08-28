@@ -236,6 +236,19 @@
         "/leftBatteryLevel",
         "/rightBatteryLevel"
       ]
+    },
+    {
+      "templateId": "BluetoothDeviceOverviewHero@1",
+      "businessId": "BluetoothDeviceOverview",
+      "capabilityId": "GetEarphoneInfo",
+      "description": "蓝牙耳机连接状态与耳机名 Hero；居中展示连接状态和耳机名，title 文本属性展示耳机相关业务标题。",
+      "optionalData": [],
+      "entry": "templates/bluetooth-device-overview.cardtpl",
+      "primaryData": [
+        "/isConnected",
+        "/earphoneName"
+      ],
+      "secondaryData": []
     }
   ],
   "compatibility": {

@@ -1011,6 +1011,8 @@ def _provider_variant_matches_trusted_state(
         facts = extract_bluetooth_device_overview_facts(task_spec.dataModelSchema)
         if facts is None:
             return False
+        if variant_name == "hero":
+            return True
         paired_with_phone = {
             "GetEarphoneInfo",
             "GetPhoneBatteryInfo",

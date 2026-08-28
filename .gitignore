@@ -66,3 +66,9 @@ tempelate.jpg
 SVG图标素材库清单.md
 test/
 test.jsonl
+
+.codex-tmp/
+widget_service/.codex-tmp/
+Q*.json
+ux*.txt
+ux*.txt

@@ -2261,7 +2261,7 @@ def extract_battery_overview_facts(schema: dict[str, Any]) -> BatteryOverviewFac
 def extract_bluetooth_device_overview_facts(
     schema: dict[str, Any],
 ) -> BluetoothDeviceOverviewFacts | None:
-    """Extract one coherent earphone entity with at least one valid battery part."""
+    """Extract one coherent earphone entity with optional battery facts."""
     data = schema.get("data")
     if isinstance(data, dict):
         projected = data.get("BluetoothDeviceOverview")
@@ -2275,9 +2275,8 @@ def extract_bluetooth_device_overview_facts(
             if facts is not None:
                 return facts
     required_identity = {"isConnected", "earphoneName"}
-    battery_fields = {"leftBatteryLevel", "rightBatteryLevel", "batteryLevel"}
     for candidate in _dict_nodes(schema):
-        if not required_identity.issubset(candidate) or not battery_fields.intersection(candidate):
+        if not required_identity.issubset(candidate):
             continue
         facts = _bluetooth_facts_from_candidate(candidate)
         if facts is not None:
@@ -2303,7 +2302,7 @@ def _bluetooth_facts_from_candidate(
         ),
         case_battery_level=_trusted_percentage_number(_first_field(candidate, "batteryLevel")),
     )
-    return facts if facts.battery_part_count else None
+    return facts
 
 
 def _projected_battery_candidates(schema: dict[str, Any]):

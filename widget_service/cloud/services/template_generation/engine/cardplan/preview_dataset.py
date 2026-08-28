@@ -62,6 +62,9 @@ _SOURCE_ICON_BY_BUSINESS = {
     "SleepOverview": "resources/base/media/moon_z_fill_1.svg",
     "WorkoutOverview": "resources/base/media/figure_run.svg",
 }
+_TEXT_BY_TEMPLATE_PARAMETER = {
+    ("BluetoothDeviceOverviewHero@1", "title"): "耳机听歌入口",
+}
 _SAMPLE_BY_BUSINESS_BINDING: dict[tuple[str, str], Any] = {
     ("ActivityOverview", "calories"): "420 千卡",
     ("ActivityOverview", "distance"): "4.6 公里",
@@ -284,7 +287,10 @@ def _template_parameters(definition: TemplateDefinition) -> dict[str, str]:
     properties = definition.variants[0].parameters_schema.get("properties", {})
     parameters: dict[str, str] = {}
     for name in properties:
-        if name == "sourceIcon":
+        text = _TEXT_BY_TEMPLATE_PARAMETER.get((definition.wire_id, name))
+        if text is not None:
+            parameters[name] = text
+        elif name == "sourceIcon":
             parameters[name] = _SOURCE_ICON_BY_BUSINESS.get(
                 definition.business_id or "",
                 "resources/base/media/icon_id.svg",

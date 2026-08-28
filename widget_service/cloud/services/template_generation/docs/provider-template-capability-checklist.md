@@ -104,8 +104,8 @@
 
 ## BluetoothDeviceOverview
 
-- Provider：`com.huawei.earphone.cli`；运行状态：配置禁用。
-- 数据能力：`GetEarphoneInfo`；模板数：14。
+- Provider：`com.huawei.earphone.cli`；运行状态：启用。
+- 数据能力：`GetEarphoneInfo`；模板数：15。
 
 | 状态 | 模板 | 布局场景 | 主数据 | 次要数据 | 可选数据 |
 | --- | --- | --- | --- | --- | --- |
@@ -123,6 +123,7 @@
 | ✅ | `BluetoothDeviceOverviewCompleteWideFull@1` | 完整 4x2；单 WideFull | `/isConnected` | `/earphoneName`<br>`/batteryLevel`<br>`/leftBatteryLevel`<br>`/rightBatteryLevel` | 无 |
 | ✅ | `BluetoothDeviceOverviewEarbudPairPhoneCompact@1` | 约 2x1；双 Compact 组成 2x2，或单 Compact + 2 个 PillAction | `/isConnected` | `/leftBatteryLevel`<br>`/rightBatteryLevel` | 无 |
 | ✅ | `BluetoothDeviceOverviewCompletePhoneWideFull@1` | 完整 4x2；单 WideFull | `/isConnected` | `/earphoneName`<br>`/batteryLevel`<br>`/leftBatteryLevel`<br>`/rightBatteryLevel` | 无 |
+| ✅ | `BluetoothDeviceOverviewHero@1` | 约 2x1.7；Hero + 1 个 PillAction；顶部展示 `title` 文本属性 | `/isConnected`<br>`/earphoneName` | 无 | 无 |
 
 ## ActivityOverview
 

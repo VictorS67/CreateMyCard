@@ -35,6 +35,100 @@ Column(
 )
 #End
 
+#Template BluetoothDeviceOverviewHero@1(props: { title?: string })
+data = {
+    connected: $path("/isConnected"),
+    name: $path("/earphoneName")
+}
+
+Column(
+  {
+    "_advancedComponent": "BluetoothDeviceOverview",
+    "_layoutActionBackgroundOpacity": 0.1,
+    "width": "matchParent",
+    "height": "matchParent",
+    "itemMargin": 4,
+    "justifyContent": "start",
+    "alignItems": "start",
+    "clip": true,
+    "constraintSize": {"minWidth": 0, "minHeight": 0}
+  },
+  IfPresent(
+    props.title,
+    Text(
+      props.title,
+      {
+        "width": "matchParent",
+        "height": 20,
+        "fontSize": 12,
+        "fontWeight": 400,
+        "fontColor": $theme('supportContentColor'),
+        "maxLines": 1,
+        "textAlign": "start",
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0}
+      }
+    )
+  ),
+  IfAbsent(
+    props.title,
+    Text(
+      "耳机",
+      {
+        "width": "matchParent",
+        "height": 20,
+        "fontSize": 12,
+        "fontWeight": 400,
+        "fontColor": $theme('supportContentColor'),
+        "maxLines": 1,
+        "textAlign": "start",
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0}
+      }
+    )
+  ),
+  Column(
+    {
+      "width": "matchParent",
+      "height": 48,
+      "itemMargin": 4,
+      "justifyContent": "start",
+      "alignItems": "start",
+      "clip": true,
+      "constraintSize": {"minWidth": 0, "minHeight": 0}
+    },
+    Text(
+      Expr(`${data.connected} ? '已连接' : '未连接'`),
+      {
+        "width": "matchParent",
+        "height": 28,
+        "fontSize": 20,
+        "fontWeight": 700,
+        "fontColor": $theme('primaryColor'),
+        "maxLines": 1,
+        "textAlign": "start",
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0}
+      }
+    ),
+    Text(
+      data.name,
+      {
+        "width": "matchParent",
+        "height": 16,
+        "fontSize": 12,
+        "fontWeight": 400,
+        "fontColor": $theme('supportContentColor'),
+        "maxLines": 1,
+        "textAlign": "start",
+        "textOverflow": "ellipsis",
+        "constraintSize": {"minWidth": 0, "minHeight": 0}
+      }
+    )
+  )
+)
+#End
+
 #Template BluetoothDeviceOverviewConnectionFull@1(props: { sourceIcon?: asset })
 data = {
     connected: $path("/isConnected"),

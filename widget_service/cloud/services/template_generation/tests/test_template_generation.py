@@ -50,6 +50,7 @@ from services.template_generation.engine.advanced.content_selectors import (
     app_usage_overview_query_is_supported,
     apply_content_selectors,
     extract_battery_overview_facts,
+    extract_bluetooth_device_overview_facts,
     extract_workout_latest_facts,
 )
 from services.template_generation.engine.advanced.data_shape import extract_data_shape
@@ -276,13 +277,14 @@ def test_all_provider_templates_are_loaded_from_the_isolated_directory():
         if path.is_dir()
     }
 
-    assert len(registry.provider_template_ids) == 85
+    assert len(registry.provider_template_ids) == 86
     assert {
         "ActivityOverviewFull@1",
         "AppUsageOverviewFull@1",
         "BatteryOverviewNormalFull@1",
         "BatteryOverviewNormalHero@1",
         "BluetoothDeviceOverviewCaseFull@1",
+        "BluetoothDeviceOverviewHero@1",
         "CountdownOverviewFull@1",
         "DateOverviewFull@1",
         "HeartRateOverviewFull@1",
@@ -1663,18 +1665,19 @@ def test_unknown_template_controls_fail_closed(kwargs, message):
         CardPlanRegistry(**kwargs)
 
 
-def test_checked_in_template_controls_enable_calendar_and_disable_earphone():
+def test_checked_in_template_controls_enable_calendar_and_earphone():
     controls = load_template_controls()
     registry = CardPlanRegistry(
         disabled_provider_ids=controls.disabled_provider_ids,
         disabled_template_ids=controls.disabled_template_ids,
     )
 
-    assert controls.disabled_provider_ids == ("com.huawei.earphone.cli",)
+    assert controls.disabled_provider_ids == ()
     assert controls.disabled_template_ids == ()
     assert registry.template_is_enabled("ScheduleOverviewNextEventFull@1")
     assert registry.template_is_enabled("ScheduleOverviewNextEventHero@1")
-    assert not registry.template_is_enabled("BluetoothDeviceOverviewCaseFull@1")
+    assert registry.template_is_enabled("BluetoothDeviceOverviewCaseFull@1")
+    assert registry.template_is_enabled("BluetoothDeviceOverviewHero@1")
     assert registry.template_is_enabled("WeatherOverviewFull@1")
 
 
@@ -2998,13 +3001,112 @@ async def test_bluetooth_music_action_requires_a_hero_template():
         ),
     )
 
-    with pytest.raises(TemplateGenerationError, match="selected template generation failed"):
+    with pytest.raises(
+        TemplateRouteNotApplicable,
+        match="Hero templates cannot cover all requested fields",
+    ):
         await generate_template_a2ui(
             task_spec,
             _bluetooth_card_spec(),
             (binding,),
             model,
         )
+
+
+def test_bluetooth_identity_without_battery_is_a_complete_provider_fact():
+    facts = extract_bluetooth_device_overview_facts(
+        {
+            "data": {
+                "earphone": {
+                    "isConnected": _provider_field(True, "boolean"),
+                    "earphoneName": _provider_field("FreeBuds Pro", "string"),
+                }
+            }
+        }
+    )
+
+    assert facts is not None
+    assert facts.is_connected is True
+    assert facts.earphone_name == "FreeBuds Pro"
+    assert facts.battery_part_count == 0
+
+
+@pytest.mark.asyncio
+async def test_bluetooth_music_action_uses_hero_title_parameter():
+    binding = CandidateDataBinding(
+        capabilityId="GetEarphoneInfo",
+        writeResultTo="/data/earphone",
+        candidateOutputFields=["/isConnected", "/earphoneName"],
+    )
+    task_spec = _bluetooth_task(
+        "看看耳机连上没、叫什么名字，并打开每日推荐",
+    ).model_copy(
+        update={
+            "eventCandidates": [
+                EventAction(
+                    id="event.open.music.daily",
+                    displayLabel="每日推荐",
+                    call="clickToIntent",
+                    args={"intentName": "event.open.music.daily"},
+                )
+            ],
+            "dataModelSchema": {
+                "data": {
+                    "earphone": {
+                        "isConnected": _provider_field(True, "boolean"),
+                        "earphoneName": _provider_field("FreeBuds Pro", "string"),
+                    }
+                }
+            },
+        }
+    )
+    model = _FixedTemplateModel(
+        theme_id="audio-product-neutral-violet",
+        component_id="BluetoothDeviceOverview",
+        available_template_ids=("BluetoothDeviceOverviewHero@1",),
+        capability_id="GetEarphoneInfo",
+        required_fields=("/isConnected", "/earphoneName"),
+        action_id="event.open.music.daily",
+        body=(
+            'Template("HeroActionLayout@1",{},'
+            'Template("BluetoothDeviceOverviewHero@1",{"title":"耳机听歌入口"}),'
+            'Template("PillAction@1",{"actionId":"event.open.music.daily",'
+            '"label":"每日推荐"}));'
+        ),
+    )
+    card_spec = _bluetooth_card_spec() | {"title": "耳机听歌入口"}
+
+    output = await generate_template_a2ui(task_spec, card_spec, (binding,), model)
+
+    assert output.template_ids == (
+        "BluetoothDeviceOverviewHero@1",
+        "PillAction@1",
+        "HeroActionLayout@1",
+    )
+    assert "耳机听歌入口" in output.a2ui
+    assert "isConnected" in output.a2ui
+    assert "earphoneName" in output.a2ui
+    assert model.second_layer_prompt is not None
+    second_layer_user = model.second_layer_prompt[1]["content"]
+    trusted_line = next(
+        line
+        for line in second_layer_user.splitlines()
+        if line.startswith("trustedStringLiterals=")
+    )
+    trusted_literals = json.loads(trusted_line.removeprefix("trustedStringLiterals="))
+    assert "耳机听歌入口" in trusted_literals
+    contracts_line = next(
+        line
+        for line in second_layer_user.splitlines()
+        if line.startswith("templateContracts=")
+    )
+    contracts = json.loads(contracts_line.removeprefix("templateContracts="))
+    hero_contract = next(
+        item
+        for item in contracts
+        if item["templateId"] == "BluetoothDeviceOverviewHero@1"
+    )
+    assert hero_contract["propsSchema"]["properties"]["title"]["type"] == "string"
 
 
 @pytest.mark.asyncio

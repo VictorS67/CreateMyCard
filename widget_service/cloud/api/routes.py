@@ -57,12 +57,17 @@ _MODULE = "[WS Router]"
 INTERFACE_TYPE = {
     "getWidgetCapabilityOverview": "getWidgetCapabilityOverviewInterfaceTime",
     "getDataCapabilitySchemas": "getDataCapabilitySchemasInterfaceTime",
-    "generateWidgetCardCompactDsl": "generateWidgetCardCompactDslInterfaceTime"
+    "generateWidgetCard": "generateWidgetCardInterfaceTime",
+    "generateWidgetCardCompactDsl": "generateWidgetCardCompactDslInterfaceTime",
+    "generateWidgetCardTerseDslNested2": "generateWidgetCardTerseDslNested2InterfaceTime",
 }
 
 INTERFACE_PARAMETER_ERROR_TYPE = {
+    "getWidgetCapabilityOverview": "getWidgetCapabilityOverviewInterfaceParamError",
     "getDataCapabilitySchemas": "getDataCapabilitySchemasInterfaceParamError",
-    "generateWidgetCardCompactDsl": "generateWidgetCardCompactDslInterfaceParamError"
+    "generateWidgetCard": "generateWidgetCardInterfaceParamError",
+    "generateWidgetCardCompactDsl": "generateWidgetCardCompactDslInterfaceParamError",
+    "generateWidgetCardTerseDslNested2": "generateWidgetCardTerseDslNested2InterfaceParamError",
 }
 
 
@@ -964,9 +969,10 @@ async def _serve_operation_websocket(
                     compact_dsl_argument_issue_tracker.reset(request_id)
                 result_data = result.model_dump(mode="json", exclude_none=True)
                 duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
-                trigger_mq(body={
-                    INTERFACE_TYPE[operation]: duration_ms
-                })
+                # 打点键缺失不能吞掉已成功的生成结果。
+                interface_time_key = INTERFACE_TYPE.get(operation)
+                if interface_time_key is not None:
+                    trigger_mq(body={interface_time_key: duration_ms})
                 logger.info(
                     f"{_MODULE} widget_operation_ws_handler_completed request_id={request_id} "
                     f"operation={operation} duration_ms={duration_ms} "

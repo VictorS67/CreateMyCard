@@ -1001,8 +1001,21 @@ def _provider_variant_matches_trusted_state(
         if isinstance(item, dict)
     }
     if wire_id == "BatteryOverview@1":
+        state_independent_variants = {
+            "chargingDiagnosticsHero",
+            "chargingProgressHero",
+            "healthLevelHero",
+            "percentRingHero",
+            "progressCompact",
+            "statusIconCompact",
+            "temperatureIconCompact",
+        }
+        if variant_name in state_independent_variants:
+            return True
         facts = extract_battery_overview_facts(task_spec.dataModelSchema)
-        if facts is None or not variant_name.startswith(facts.state):
+        if facts is None:
+            return False
+        if not variant_name.startswith(facts.state):
             return False
         if "GetEarphoneInfo" in capabilities:
             return variant_name == f"{facts.state}Phone"
@@ -1010,6 +1023,13 @@ def _provider_variant_matches_trusted_state(
     if wire_id == "BluetoothDeviceOverview@1":
         facts = extract_bluetooth_device_overview_facts(task_spec.dataModelSchema)
         if facts is None:
+            return False
+        if variant_name in {"caseStatus", "caseStatusCompact"}:
+            return (
+                facts.case_battery_level is not None
+                and facts.case_charging_status is not None
+            )
+        if facts.is_connected is None or facts.earphone_name is None:
             return False
         if variant_name == "hero":
             return True

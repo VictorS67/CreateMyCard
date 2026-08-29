@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     validation_failure_max_repair_attempts: int = Field(default=1, ge=1, le=10)
     enable_widget_edit: bool = False
     enable_widget_directive_commands: bool = False
+    enable_card_template: bool = False
+    enable_fusion_ball: bool = False
     artifact_base_url: str = "https://obs.todo.local/widget"
     enable_artifact_download_mock: bool = True
     source_artifact_max_bytes: int = 2 * 1024 * 1024

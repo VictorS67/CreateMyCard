@@ -1012,12 +1012,10 @@ def _validate_provider_template_state(
     if identity is not None:
         wire_id, variant_name = identity
     if wire_id == "BatteryOverview@1":
-        facts = extract_battery_overview_facts(task_spec.dataModelSchema)
-        if facts is None:
-            raise TerselConversionError(
-                "Battery Provider Template variant does not match the trusted state."
-            )
         state_independent_variants = {
+            "chargingDiagnosticsHero",
+            "chargingProgressHero",
+            "healthLevelHero",
             "percentRingHero",
             "progressCompact",
             "statusIconCompact",
@@ -1025,6 +1023,11 @@ def _validate_provider_template_state(
         }
         if variant_name in state_independent_variants:
             return
+        facts = extract_battery_overview_facts(task_spec.dataModelSchema)
+        if facts is None:
+            raise TerselConversionError(
+                "Battery Provider Template variant does not match the trusted state."
+            )
         if not variant_name.startswith(facts.state):
             raise TerselConversionError(
                 "Battery Provider Template variant does not match the trusted state."
@@ -1038,6 +1041,19 @@ def _validate_provider_template_state(
     if wire_id == "BluetoothDeviceOverview@1":
         facts = extract_bluetooth_device_overview_facts(task_spec.dataModelSchema)
         if facts is None:
+            raise TerselConversionError(
+                "Bluetooth Provider Template has no trusted earphone facts."
+            )
+        if variant_name == "caseStatusCompact":
+            if (
+                facts.case_battery_level is None
+                or facts.case_charging_status is None
+            ):
+                raise TerselConversionError(
+                    "Bluetooth Provider Template variant does not match the trusted case status."
+                )
+            return
+        if facts.is_connected is None or facts.earphone_name is None:
             raise TerselConversionError(
                 "Bluetooth Provider Template has no trusted earphone identity."
             )
@@ -5690,6 +5706,9 @@ _PROVIDER_TEMPLATE_DIRECT_VARIANTS = {
         "normalWeatherCompact": "normal",
         "chargingWeatherCompact": "charging",
         "lowWeatherCompact": "low",
+        "chargingDiagnosticsHero": "chargingDiagnostics",
+        "chargingProgressHero": "chargingProgress",
+        "healthLevelHero": "healthLevel",
         "percentRingHero": "percentRing",
     },
     "ResourceUsageOverview@1": {"full": "memory", "compact": "memory"},

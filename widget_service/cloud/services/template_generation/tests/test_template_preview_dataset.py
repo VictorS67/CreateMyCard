@@ -16,17 +16,17 @@ def test_template_preview_dataset_covers_all_business_templates(tmp_path):
     manifest = write_template_preview_dataset(tmp_path)
     cases = manifest["cases"]
 
-    assert manifest["templateCount"] == 79
+    assert manifest["templateCount"] == 83
     assert manifest["countsByLayout"] == {
         "Compact": 31,
-        "Hero": 11,
+        "Hero": 15,
         "Full": 24,
         "WideHero": 2,
         "WideFull": 11,
     }
-    assert manifest["countsBySize"] == {"2x2": 66, "2x4": 13}
-    assert len(cases) == 79
-    assert len({case["templateId"] for case in cases}) == 79
+    assert manifest["countsBySize"] == {"2x2": 70, "2x4": 13}
+    assert len(cases) == 83
+    assert len({case["templateId"] for case in cases}) == 83
     assert all((tmp_path / case["file"]).is_file() for case in cases)
 
 
@@ -54,6 +54,7 @@ def test_template_preview_assets_are_bundled_by_genui_evaluation():
         "battery_leaf_fill.svg",
         "calendar_fill.svg",
         "clock_fill.svg",
+        "earphone_case_16644.svg",
         "externaldrive_fill.svg",
         "figure_run.svg",
         "flame_fill.svg",

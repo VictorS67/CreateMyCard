@@ -107,6 +107,36 @@
       ]
     },
     {
+      "templateId": "WorkoutOverviewCompact@1",
+      "businessId": "WorkoutOverview",
+      "capabilityId": "GetHealthAndSportSummary",
+      "description": "最近一次单次运动训练摘要，展示运动类型、该次热量和时长，可使用运动图标。 组件形态：latestCompact。",
+      "optionalData": [],
+      "entry": "templates/workout-overview.cardtpl",
+      "primaryData": [
+        "/exerciseTypeName",
+        "/exerciseDurationText"
+      ],
+      "secondaryData": [
+        "/exerciseCalorieText"
+      ]
+    },
+    {
+      "templateId": "WorkoutOverviewHero@1",
+      "businessId": "WorkoutOverview",
+      "capabilityId": "GetHealthAndSportSummary",
+      "description": "最近一次单次运动训练摘要，展示运动类型、该次热量和时长，可使用运动图标。 组件形态：latestHero。",
+      "optionalData": [],
+      "entry": "templates/workout-overview.cardtpl",
+      "primaryData": [
+        "/exerciseTypeName",
+        "/exerciseDurationText"
+      ],
+      "secondaryData": [
+        "/exerciseCalorieText"
+      ]
+    },
+    {
       "templateId": "HeartRateOverviewFull@1",
       "businessId": "HeartRateOverview",
       "capabilityId": "GetHealthAndSportSummary",

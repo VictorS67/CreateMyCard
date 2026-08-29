@@ -19,7 +19,7 @@ def get_container_ip():
 
 class Settings(BaseSettings):
     container_ip: str = get_container_ip()
-    if platform.system() == "Windows":
+    if platform.system() in ("Windows", "Darwin"):
         LOCAL_FLAG: bool = True
         HTTP_SERVER_URL: str = f"http://localhost:8080"
     else:
@@ -47,8 +47,9 @@ class Settings(BaseSettings):
     ids_calling_uid: str = "decisionhub"
     ids_dev_fake_id: str = "123**********postmantestdevFakeId"
     ids_sign_secret: str = "postman-test-secret"
-    artifact_base_url: str = "https://obs.todo.local/widget"
-    server_host: str = "127.0.0.1"
+    artifact_base_url: str = CONFIG.get("artifact_base_url", "https://obs.todo.local/widget")
+    asset_src_url_mapping: dict[str, str] = CONFIG.get("asset_src_url_mapping", {})
+    server_host: str = "0.0.0.0"
     server_port: int = 8855
     sts_server: str = CONFIG.get("sts_serverDomain")
     ids_request_timeout_seconds: int = 30
@@ -119,6 +120,7 @@ class Settings(BaseSettings):
     )
 
     # deepseek v4 flash model config
+    deepseek_api_url: str = CONFIG.get("deepseek_api_url")
     deepseek_ws_url: str = CONFIG.get("deepseek_ws_url")
     deepseek_model: str = CONFIG.get("deepseek_model")
     deepseek_api_key: str = CONFIG.get("deepseek_api_key")

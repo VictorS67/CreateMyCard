@@ -1595,9 +1595,11 @@ class WidgetGenerationService:
     def _enable_card_template(self) -> bool:
         """Whether use template for UI generation."""
         settings = get_settings()
-        return bool(getattr(settings, "enable_card_template", False))
+        config = getattr(settings, "CONFIG", {})
+        return isinstance(config, dict) and config.get("enable_card_template") == "true"
 
     def _enable_fusion_ball(self) -> bool:
         """Whether use fusion ball for UI generation."""
         settings = get_settings()
-        return bool(getattr(settings, "enable_fusion_ball", False))
+        config = getattr(settings, "CONFIG", {})
+        return isinstance(config, dict) and config.get("enable_fusion_ball") == "true"

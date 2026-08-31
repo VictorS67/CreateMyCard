@@ -26,11 +26,12 @@
   - `SleepOverviewFull@1`：睡眠情况完整摘要，展示时长、得分进度和状态，可使用睡眠图标。 组件形态：full。 布局场景：完整 2x2；无 Action 时单独使用。主数据：/nightSleepDurationText；次要数据：/sleepScore, /sleepStatus；可选数据：无。
   - `SleepOverviewHero@1`：睡眠情况主视觉，展示时长和得分进度，可使用睡眠图标。 组件形态：hero。 布局场景：约 2x1.7；Hero + 1 个 PillAction。主数据：/nightSleepDurationText；次要数据：/sleepScore；可选数据：无。
   - `SleepOverviewCompact@1`：睡眠情况紧凑摘要，展示时长和得分环，可使用睡眠图标。 组件形态：compact。 布局场景：约 2x1；双 Compact 组成 2x2，或单 Compact + 2 个 PillAction。主数据：/nightSleepDurationText；次要数据：/sleepScore；可选数据：无。
+  - `SleepOverviewWideFull@1`：睡眠情况摘要，展示时长，可补充得分、状态和目标日期。 组件形态：wideFull。 布局场景：完整 4x2；单独使用。主数据：/nightSleepDurationText；次要数据：/sleepScore, /sleepStatus, /targetDateText；可选数据：无。
 - 已有 Provider 全局路径的值必须由模板 `data` 绑定；props 可传无全局路径的受控派生值、排版参数和
   素材。
 - 选择能够完整表达用户显式要求字段且自身 `primaryData` 与 `secondaryData` 全部可用的模板。
 - `ActivityOverviewCompact@1` 与 `ActivityOverviewHero@1` 只表达步数；`ActivityOverviewFull@1` 还要求并展示热量和距离。Hero 与 Full 的万步进度是固定展示基准，不得描述成用户个人目标或可信达成率。
-- `SleepOverviewCompact@1` 与 `SleepOverviewHero@1` 表达时长和得分；用户还要求睡眠状态时只能选择 `SleepOverviewFull@1`。
+- `SleepOverviewCompact@1` 与 `SleepOverviewHero@1` 表达时长和得分；用户还要求睡眠状态时，2x2 只能选择 `SleepOverviewFull@1`，2x4 只能选择 `SleepOverviewWideFull@1`。
 - 素材参数描述的是槽位语义，不代表固定素材清单；只在本轮素材候选中匹配，没有合适候选时省略可选参数：
   - `ActivityOverview*.stepsIcon`：步行、步数或日常活动语义。
   - `ActivityOverviewWideHero@1`、`ActivityOverviewWideFull@1` 的 `caloriesIcon`：热量、能量消耗或火焰语义；`distanceIcon`：距离、里程或路线语义。其它活动模板不得传入这两个参数。

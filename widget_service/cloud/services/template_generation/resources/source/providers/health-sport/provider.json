@@ -334,6 +334,22 @@
       "secondaryData": [
         "/sleepScore"
       ]
+    },
+    {
+      "templateId": "SleepOverviewWideFull@1",
+      "businessId": "SleepOverview",
+      "capabilityId": "GetHealthAndSportSummary",
+      "description": "睡眠情况摘要，展示时长，可补充得分、状态和目标日期。 组件形态：wideFull。",
+      "optionalData": [],
+      "entry": "templates/sleep-overview.cardtpl",
+      "primaryData": [
+        "/nightSleepDurationText"
+      ],
+      "secondaryData": [
+        "/sleepScore",
+        "/sleepStatus",
+        "/targetDateText"
+      ]
     }
   ],
   "compatibility": {

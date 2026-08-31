@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -320,20 +320,101 @@ def test_first_layer_prompt_includes_task_fields_rules_and_action_candidates() -
     assert "不得为了迁就单业务限制而省略" in messages[0]["content"]
 
 
-def test_search_rejects_2x4_before_prompt_or_retrieval() -> None:
-    task = _task().model_copy(update={"size": "2x4"})
-    card_spec = _card_spec() | {"suggestSize": "2x4"}
-    inaccessible_registry = cast(CardPlanRegistry, object())
+def _battery_2x4_task(event_ids: tuple[str, ...] = ()) -> TaskSpec:
+    return TaskSpec(
+        userQuery="显示电量和充电状态",
+        size="2x4",
+        eventCandidates=[
+            EventAction(id=event_id, call="clickToIntent", args={}) for event_id in event_ids
+        ],
+        dataModelSchema={
+            "data": {
+                "phoneBattery": {
+                    "batterySOC": _field(68, "integer"),
+                    "batterySOCText": _field("68%"),
+                    "batteryCapacityLevelDesc": _field("正常电量"),
+                    "chargingStatusDesc": _field("未充电"),
+                }
+            }
+        },
+    )
 
-    with pytest.raises(TemplateRetrievalMiss, match="does not support 2x4"):
-        build_template_retrieval_prompt(task, inaccessible_registry, (_binding(),))
-    with pytest.raises(TemplateRetrievalMiss, match="does not support 2x4"):
+
+def _battery_binding() -> CandidateDataBinding:
+    return CandidateDataBinding(
+        capabilityId="GetPhoneBatteryInfo",
+        writeResultTo="/data/phoneBattery",
+        candidateOutputFields=[
+            "/batterySOC",
+            "/batterySOCText",
+            "/batteryCapacityLevelDesc",
+            "/chargingStatusDesc",
+        ],
+    )
+
+
+def _battery_2x4_card_spec() -> dict[str, Any]:
+    return {
+        "suggestSize": "2x4",
+        "dataBindings": [
+            {"capabilityId": "GetPhoneBatteryInfo", "writeResultTo": "/data/phoneBattery"}
+        ],
+    }
+
+
+def _battery_query(*paths: str) -> TemplateRetrievalQuery:
+    return TemplateRetrievalQuery(
+        themeId="battery-yellow",
+        requiredOutputFieldsByCapability={"GetPhoneBatteryInfo": paths},
+    )
+
+
+def test_search_2x4_pins_battery_candidates_to_wide_full() -> None:
+    result = retrieve_template_variants(
+        _battery_query("/batterySOC", "/chargingStatusDesc"),
+        _battery_2x4_task(),
+        get_cardplan_registry(),
+        (_battery_binding(),),
+        _battery_2x4_card_spec(),
+    )
+
+    assert len(result.component_candidates) == 1
+    candidate = result.component_candidates[0]
+    assert candidate.component_id == "BatteryOverview"
+    assert candidate.available_template_ids
+    assert all(
+        template_id.endswith("WideFull@1")
+        for template_id in candidate.available_template_ids
+    )
+
+
+def test_search_rejects_2x4_with_two_actions() -> None:
+    query = _battery_query("/batterySOC", "/chargingStatusDesc").model_copy(
+        update={"action_ids": ("event.setPowerSavingMode", "event.startNavigate")}
+    )
+
+    with pytest.raises(TemplateRetrievalMiss, match="at most one Action"):
         retrieve_template_variants(
-            _query("/current/condition"),
-            task,
-            inaccessible_registry,
-            (_binding(),),
-            card_spec,
+            query,
+            _battery_2x4_task(("event.setPowerSavingMode", "event.startNavigate")),
+            get_cardplan_registry(),
+            (_battery_binding(),),
+            _battery_2x4_card_spec(),
+        )
+
+
+def test_search_rejects_2x4_action_when_business_has_no_wide_hero() -> None:
+    query = _battery_query("/batterySOC", "/chargingStatusDesc").model_copy(
+        update={"action_ids": ("event.setPowerSavingMode",)}
+    )
+
+    with pytest.raises(TemplateRetrievalMiss, match="has no WideHero template"):
+        retrieve_template_variants(
+            query,
+            _battery_2x4_task(("event.setPowerSavingMode",)),
+            get_cardplan_registry(),
+            (_battery_binding(),),
+            _battery_2x4_card_spec(),
         )
 
 

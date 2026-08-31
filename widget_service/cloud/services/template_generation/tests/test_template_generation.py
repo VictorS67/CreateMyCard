@@ -4671,30 +4671,169 @@ async def test_disabled_fusion_feature_rejects_forged_fusion_theme() -> None:
 
 
 @pytest.mark.asyncio
-async def test_template_pipeline_rejects_2x4_before_any_model_call() -> None:
-    class NoModelCall:
-        async def generate_json(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            pytest.fail("2x4 template Search must not call the model")
-
-        async def generate(self, *_args: Any, **_kwargs: Any) -> str:
-            pytest.fail("2x4 template Search must not call the model")
-
-    task_spec = _weather_task_spec().model_copy(update={"size": "2x4"})
-    card_spec = _weather_card_spec() | {"suggestSize": "2x4"}
+async def test_template_pipeline_supports_2x4_wide_single_focus() -> None:
     binding = CandidateDataBinding(
-        capabilityId="ViewWeather",
-        writeResultTo="/data/weather",
-        candidateOutputFields=["/current/temperatureText", "/current/condition"],
+        capabilityId="GetPhoneBatteryInfo",
+        writeResultTo="/data/phoneBattery",
+        candidateOutputFields=["/batterySOC", "/chargingStatusDesc"],
+    )
+    task_spec = _battery_task().model_copy(update={"size": "2x4"})
+    card_spec = _battery_card_spec() | {"suggestSize": "2x4"}
+    model = _FixedTemplateModel(
+        theme_id="battery-yellow",
+        component_id="BatteryOverview",
+        available_template_ids=(
+            "BatteryOverviewChargingWideFull@1",
+            "BatteryOverviewLowWideFull@1",
+            "BatteryOverviewNormalWideFull@1",
+        ),
+        capability_id="GetPhoneBatteryInfo",
+        required_fields=("/batterySOC", "/chargingStatusDesc"),
+        body=(
+            'Template("WideSingleFocusLayout@1",{},'
+            'Template("BatteryOverviewNormalWideFull@1",{}));'
+        ),
     )
 
-    with pytest.raises(TemplateRouteNotApplicable, match="does not support 2x4"):
-        await generate_template_a2ui(
-            task_spec,
-            card_spec,
-            (binding,),
-            NoModelCall(),
-            enable_fusion_ball=True,
-        )
+    output = await generate_template_a2ui(task_spec, card_spec, (binding,), model)
+
+    assert output.template_ids == (
+        "BatteryOverviewNormalWideFull@1",
+        "WideSingleFocusLayout@1",
+    )
+    assert model.second_layer_prompt is not None
+    second_layer_user = model.second_layer_prompt[1]["content"]
+    assert 'allowedUxLayouts=["WideSingleFocusLayout"]' in second_layer_user
+    assert "batterySOC" in output.a2ui
+    assert "chargingStatusDesc" in output.a2ui
+    messages = [json.loads(line) for line in output.a2ui.splitlines()]
+    components = {
+        item["id"]: item for item in messages[1]["updateComponents"]["components"]
+    }
+    root = components["root"]
+    assert root["component"] == "Column"
+    assert root["styles"]["width"] == "matchParent"
+    assert root["styles"]["height"] == "matchParent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("template_id", "action_id", "body", "expected_template_ids"),
+    [
+        (
+            "ActivityOverviewWideFull@1",
+            None,
+            'Template("WideSingleFocusLayout@1",{},Template("ActivityOverviewWideFull@1",{}));',
+            ("ActivityOverviewWideFull@1", "WideSingleFocusLayout@1"),
+        ),
+        (
+            "ActivityOverviewWideHero@1",
+            "event.open.health.sport",
+            (
+                'Template("WideSingleFocusLayout@1",{},'
+                'Template("ActivityOverviewWideHero@1",{}),'
+                'Template("PillAction@1",{"actionId":"event.open.health.sport",'
+                '"label":"今日训练"}));'
+            ),
+            (
+                "ActivityOverviewWideHero@1",
+                "PillAction@1",
+                "WideSingleFocusLayout@1",
+            ),
+        ),
+    ],
+)
+async def test_2x4_activity_wide_templates_pass_display_unit_validation(
+    template_id: str,
+    action_id: str | None,
+    body: str,
+    expected_template_ids: tuple[str, ...],
+) -> None:
+    binding = CandidateDataBinding(
+        capabilityId="GetHealthAndSportSummary",
+        writeResultTo="/data/healthSport",
+        candidateOutputFields=[
+            "/targetDateText",
+            "/dailySteps",
+            "/dailyTotalCaloriesText",
+            "/dailyDistanceText",
+        ],
+    )
+    task_spec = TaskSpec(
+        userQuery="生成一张步数卡片，看看我今天走了多少步。",
+        size="2x4",
+        eventCandidates=[
+            EventAction(
+                id="event.open.health.sport",
+                call="clickToDeeplink",
+                args={"intentName": "Health"},
+            )
+        ],
+        assetCandidates=[],
+        dataModelSchema={
+            "data": {
+                "healthSport": {
+                    "targetDateText": _provider_field("2026-08-31", "string"),
+                    "dailySteps": _provider_field(6200, "integer"),
+                    "dailyTotalCaloriesText": _provider_field("420 千卡", "string"),
+                    "dailyDistanceText": _provider_field("4.60 公里", "string"),
+                }
+            }
+        },
+    )
+    card_spec = {
+        "title": "步数记录",
+        "description": "运动数据速览",
+        "suggestSize": "2x4",
+        "dataBindings": [
+            {
+                "capabilityId": "GetHealthAndSportSummary",
+                "arguments": {"targetDayOffset": 0},
+                "writeResultTo": "/data/healthSport",
+            }
+        ],
+    }
+    model = _FixedTemplateModel(
+        theme_id="race-sunrise-action",
+        component_id="ActivityOverview",
+        available_template_ids=(template_id,),
+        capability_id="GetHealthAndSportSummary",
+        required_fields=("/dailySteps",),
+        action_id=action_id,
+        body=body,
+    )
+
+    output = await generate_template_a2ui(task_spec, card_spec, (binding,), model)
+
+    assert output.template_ids == expected_template_ids
+    reporter = validate_card(
+        artifact={
+            "genui": output.a2ui,
+            "cardSpec": card_spec,
+            "effectiveCapabilities": {
+                "data": [
+                    {
+                        "id": "GetHealthAndSportSummary",
+                        "description": "健康与运动数据",
+                        "outputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "dailySteps": {
+                                    "type": "integer",
+                                    "description": "每日步数",
+                                    "sampleValue": 6200,
+                                    "displayUnits": ["步"],
+                                    "unitIncluded": False,
+                                }
+                            },
+                        },
+                    }
+                ]
+            },
+        }
+    )
+
+    assert not reporter.has_code("DISPLAY_UNIT_MISSING", "DISPLAY_UNIT_DUPLICATED")
 
 
 @pytest.mark.asyncio

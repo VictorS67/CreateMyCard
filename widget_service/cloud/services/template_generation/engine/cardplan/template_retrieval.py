@@ -71,7 +71,6 @@ def build_template_retrieval_prompt(
     coverage_bindings: tuple[CandidateDataBinding, ...],
 ) -> list[dict[str, str]]:
     """Build the first-layer marker prompt without exposing final UI choices."""
-    _require_supported_search_size(task_spec)
     data_shape = extract_data_shape(task_spec)
     capability_ids = tuple(binding.capabilityId for binding in coverage_bindings)
     component_ids = _component_ids_for_capabilities(registry, capability_ids)
@@ -135,7 +134,6 @@ def retrieve_template_variants(
     preferred_template_ids: tuple[str, ...] = (),
 ) -> TemplateRouteSelection:
     """Return component candidate sets; never choose a final CardTpl variant."""
-    _require_supported_search_size(task_spec)
     registry.require_theme(query.theme_id)
     _validate_selected_actions(query, task_spec)
     if not query.required_output_fields_by_capability:
@@ -183,6 +181,12 @@ def retrieve_template_variants(
             query.action_ids,
             required_groups,
         )
+    elif task_spec.size == "2x4":
+        candidates, required_groups = _apply_2x4_combination_policy(
+            candidates,
+            query.action_ids,
+            required_groups,
+        )
     else:
         if len(candidates) > 1:
             raise TemplateRetrievalMiss(
@@ -205,10 +209,27 @@ def retrieve_template_variants(
     )
 
 
-def _require_supported_search_size(task_spec: TaskSpec) -> None:
-    """Reject card sizes that are not yet supported by Provider Template Search."""
-    if task_spec.size == "2x4":
-        raise TemplateRetrievalMiss("template Search does not support 2x4 cards")
+def _apply_2x4_combination_policy(
+    candidates: tuple[TemplateComponentCandidate, ...],
+    action_ids: tuple[str, ...],
+    required_groups: list[tuple[str, ...]],
+) -> tuple[tuple[TemplateComponentCandidate, ...], list[tuple[str, ...]]]:
+    """Restrict 2x4 candidates to the single-business Wide capacity contract."""
+    component_count = len(candidates)
+    action_count = len(action_ids)
+    if component_count != 1:
+        raise TemplateRetrievalMiss(
+            "2x4 template Search supports one data business with optional Actions"
+        )
+    if action_count >= 2:
+        raise TemplateRetrievalMiss("2x4 template Search supports at most one Action")
+    layout_suffix = "WideHero" if action_count else "WideFull"
+    return _restrict_candidates_to_layout_suffix(
+        candidates,
+        layout_suffix,
+        required_groups,
+        card_size="2x4",
+    )
 
 
 def _apply_2x2_combination_policy(
@@ -231,9 +252,25 @@ def _apply_2x2_combination_policy(
         layout_suffix = {0: "Full", 1: "Hero", 2: "Compact"}[action_count]
     else:
         raise TemplateRetrievalMiss("template Search found no business component")
+    return _restrict_candidates_to_layout_suffix(
+        candidates,
+        layout_suffix,
+        required_groups,
+        card_size="2x2",
+    )
 
+
+def _restrict_candidates_to_layout_suffix(
+    candidates: tuple[TemplateComponentCandidate, ...],
+    layout_suffix: str,
+    required_groups: list[tuple[str, ...]],
+    *,
+    card_size: str,
+) -> tuple[tuple[TemplateComponentCandidate, ...], list[tuple[str, ...]]]:
+    """Pin candidates to one layout family and re-check field coverage per slot."""
     filtered_candidates = tuple(
-        _candidate_with_layout_suffix(candidate, layout_suffix) for candidate in candidates
+        _candidate_with_layout_suffix(candidate, layout_suffix, card_size)
+        for candidate in candidates
     )
     allowed_template_ids = {
         template_id
@@ -246,16 +283,22 @@ def _apply_2x2_combination_policy(
     ]
     if any(not group for group in filtered_groups):
         raise TemplateRetrievalMiss(
-            f"2x2 {layout_suffix} templates cannot cover all requested fields"
+            f"{card_size} {layout_suffix} templates cannot cover all requested fields"
         )
     for candidate in filtered_candidates:
-        _require_single_template_coverage(candidate, filtered_groups, layout_suffix)
+        _require_single_template_coverage(
+            candidate,
+            filtered_groups,
+            layout_suffix,
+            card_size,
+        )
     return filtered_candidates, filtered_groups
 
 
 def _candidate_with_layout_suffix(
     candidate: TemplateComponentCandidate,
     layout_suffix: str,
+    card_size: str = "2x2",
 ) -> TemplateComponentCandidate:
     template_ids = tuple(
         template_id
@@ -264,7 +307,7 @@ def _candidate_with_layout_suffix(
     )
     if not template_ids:
         raise TemplateRetrievalMiss(
-            f"2x2 business {candidate.component_id} has no {layout_suffix} template"
+            f"{card_size} business {candidate.component_id} has no {layout_suffix} template"
         )
     return candidate.model_copy(update={"available_template_ids": template_ids})
 
@@ -273,8 +316,9 @@ def _require_single_template_coverage(
     candidate: TemplateComponentCandidate,
     required_groups: list[tuple[str, ...]],
     layout_suffix: str,
+    card_size: str = "2x2",
 ) -> None:
-    """A 2x2 business slot must use one layout-compatible business template."""
+    """A business slot must use one layout-compatible business template."""
     candidate_ids = set(candidate.available_template_ids)
     component_groups = [
         set(group).intersection(candidate_ids)
@@ -283,7 +327,7 @@ def _require_single_template_coverage(
     ]
     if component_groups and not set.intersection(*component_groups):
         raise TemplateRetrievalMiss(
-            f"2x2 {layout_suffix} templates cannot cover one {candidate.component_id} slot"
+            f"{card_size} {layout_suffix} templates cannot cover one {candidate.component_id} slot"
         )
 
 

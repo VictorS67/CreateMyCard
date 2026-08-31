@@ -88,9 +88,6 @@ async def generate_template_a2ui(
         f"{_MODULE} task_spec_received "
         f"summary={json_for_log(_task_spec_log_summary(task_spec))}"
     )
-    if task_spec.size == "2x4":
-        logger.info(f"{_MODULE} template_search_disabled_for_card_size size=2x4")
-        raise TemplateRouteNotApplicable("template Search does not support 2x4 cards")
     try:
         selected_task_spec = _with_trusted_sample_overrides(
             task_spec,

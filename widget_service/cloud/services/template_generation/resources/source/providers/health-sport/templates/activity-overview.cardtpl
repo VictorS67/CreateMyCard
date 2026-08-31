@@ -164,9 +164,16 @@ Row(
             ),
             Column(
                 {"itemMargin":4,"width": "matchParent", "justifyContent": "start", "alignItems": "start", "clip": true},
-                Text(
-                    data.steps,
-                    {"fontSize": 30, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1}
+                Row(
+                    {"itemMargin": 4, "width": "matchParent", "justifyContent": "start", "alignItems": "bottom"},
+                    Text(
+                        data.steps,
+                        {"fontSize": 30, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1}
+                    ),
+                    Text(
+                        "步",
+                        {"fontSize": 12, "fontWeight": 500, "fontColor": $theme('supportContentColor'), "maxLines": 1, "margin": {"bottom": 5}}
+                    )
                 ),
                 Text(
                     "总步数",
@@ -441,9 +448,16 @@ Row(
             ),
             Column(
                 {"itemMargin":4,"width": "matchParent", "justifyContent": "start", "alignItems": "start", "clip": true},
-                Text(
-                    data.steps,
-                    {"fontSize": 30, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1}
+                Row(
+                    {"itemMargin": 4, "width": "matchParent", "justifyContent": "start", "alignItems": "bottom"},
+                    Text(
+                        data.steps,
+                        {"fontSize": 30, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1}
+                    ),
+                    Text(
+                        "步",
+                        {"fontSize": 12, "fontWeight": 500, "fontColor": $theme('supportContentColor'), "maxLines": 1, "margin": {"bottom": 5}}
+                    )
                 ),
                 Text(
                     "总步数",

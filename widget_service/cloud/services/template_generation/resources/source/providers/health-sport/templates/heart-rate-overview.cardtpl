@@ -1,29 +1,54 @@
 #Template HeartRateOverviewFull@1(props: {})
 data = {
-    average: $path("/exerciseHeartRateAvg")
+    average: $optionalPath("/exerciseHeartRateAvg"),
+    max: $optionalPath("/exerciseHeartRateMax"),
+    min: $optionalPath("/exerciseHeartRateMin"),
+    updatedAt: $optionalPath("/updatedAt")
 }
 
-Column(
-    { "_advancedComponent": "HeartRateOverview", "itemMargin": 4, "width": "matchParent", "height": "matchParent", "justifyContent": "center", "alignItems": "center", "constraintSize": { "minWidth": 0, "minHeight": 0 } },
-    Text(
-        "运动平均心率",
-        { "width": "matchParent", "fontSize": 16, "minFontSize": 12, "fontWeight": 500, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
-    ),
-    Row(
-        { "width": "matchParent", "margin": { "top": 4 }, "itemMargin": 0, "justifyContent": "center", "alignItems": "bottom", "constraintSize": { "minWidth": 0, "minHeight": 0 } },
-        Text(
-            data.average,
-            { "fontSize": 56, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+Stack(
+    { "width": "matchParent", "height": "matchParent", "alignContent": "topStart" },
+    Column(
+        { "_advancedComponent": "HeartRateOverview", "itemMargin": 0, "width": "matchParent", "height": "matchParent", "justifyContent": "center", "alignItems": "center", "constraintSize": { "minWidth": 0, "minHeight": 0 } },
+        #if data.average
+            Text(
+                "运动平均心率",
+                { "width": "matchParent", "fontSize": 16, "minFontSize": 12, "fontWeight": 500, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+            ),
+        #elseif data.max && data.min
+            Text(
+                "运动心率区间",
+                { "width": "matchParent", "fontSize": 16, "minFontSize": 12, "fontWeight": 500, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+            ),
+        #endif
+        Row(
+            { "width": "matchParent", "margin": { "top": 4 }, "itemMargin": 0, "justifyContent": "center", "alignItems": "bottom", "constraintSize": { "minWidth": 0, "minHeight": 0 } },
+            #if data.average
+                Text(
+                    data.average,
+                    { "fontSize": 56, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+                ),
+            #elseif data.max && data.min
+                Text(
+                    Expr(`${data.min}` + " / " + `${data.max}`),
+                    { "fontSize": 34, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+                ),
+            #endif
         ),
         Text(
             "次/分钟",
-            { "fontSize": 1, "fontWeight": 500, "fontColor": "#00000000", "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+            { "fontSize": 12, "fontWeight": 500, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
         )
     ),
-    Text(
-        "次/分钟",
-        { "fontSize": 12, "fontWeight": 500, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
-    )
+    #if data.updatedAt
+        Column(
+            { "width": "matchParent", "height": "matchParent", "itemMargin": 4, "justifyContent": "end", "alignItems": "center", "constraintSize": { "minWidth": 0, "minHeight": 0 } },
+            Text(
+                data.updatedAt,
+                { "width": "matchParent", "fontSize": 10, "fontWeight": 500, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+            )
+        )
+    #endif
 )
 #End
 

@@ -209,7 +209,7 @@ def test_gallery_inputs_cover_all_provider_business_scenarios(tmp_path: Path) ->
 
     assert not stale_input.exists()
     assert len(manifest.providers) == 9
-    assert sum(len(provider.cases) for provider in manifest.providers) == 98
+    assert sum(len(provider.cases) for provider in manifest.providers) == 112
     scenario_ids = {
         case.scenarioId
         for provider in manifest.providers
@@ -305,7 +305,7 @@ def test_gallery_inputs_cover_all_provider_business_scenarios(tmp_path: Path) ->
         for case in provider.cases:
             if case.targetTemplateId:
                 targeted_cases.append(case)
-    assert len(targeted_cases) == 90
+    assert len(targeted_cases) == 104
     battery_full_ids = {
         case.targetTemplateId
         for case in targeted_cases
@@ -567,10 +567,10 @@ async def test_gallery_dry_run_emits_missing_and_not_generated_results(
 
     summary = await runner.run(input_root, output_root, dry_run=True)
 
-    assert summary.total == 98
+    assert summary.total == 112
     assert summary.failed == 0
     assert summary.missing == 18
-    assert summary.not_generated == 80
+    assert summary.not_generated == 94
     assert service.requests == []
     reloaded = load_gallery_input_manifest(input_root)
     assert len(reloaded.providers) == 9

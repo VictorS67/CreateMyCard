@@ -1378,18 +1378,34 @@ def _template_directive_components(content: str, line_number: int) -> tuple[str,
         encoded = json.dumps(names, separators=(",", ":"))
         components = (f"IfAnyBind({encoded},", f"IfAllMissingBind({encoded},")
     else:
-        grouped = re.fullmatch(
-            r"#(?:if|elseif)[ \t]+data\.([A-Za-z_][A-Za-z0-9_]*)[ \t]*&&[ \t]*"
-            r"data\.([A-Za-z_][A-Za-z0-9_]*)",
+        keyword = content.split(maxsplit=1)[0]
+        or_group = re.fullmatch(
+            r"#(?:if|elseif)[ \t]+data\.[A-Za-z_][A-Za-z0-9_]*"
+            r"(?:[ \t]*\|\|[ \t]*data\.[A-Za-z_][A-Za-z0-9_]*)+",
             content,
         )
-        if grouped is None or grouped.group(1) == grouped.group(2):
-            keyword = content.split(maxsplit=1)[0]
-            raise ValueError(
-                f"Provider Template {keyword} target is invalid at line {line_number}"
+        or_matched = False
+        if or_group is not None:
+            binding_names = re.findall(r"data\.([A-Za-z_][A-Za-z0-9_]*)", content)
+            if len(set(binding_names)) == len(binding_names):
+                encoded = json.dumps(binding_names, separators=(",", ":"))
+                components = (f"IfAnyBind({encoded},", f"IfAllMissingBind({encoded},")
+                or_matched = True
+        if not or_matched:
+            grouped = re.fullmatch(
+                r"#(?:if|elseif)[ \t]+data\.([A-Za-z_][A-Za-z0-9_]*)[ \t]*&&[ \t]*"
+                r"data\.([A-Za-z_][A-Za-z0-9_]*)",
+                content,
             )
-        binding_names = json.dumps(list(grouped.groups()), separators=(",", ":"))
-        components = (f"IfAllBind({binding_names},", f"IfAnyMissingBind({binding_names},")
+            if grouped is None or grouped.group(1) == grouped.group(2):
+                raise ValueError(
+                    f"Provider Template {keyword} target is invalid at line {line_number}"
+                )
+            binding_names = json.dumps(list(grouped.groups()), separators=(",", ":"))
+            components = (
+                f"IfAllBind({binding_names},",
+                f"IfAnyMissingBind({binding_names},",
+            )
     return components
 
 

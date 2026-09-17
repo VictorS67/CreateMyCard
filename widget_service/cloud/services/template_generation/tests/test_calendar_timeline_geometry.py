@@ -52,7 +52,9 @@ def _assert_timeline(row: Nested2Node, template_id: str) -> None:
     assert "layoutWeight" not in content_options
     texts = _texts(content)
     timezone = template_id in _TIMEZONE_TEMPLATES
-    assert len(texts) == (4 if timezone else 3)
+    # EventCountDetailsFull adds an all-day marker text next to the start time.
+    detail_full = template_id == "ScheduleOverviewEventCountDetailsFull@1"
+    assert len(texts) == (4 if (timezone or detail_full) else 3)
     assert _options(texts[0]).get("height") == 20
     assert _options(texts[0]).get("fontSize") == 14
     reminder = template_id == "ScheduleOverviewReminderHero@1"

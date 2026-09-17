@@ -5533,8 +5533,46 @@ def _compile_ux_layout_shell(
     root_options.pop("width", None)
     root_options.pop("height", None)
     root_options["_id"] = "root"
+    if _is_w9_backboard_row(content):
+        # W9 dual-backboard 2x4: the layout's backboard Row becomes the card
+        # root so the two 134x126 backboards are the root's direct children.
+        # The size-locked root must not carry inline width/height.
+        options = dict(
+            next(
+                (value for value in reversed(content.values) if isinstance(value, dict)),
+                {},
+            )
+        )
+        options.update(root_options)
+        options.pop("width", None)
+        options.pop("height", None)
+        values = list(content.values)
+        if values and isinstance(values[-1], dict):
+            values[-1] = options
+        else:
+            values.append(options)
+        return Nested2Node("Row", tuple(values), content.children)
     template_root = _merge_node_options(content, {"_id": _TEMPLATE_ROOT_ID})
     return Nested2Node("Column", ("card", root_options), (template_root,))
+
+
+def _is_w9_backboard_row(content: Nested2Node) -> bool:
+    """True for a layout root that is a Row of exactly two 134x126 backboards."""
+    if content.component_type != "Row" or len(content.children) != 2:
+        return False
+    for child in content.children:
+        options = next(
+            (value for value in reversed(child.values) if isinstance(value, dict)),
+            None,
+        )
+        if (
+            child.component_type != "Column"
+            or options is None
+            or options.get("width") != 134
+            or options.get("height") != 126
+        ):
+            return False
+    return True
 
 
 def _template_fusion_ball_palette(

@@ -233,8 +233,10 @@ def _parse_tersel_document(
         )
     state = {"components": 0}
     root = _parse_component(module.body[0].value, 1, state, theme_values or {})
-    if root.component_type not in {"Column", "Stack"}:
-        raise TerselConversionError("The root component must be Column or Stack.")
+    # Row is allowed for W9 dual-backboard 2x4 cards whose root is the
+    # backboard Row (two 134x126 Column children).
+    if root.component_type not in {"Column", "Stack", "Row"}:
+        raise TerselConversionError("The root component must be Column, Stack, or Row.")
     data_model = None
     if len(module.body) == 2:
         assignment = module.body[1]
@@ -807,9 +809,10 @@ def _container_props(
             "2x2": {"width": 160, "height": 160},
             "2x4": {"width": 300, "height": 150},
         }.get(size)
-        if node.component_type not in {"Column", "Stack"} or dimensions is None:
+        # Row is allowed for W9 dual-backboard 2x4 cards (root = backboard Row).
+        if node.component_type not in {"Column", "Stack", "Row"} or dimensions is None:
             raise TerselConversionError(
-                "Tersel root must be Column or Stack with a supported size."
+                "Tersel root must be Column, Stack, or Row with a supported size."
             )
         if "width" in inline_props or "height" in inline_props:
             raise TerselConversionError(

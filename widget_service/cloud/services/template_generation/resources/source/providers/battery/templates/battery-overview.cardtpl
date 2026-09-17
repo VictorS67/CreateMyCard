@@ -721,9 +721,16 @@ Column(
       {"width": "matchParent", "itemMargin": 2, "justifyContent": "start", "alignItems": "start", "clip": true, "constraintSize": {"minWidth": 0, "minHeight": 0}},
       Row(
           {"width": "matchParent", "itemMargin": 4, "justifyContent": "spaceBetween", "alignItems": "bottom", "clip": true, "constraintSize": {"minWidth": 0, "minHeight": 0}},
-          Text(
-              Expr(data.percent + "%"),
-              {"height": 24, "fontSize": 20, "minFontSize": 16, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+          Row(
+              {"justifyContent": "start", "alignItems": "bottom", "itemMargin": 1, "clip": true, "constraintSize": {"minWidth": 0, "minHeight": 0}},
+              Text(
+                  data.percent,
+                  {"height": 24, "fontSize": 20, "minFontSize": 16, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                ),
+              Text(
+                  "%",
+                  {"fontSize": 12, "minFontSize": 10, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1, "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                )
             ),
           Text(
               "剩余电量",
@@ -978,7 +985,7 @@ Column(
         data.temperature,
         {
           "width": "matchParent",
-          "fontSize": 20,
+          "fontSize": 18,
           "fontWeight": 700,
           "fontColor": $theme('primaryColor'),
           "maxLines": 1,

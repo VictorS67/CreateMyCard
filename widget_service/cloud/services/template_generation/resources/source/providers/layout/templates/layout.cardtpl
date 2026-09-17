@@ -182,8 +182,8 @@ Row({
   "itemMargin": 8
 },
   Column({
-    "layoutWeight": 1,
-    "height": "matchParent",
+    "width": 134,
+    "height": 126,
     "backgroundColor": $theme("supportContentStyle.backgroundColor"),
     "borderRadius": 16
   },
@@ -194,8 +194,8 @@ Row({
     }, children[0])
   ),
   Column({
-    "layoutWeight": 1,
-    "height": "matchParent",
+    "width": 134,
+    "height": 126,
     "backgroundColor": $theme("supportContentStyle.backgroundColor"),
     "borderRadius": 16
   },
@@ -255,13 +255,13 @@ Row({
   "height": "matchParent",
   "itemMargin": 8
 },
-  Column({"layoutWeight": 1, "height": "matchParent", "itemMargin": 8},
+  Column({"width": 134, "height": 126, "itemMargin": 8},
     Column({"width": "matchParent", "height": 82}, children[1]),
     Column({"width": "matchParent", "height": 36}, children[2])
   ),
   Column({
-    "layoutWeight": 1,
-    "height": "matchParent",
+    "width": 134,
+    "height": 126,
     "backgroundColor": $theme("supportContentStyle.backgroundColor"),
     "borderRadius": 16
   },
@@ -283,9 +283,9 @@ Row({
   "height": "matchParent",
   "itemMargin": 8
 },
-  Column({"layoutWeight": 1, "height": "matchParent"}, children[0]),
-  Column({"layoutWeight": 1, "height": #Expr(props.compactRows ? 126 : "matchParent"),
-    "itemMargin": #Expr(props.compactRows ? 12 : 8)},
+  Column({"width": 134, "height": 126}, children[0]),
+  Column({"width": 134, "height": 126,
+    "itemMargin": #Expr(props.compactRows ? 12 : 6)},
     Column({"width": "matchParent", "height": #Expr(props.compactRows ? 57 : 60)}, children[1]),
     Column({"width": "matchParent", "height": #Expr(props.compactRows ? 57 : 60)}, children[2])
   )
@@ -379,15 +379,15 @@ Column({
 data = {
 }
 
-Column({
+Row({
   "width": "matchParent",
   "height": "matchParent",
   "itemMargin": 8
 },
-  Column({"width": "matchParent", "layoutWeight": 1}, children[0]),
-  Row({"width": "matchParent", "layoutWeight": 1, "itemMargin": 8},
-    Column({"layoutWeight": 1, "height": "matchParent"}, children[1]),
-    Column({"layoutWeight": 1, "height": "matchParent"}, children[2])
+  Column({"width": 134, "height": 126}, children[0]),
+  Column({"width": 134, "height": 126, "itemMargin": 6, "justifyContent": "center"},
+    Column({"width": "matchParent", "height": 57}, children[1]),
+    Row({"width": "matchParent", "justifyContent": "center"}, children[2])
   )
 )
 #End
@@ -488,26 +488,35 @@ Row({
   "itemMargin": 8
 },
   Column({
-    "layoutWeight": 1,
-    "height": "matchParent",
-    "padding": {"left": 12, "top": 8, "right": 12, "bottom": 8},
-    "itemMargin": 0,
+    "width": 134,
+    "height": 126,
     "backgroundColor": $theme("supportContentStyle.backgroundColor"),
     "borderRadius": $theme("supportContentStyle.borderRadius")
   },
-    Column({"width": "matchParent", "layoutWeight": 1}, children[0]),
-    Column({"width": "matchParent", "height": 36}, children[2])
-  ),
-  Column({
-    "layoutWeight": 1,
-    "height": "matchParent",
-    "padding": {"left": 12, "top": 8, "right": 12, "bottom": 8},
-    "itemMargin": 0,
+    Column({
+      "width": "matchParent",
+      "height": "matchParent",
+      "padding": {"left": 12, "top": 12, "right": 12, "bottom": 8},
+      "itemMargin": 0
+    },
+      Column({"width": "matchParent", "layoutWeight": 1}, children[0]),
+      Column({"width": "matchParent", "height": 36}, children[2])
+    )
+  ),  Column({
+    "width": 134,
+    "height": 126,
     "backgroundColor": $theme("supportContentStyle.backgroundColor"),
     "borderRadius": $theme("supportContentStyle.borderRadius")
   },
-    Column({"width": "matchParent", "layoutWeight": 1}, children[1]),
-    Column({"width": "matchParent", "height": 36}, children[3])
+    Column({
+      "width": "matchParent",
+      "height": "matchParent",
+      "padding": {"left": 12, "top": 12, "right": 12, "bottom": 8},
+      "itemMargin": 0
+    },
+      Column({"width": "matchParent", "layoutWeight": 1}, children[1]),
+      Column({"width": "matchParent", "height": 36}, children[3])
+    )
   )
 )
 #End

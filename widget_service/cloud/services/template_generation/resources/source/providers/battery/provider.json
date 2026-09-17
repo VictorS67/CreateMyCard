@@ -1,0 +1,132 @@
+{
+  "bundleFormat": "card-provider-bundle/1",
+  "providerId": "com.huawei.battery.cli",
+  "providerVersion": "1.0.0-poc",
+  "firstLayerRule": {
+    "path": "layer-docs/first-layer.md"
+  },
+  "secondLayerRule": {
+    "path": "layer-docs/second-layer.md"
+  },
+  "capabilities": [
+    {
+      "capabilityId": "GetPhoneBatteryInfo",
+      "dataDomain": "/data/phoneBattery",
+      "dataSchema": {
+        "path": "capabilities/app-11.7.5.205_rom-6.0/data_capabilities.json",
+        "version": "app-11.7.5.205_rom-6.0"
+      }
+    }
+  ],
+  "templates": [
+    {
+      "templateId": "BatteryOverviewFull@1",
+      "businessId": "BatteryOverview",
+      "capabilityId": "GetPhoneBatteryInfo",
+      "description": "手机电量 Full，展示电量进度环、剩余电量文本、充电状态和电量等级；适用于普通、充电中和低电量状态。",
+      "optionalData": [],
+      "entry": "templates/battery-overview.cardtpl",
+      "primaryData": [
+        "/batterySOC",
+        "/batterySOCText"
+      ],
+      "secondaryData": [
+        "/chargingStatusDesc",
+        "/batteryCapacityLevelDesc"
+      ]
+    },
+    {
+      "templateId": "BatteryOverviewHero@1",
+      "businessId": "BatteryOverview",
+      "capabilityId": "GetPhoneBatteryInfo",
+      "description": "手机电量 Hero，居中展示电量进度环和当前电量等级，并为底部一个 PillAction 预留空间。",
+      "optionalData": [],
+      "entry": "templates/battery-overview.cardtpl",
+      "primaryData": [
+        "/batterySOC"
+      ],
+      "secondaryData": [
+        "/batteryCapacityLevelDesc"
+      ]
+    },
+    {
+      "templateId": "BatteryOverviewWideFull@1",
+      "businessId": "BatteryOverview",
+      "capabilityId": "GetPhoneBatteryInfo",
+      "description": "手机电量 WideFull，横向展示电量进度环、剩余电量文本、充电状态和电量等级；适用于普通、充电中和低电量状态。",
+      "optionalData": [],
+      "entry": "templates/battery-overview.cardtpl",
+      "primaryData": [
+        "/batterySOC",
+        "/batterySOCText"
+      ],
+      "secondaryData": [
+        "/chargingStatusDesc",
+        "/batteryCapacityLevelDesc"
+      ]
+    },
+    {
+      "templateId": "BatteryOverviewCompact@1",
+      "businessId": "BatteryOverview",
+      "capabilityId": "GetPhoneBatteryInfo",
+      "description": "手机电量 Compact，展示剩余电量文本，并优先补充电量等级；缺少等级时回退展示充电状态。",
+      "optionalData": [
+        "/batteryCapacityLevelDesc",
+        "/chargingStatusDesc"
+      ],
+      "entry": "templates/battery-overview.cardtpl",
+      "primaryData": [
+        "/batterySOCText"
+      ],
+      "secondaryData": []
+    },
+    {
+      "templateId": "BatteryOverviewHealthLevelHero@1",
+      "businessId": "BatteryOverview",
+      "capabilityId": "GetPhoneBatteryInfo",
+      "description": "电池健康与当前电量等级 Hero；用于 2x2 Hero 加一个 PillAction 的组合，展示电池体检标题、电池健康状态和当前电量等级。 组件形态：healthLevelHero。",
+      "optionalData": [],
+      "entry": "templates/battery-overview.cardtpl",
+      "primaryData": [
+        "/healthStatusDesc"
+      ],
+      "secondaryData": [
+        "/batteryCapacityLevelDesc"
+      ]
+    },
+    {
+      "templateId": "BatteryOverviewChargingProgressHero@1",
+      "businessId": "BatteryOverview",
+      "capabilityId": "GetPhoneBatteryInfo",
+      "description": "手机电量充电进度 Hero；用于 2x2 Hero 加一个 PillAction 的组合，展示手机电量标题、电量数字、横向进度条、充电状态、电池健康和充电器类型。 组件形态：chargingProgressHero。",
+      "optionalData": [],
+      "entry": "templates/battery-overview.cardtpl",
+      "primaryData": [
+        "/batterySOC"
+      ],
+      "secondaryData": [
+        "/chargingStatusDesc",
+        "/healthStatusDesc",
+        "/pluggedTypeDesc"
+      ]
+    },
+    {
+      "templateId": "BatteryOverviewPercentRingHero@1",
+      "businessId": "BatteryOverview",
+      "capabilityId": "GetPhoneBatteryInfo",
+      "description": "手机电量百分比环形 Hero；居中展示电量进度环和剩余电量百分比文本，用于第二层组合一个 PillAction。 组件形态：percentRingHero。",
+      "optionalData": [],
+      "entry": "templates/battery-overview.cardtpl",
+      "primaryData": [
+        "/batterySOC",
+        "/batterySOCText"
+      ],
+      "secondaryData": []
+    }
+  ],
+  "compatibility": {
+    "templateLanguage": "cardtpl/1",
+    "catalogId": "ohos.a2ui.extended.catalog.form",
+    "a2uiWireVersion": "v0.9"
+  }
+}

@@ -1,0 +1,821 @@
+#Template BluetoothDeviceOverviewHero@1(props: { leftEarIcon?: asset, rightEarIcon?: asset })
+data = {
+    connected: $path("/isConnected"),
+    name: $path("/earphoneName"),
+    left: $path("/leftBatteryLevel"),
+    right: $path("/rightBatteryLevel")
+}
+
+Column(
+  {
+    "_advancedComponent": "BluetoothDeviceOverview",
+    "_layoutActionBackgroundOpacity": 0.1,
+    "width": "matchParent",
+    "height": "matchParent",
+    "itemMargin": 4,
+    "justifyContent": "start",
+    "alignItems": "start",
+    "clip": true,
+    "constraintSize": {"minWidth": 0, "minHeight": 0}
+  },
+  Text(
+    data.name,
+    {
+      "width": "matchParent",
+      "height": 16,
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontColor": $theme('supportContentColor'),
+      "maxLines": 1,
+      "textOverflow": "ellipsis",
+      "constraintSize": { "minWidth": 0, "minHeight": 0 }
+    }
+  ),
+  Text(
+    Expr(`${data.connected}? '已连接' : '未连接'`),
+    {
+      "width": "matchParent",
+      "height": 32,
+      "fontSize": 20,
+      "fontWeight": 700,
+      "fontColor": $theme('primaryColor'),
+      "maxLines": 1,
+      "textOverflow": "ellipsis",
+      "constraintSize": { "minWidth": 0, "minHeight": 0 }
+    }
+  ),
+  Row(
+    {
+      "width": 100,
+      "height": 16,
+      "itemMargin": 0,
+      "justifyContent": "spaceBetween",
+      "alignItems": "center",
+    },
+    Row(
+      {
+        "width": 50,
+        "height": 16,
+        "itemMargin": 2,
+        "justifyContent": "start",
+        "alignItems": "center",
+      },
+      IfPresent(
+        props.leftEarIcon,
+        Image(
+          props.leftEarIcon,
+          { "width": 12, "height": 12, "fillColor": $theme('supportContentColor') }
+        )
+      ),
+      IfAbsent(
+        props.leftEarIcon,
+        Text(
+          "左",
+          { "fontColor": $theme('supportContentColor'), "fontSize": 12, "fontWeight": 500 }
+        )
+      ),
+      Text(
+        Expr(`'' + ${data.left} + '%'`),
+        { "fontColor": $theme('supportContentColor'), "fontSize": 12, "fontWeight": 500 }
+      )
+    ),
+    Row(
+      {
+        "width": 50,
+        "height": 16,
+        "itemMargin": 2,
+        "justifyContent": "start",
+        "alignItems": "center",
+      },
+      IfPresent(
+        props.rightEarIcon,
+        Image(
+          props.rightEarIcon,
+          { "width": 12, "height": 12, "fillColor": $theme('supportContentColor') }
+        )
+      ),
+      IfAbsent(
+        props.rightEarIcon,
+        Text(
+          "右",
+          { "fontColor": $theme('supportContentColor'), "fontSize": 12, "fontWeight": 500 }
+        )
+      ),
+      Text(
+        Expr(`'' + ${data.right} + '%'`),
+        { "fontColor": $theme('supportContentColor'), "fontSize": 12, "fontWeight": 500 }
+      )
+    )
+  )
+)
+#End
+
+#Template BluetoothDeviceOverviewEarbudsPhoneWideFull@1(props: { sourceIcon?: asset, leftEarIcon?: asset, rightEarIcon?: asset })
+data = {
+    connected: $path("/isConnected"),
+    name: $path("/earphoneName"),
+    battery: $optionalPath("/batteryLevel"),
+    left: $optionalPath("/leftBatteryLevel"),
+    right: $optionalPath("/rightBatteryLevel")
+}
+
+Column(
+  {"_advancedComponent": "BluetoothDeviceOverview",
+    "width": "matchParent",
+    "height": "matchParent",
+    "padding": {"left": 8,
+    "top": 6,
+    "right": 8,
+    "bottom": 6},
+    "borderRadius": 8,
+    "backgroundColor": "#1A64BB5C",
+    "itemMargin": 4,
+    "justifyContent": "start",
+    "alignItems": "start",
+    "clip": true,
+    "constraintSize": {"minWidth": 0,
+    "minHeight": 0}},
+  IfAbsent(
+      data.battery,
+      Text(
+            Expr(`${data.connected} ? ${data.name} + ' · 已连接' : ${data.name} + ' · 未连接'`),
+            {"width": "matchParent", "fontSize": 11, "fontWeight": 400, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "start", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+          )
+    ),
+  IfPresent(
+      data.battery,
+      Text(
+            Expr(`${data.connected} ? ${data.name} + ' · 已连接 · 充电盒 ' + ${data.battery} + '%' : ${data.name} + ' · 未连接 · 充电盒 ' + ${data.battery} + '%'`),
+            {"width": "matchParent", "fontSize": 11, "fontWeight": 400, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "start", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+          )
+    ),
+  Row(
+      {"width": "matchParent", "height": 56, "itemMargin": 8, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+      IfPresent(
+            data.left,
+            Column(
+                    {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+                    Stack(
+                              {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                              Progress(
+                                          {"value": data.left,
+                                            "total": 100,
+                                            "type": "ring",
+                                            "color": $theme('supportContentColor'),
+                                            "backgroundColor": "#1A000000",
+                                            "width": 40,
+                                            "height": 40,
+                                            "strokeWidth": 6}
+                                        ),
+                              IfPresent(
+                                          props.leftEarIcon,
+                                          Image(
+                                                        props.leftEarIcon,
+                                                        {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                                      )
+                                        )
+                            ),
+                    Text(
+                              Expr(`'' + ${data.left} + '%'`),
+                              {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                            )
+                  )
+          ),
+      IfPresent(
+            data.right,
+            Column(
+                    {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+                    Stack(
+                              {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                              Progress(
+                                          {"value": data.right,
+                                            "total": 100,
+                                            "type": "ring",
+                                            "color": $theme('supportContentColor'),
+                                            "backgroundColor": "#1A000000",
+                                            "width": 40,
+                                            "height": 40,
+                                            "strokeWidth": 6}
+                                        ),
+                              IfPresent(
+                                          props.rightEarIcon,
+                                          Image(
+                                                        props.rightEarIcon,
+                                                        {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                                      )
+                                        )
+                            ),
+                    Text(
+                              Expr(`'' + ${data.right} + '%'`),
+                              {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                            )
+                  )
+          ),
+      IfAbsent(
+            data.left,
+            IfAbsent(
+                    data.right,
+                    IfPresent(
+                              data.battery,
+                              Column(
+                                          {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+                                          Stack(
+                                                        {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                                                        Progress(
+                                                                        {"value": data.battery,
+                                                                          "total": 100,
+                                                                          "type": "ring",
+                                                                          "color": $theme('supportContentColor'),
+                                                                          "backgroundColor": "#1A000000",
+                                                                          "width": 40,
+                                                                          "height": 40,
+                                                                          "strokeWidth": 6}
+                                                                      ),
+                                                        IfPresent(
+                                                                        props.sourceIcon,
+                                                                        Image(
+                                                                                          props.sourceIcon,
+                                                                                          {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                                                                        )
+                                                                      )
+                                                      ),
+                                          Text(
+                                                        Expr(`'' + ${data.battery} + '%'`),
+                                                        {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                                                      )
+                                        )
+                            )
+                  )
+          )
+    )
+)
+#End
+
+#Template BluetoothDeviceOverviewEarbudsDynamicWideFull@1(props: { sourceIcon?: asset, leftEarIcon?: asset, rightEarIcon?: asset })
+data = {
+    connected: $path("/isConnected"),
+    name: $path("/earphoneName"),
+    battery: $optionalPath("/batteryLevel"),
+    left: $optionalPath("/leftBatteryLevel"),
+    right: $optionalPath("/rightBatteryLevel")
+}
+
+Column(
+  {"_advancedComponent": "BluetoothDeviceOverview",
+    "width": "matchParent",
+    "height": "matchParent",
+    "itemMargin": 4,
+    "justifyContent": "spaceBetween",
+    "alignItems": "start",
+    "clip": true,
+    "constraintSize": {"minWidth": 0,
+    "minHeight": 0}},
+  Row(
+      {"width": "matchParent", "height": 20, "itemMargin": 4, "justifyContent": "spaceBetween", "alignItems": "top", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+      Text(
+            Expr(`${data.connected} ? ${data.name} + ' · 已连接' : ${data.name} + ' · 未连接'`),
+            {"width": "matchParent", "fontSize": 12, "fontWeight": 400, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "start", "textOverflow": "ellipsis", "layoutWeight": 1, "constraintSize": {"minWidth": 0, "minHeight": 0}}
+          ),
+      IfPresent(
+            props.sourceIcon,
+            Image(
+                    props.sourceIcon,
+                    {"width": 20, "height": 20, "borderRadius": 4, "objectFit": "contain", "_preserveOriginalColor": true, "flexShrink": 0}
+                  )
+          )
+    ),
+  Row(
+      {"width": "matchParent", "height": 56, "itemMargin": 8, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+      IfPresent(
+            data.left,
+            Column(
+                    {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+                    Stack(
+                              {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                              Progress(
+                                          {"value": data.left,
+                                            "total": 100,
+                                            "type": "ring",
+                                            "color": $theme('supportContentColor'),
+                                            "backgroundColor": "#1A000000",
+                                            "width": 40,
+                                            "height": 40,
+                                            "strokeWidth": 6}
+                                        ),
+                              IfPresent(
+                                          props.leftEarIcon,
+                                          Image(
+                                                        props.leftEarIcon,
+                                                        {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                                      )
+                                        )
+                            ),
+                    Text(
+                              Expr(`'' + ${data.left} + '%'`),
+                              {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                            )
+                  )
+          ),
+      IfPresent(
+            data.right,
+            Column(
+                    {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+                    Stack(
+                              {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                              Progress(
+                                          {"value": data.right,
+                                            "total": 100,
+                                            "type": "ring",
+                                            "color": $theme('supportContentColor'),
+                                            "backgroundColor": "#1A000000",
+                                            "width": 40,
+                                            "height": 40,
+                                            "strokeWidth": 6}
+                                        ),
+                              IfPresent(
+                                          props.rightEarIcon,
+                                          Image(
+                                                        props.rightEarIcon,
+                                                        {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                                      )
+                                        )
+                            ),
+                    Text(
+                              Expr(`'' + ${data.right} + '%'`),
+                              {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                            )
+                  )
+          ),
+      IfAbsent(
+            data.left,
+            IfAbsent(
+                    data.right,
+                    IfPresent(
+                              data.battery,
+                              Column(
+                                          {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+                                          Stack(
+                                                        {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                                                        Progress(
+                                                                        {"value": data.battery,
+                                                                          "total": 100,
+                                                                          "type": "ring",
+                                                                          "color": $theme('supportContentColor'),
+                                                                          "backgroundColor": "#1A000000",
+                                                                          "width": 40,
+                                                                          "height": 40,
+                                                                          "strokeWidth": 6}
+                                                                      ),
+                                                        IfPresent(
+                                                                        props.sourceIcon,
+                                                                        Image(
+                                                                                          props.sourceIcon,
+                                                                                          {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                                                                        )
+                                                                      )
+                                                      ),
+                                          Text(
+                                                        Expr(`'' + ${data.battery} + '%'`),
+                                                        {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                                                      )
+                                        )
+                            )
+                  )
+          )
+    ),
+  IfPresent(
+      data.battery,
+      Text(
+            Expr(`'充电盒 ' + ${data.battery} + '%'`),
+            {"width": "matchParent", "fontSize": 11, "fontWeight": 400, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "start", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+          )
+    )
+)
+#End
+
+#Template BluetoothDeviceOverviewEarbudsSupport@1(props: { deviceIcon: asset, actionId?: string })
+data = {
+    left: $path("/leftBatteryLevel"),
+    right: $path("/rightBatteryLevel")
+}
+
+Row(
+  {
+      "width": "matchParent",
+      "height": "matchParent",
+      "padding": { "left": 12, "right": 16 },
+      "alignItems": "center",
+      "justifyContent": "spaceBetween",
+      "onClick": EventAction(props?.actionId)
+  },
+  Column(
+    {
+      "itemMargin": 2,
+      "alignItems": "start",
+      "justifyContent": "start",
+    },
+    Text(
+      '耳机电量',
+      { "fontSize": 14, "fontWeight": 700, "height": 19, "fontColor": $theme('primaryColor') }
+    ),
+    Text(
+      Expr(`'L ' + ${data.left} + '% R ' + ${data.right} + '%'`),
+      { "fontSize": 12, "fontWeight": 500, "height": 16, "fontColor": $theme('primaryColor') }
+    )
+  ),
+  Image(
+    props.deviceIcon,
+    { "width": 24, "height": 24, "fillColor": $theme('supportContentColor') }
+  )
+)
+
+#End
+
+#Template BluetoothDeviceOverviewEarbudPairFull@1(props: { caseIcon?: asset, leftEarIcon?: asset, rightEarIcon?: asset })
+data = {
+    connected: $path("/isConnected"),
+    name: $path("/earphoneName"),
+    case: $path("/batteryLevel"),
+    left: $path("/leftBatteryLevel"),
+    right: $path("/rightBatteryLevel")
+}
+
+Column(
+  {
+    "_advancedComponent": "BluetoothDeviceOverview",
+    "width": "matchParent",
+    "height": "matchParent",
+    "itemMargin": 4,
+    "justifyContent": "spaceBetween",
+    "alignItems": "start",
+    "clip": true,
+    "constraintSize": {
+      "minWidth": 0,
+      "minHeight": 0
+    }
+  },
+  Column(
+    { "width": "matchParent", "itemMargin": 4, "justifyContent": "start", "alignItems": "start", "constraintSize": { "minWidth": 0, "minHeight": 0 } },
+    Text(
+      data.name,
+      { "fontSize": 12, "fontWeight": 400, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textOverflow": "ellipsis", "height": 18, "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+    ),
+    Text(
+      Expr(`${data.connected} ? '已连接' : '未连接'`),
+      { "fontSize": 20, "fontWeight": 700, "fontColor": $theme('primaryColor'), "maxLines": 1, "textOverflow": "ellipsis", "height": 26, "constraintSize": { "minWidth": 0, "minHeight": 0 } }
+    )
+  ),
+  Row(
+    { "width": "matchParent", "height": 40, "itemMargin": 8, "justifyContent": "spaceBetween", "alignItems": "center", "constraintSize": { "minWidth": 0, "minHeight": 0 } },
+    Column(
+      {
+          "height": 40,
+          "itemMargin": 2,
+          "justifyContent": "start",
+          "alignItems": "center",
+      },
+      IfPresent(
+        props.leftEarIcon,
+        Image(
+          props.leftEarIcon,
+          { "width": 20, "height": 20, "fillColor": $theme('supportContentColor') }
+        )
+      ),
+      IfAbsent(
+        props.leftEarIcon,
+        Text('左',
+          { "fontSize": 14, "height": 20, "fontWeight": 400, "fontColor":$theme('supportContentColor') }
+        )
+      ),
+      Text(Expr(`'' + ${data.left} + '%'`),
+          { "fontSize": 14, "height": 18, "fontWeight": 500, "fontColor":$theme('supportContentColor') }
+        )
+    ),
+    Column(
+      {
+          "height": 40,
+          "itemMargin": 2,
+          "justifyContent": "start",
+          "alignItems": "center",
+      },
+      IfPresent(
+        props.rightEarIcon,
+        Image(
+          props.rightEarIcon,
+          { "width": 20, "height": 20, "fillColor": $theme('supportContentColor') }
+        )
+      ),
+      IfAbsent(
+        props.rightEarIcon,
+        Text('右',
+          { "fontSize": 14, "height": 20, "fontWeight": 400, "fontColor":$theme('supportContentColor') }
+        )
+      ),
+      Text(Expr(`'' + ${data.right} + '%'`),
+          { "fontSize": 14, "height": 18, "fontWeight": 500, "fontColor":$theme('supportContentColor') }
+        )
+    ),
+    Column(
+      {
+          "height": 40,
+          "itemMargin": 2,
+          "justifyContent": "start",
+          "alignItems": "center",
+      },
+      IfPresent(
+        props.caseIcon,
+        Image(
+          props.caseIcon,
+          { "width": 20, "height": 20, "fillColor": $theme('supportContentColor') }
+        )
+      ),
+      IfAbsent(
+        props.caseIcon,
+        Text('充电盒',
+          { "fontSize": 14, "height": 20, "fontWeight": 400, "fontColor":$theme('supportContentColor') }
+        )
+      ),
+      Text(Expr(`'' + ${data.case} + '%'`),
+          { "fontSize": 14, "height": 18, "fontWeight": 500, "fontColor":$theme('supportContentColor') }
+        )
+    ),
+  )
+)
+#End
+
+#Template BluetoothDeviceOverviewCompleteWideFull@1(props: { sourceIcon?: asset, leftEarIcon?: asset, rightEarIcon?: asset })
+data = {
+    connected: $path("/isConnected"),
+    name: $path("/earphoneName"),
+    battery: $path("/batteryLevel"),
+    left: $path("/leftBatteryLevel"),
+    right: $path("/rightBatteryLevel")
+}
+
+Column(
+  {"_advancedComponent": "BluetoothDeviceOverview",
+    "width": "matchParent",
+    "height": "matchParent",
+    "itemMargin": 4,
+    "justifyContent": "spaceBetween",
+    "alignItems": "start",
+    "clip": true,
+    "constraintSize": {"minWidth": 0,
+    "minHeight": 0}},
+  Row(
+      {"width": "matchParent", "height": 20, "itemMargin": 4, "justifyContent": "spaceBetween", "alignItems": "top", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+      Text(
+            Expr(`${data.connected} ? ${data.name} + ' · 已连接' : ${data.name} + ' · 未连接'`),
+            {"width": "matchParent", "fontSize": 12, "fontWeight": 400, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "start", "textOverflow": "ellipsis", "layoutWeight": 1, "constraintSize": {"minWidth": 0, "minHeight": 0}}
+          ),
+      IfPresent(
+            props.sourceIcon,
+            Image(
+                    props.sourceIcon,
+                    {"width": 20, "height": 20, "borderRadius": 4, "objectFit": "contain", "_preserveOriginalColor": true, "flexShrink": 0}
+                  )
+          )
+    ),
+  Row(
+      {"width": "matchParent", "height": 56, "itemMargin": 8, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+      Column(
+            {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+            Stack(
+                    {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                    Progress(
+                              {"value": data.left,
+                                "total": 100,
+                                "type": "ring",
+                                "color": $theme('supportContentColor'),
+                                "backgroundColor": "#1A000000",
+                                "width": 40,
+                                "height": 40,
+                                "strokeWidth": 6}
+                            ),
+                    IfPresent(
+                              props.leftEarIcon,
+                              Image(
+                                          props.leftEarIcon,
+                                          {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                        )
+                            )
+                  ),
+            Text(
+                    Expr(`'' + ${data.left} + '%'`),
+                    {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                  )
+          ),
+      Column(
+            {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+            Stack(
+                    {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                    Progress(
+                              {"value": data.right,
+                                "total": 100,
+                                "type": "ring",
+                                "color": $theme('supportContentColor'),
+                                "backgroundColor": "#1A000000",
+                                "width": 40,
+                                "height": 40,
+                                "strokeWidth": 6}
+                            ),
+                    IfPresent(
+                              props.rightEarIcon,
+                              Image(
+                                          props.rightEarIcon,
+                                          {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                        )
+                            )
+                  ),
+            Text(
+                    Expr(`'' + ${data.right} + '%'`),
+                    {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                  )
+          )
+    ),
+  Text(
+      Expr(`'充电盒 ' + ${data.battery} + '%'`),
+      {"width": "matchParent", "fontSize": 11, "fontWeight": 400, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "start", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+    )
+)
+#End
+
+#Template BluetoothDeviceOverviewEarbudPairCompact@1(props: { leftEarIcon?: asset, rightEarIcon?: asset })
+data = {
+    name: $path("/earphoneName"),
+    left: $path("/leftBatteryLevel"),
+    right: $path("/rightBatteryLevel")
+}
+
+Column(
+  {
+    "_advancedComponent": "BluetoothDeviceOverview",
+    "width": "matchParent",
+    "height": "matchParent",
+    "itemMargin": 4,
+    "justifyContent": "start",
+    "alignItems": "start",
+    "clip": true,
+    "constraintSize": {
+      "minWidth": 0,
+      "minHeight": 0
+    }
+  },
+  Text(
+    data.name,
+    { "width": "matchParent", "fontSize": 16, "fontWeight": 700, "fontColor": $theme('primaryColor') }
+  ),
+  Row(
+    {
+      "width": 84,
+      "height": 12,
+      "itemMargin": 0,
+      "justifyContent": "spaceBetween",
+      "alignItems": "center",
+    },
+    Row(
+      {
+        "width": 36,
+        "height": 12,
+        "itemMargin": 0,
+        "justifyContent": "spaceBetween",
+        "alignItems": "center",
+      },
+      IfPresent(
+        props.leftEarIcon,
+        Image(
+          props.leftEarIcon,
+          { "width": 12, "height": 12, "fillColor": $theme('supportContentColor') }
+        )
+      ),
+      IfAbsent(
+        props.leftEarIcon,
+        Text(
+          "左",
+          { "fontColor": $theme('supportContentColor'), "fontSize": 10, "fontWeight": 400 }
+        )
+      ),
+      Text(
+        Expr(`'' + ${data.left} + '%'`),
+        { "fontColor": $theme('supportContentColor'), "fontSize": 10, "fontWeight": 400 }
+      )
+    ),
+    Row(
+      {
+        "width": 36,
+        "height": 12,
+        "itemMargin": 0,
+        "justifyContent": "spaceBetween",
+        "alignItems": "center",
+      },
+      IfPresent(
+        props.rightEarIcon,
+        Image(
+          props.rightEarIcon,
+          { "width": 12, "height": 12, "fillColor": $theme('supportContentColor') }
+        )
+      ),
+      IfAbsent(
+        props.rightEarIcon,
+        Text(
+          "右",
+          { "fontColor": $theme('supportContentColor'), "fontSize": 10, "fontWeight": 400 }
+        )
+      ),
+      Text(
+        Expr(`'' + ${data.right} + '%'`),
+        { "fontColor": $theme('supportContentColor'), "fontSize": 10, "fontWeight": 400 }
+      )
+    )
+  )
+)
+#End
+
+#Template BluetoothDeviceOverviewCompletePhoneWideFull@1(props: { leftEarIcon?: asset, rightEarIcon?: asset })
+data = {
+    connected: $path("/isConnected"),
+    name: $path("/earphoneName"),
+    battery: $path("/batteryLevel"),
+    left: $path("/leftBatteryLevel"),
+    right: $path("/rightBatteryLevel")
+}
+
+Column(
+  {"_advancedComponent": "BluetoothDeviceOverview",
+    "width": "matchParent",
+    "height": "matchParent",
+    "padding": {"left": 8,
+    "top": 6,
+    "right": 8,
+    "bottom": 6},
+    "borderRadius": 8,
+    "backgroundColor": "#1A64BB5C",
+    "itemMargin": 4,
+    "justifyContent": "start",
+    "alignItems": "start",
+    "clip": true,
+    "constraintSize": {"minWidth": 0,
+    "minHeight": 0}},
+  Text(
+      Expr(`${data.connected} ? ${data.name} + ' · 已连接 · 充电盒 ' + ${data.battery} + '%' : ${data.name} + ' · 未连接 · 充电盒 ' + ${data.battery} + '%'`),
+      {"width": "matchParent", "fontSize": 11, "fontWeight": 400, "fontColor": $theme('supportContentColor'), "maxLines": 1, "textAlign": "start", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+    ),
+  Row(
+      {"width": "matchParent", "height": 56, "itemMargin": 8, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+      Column(
+            {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+            Stack(
+                    {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                    Progress(
+                              {"value": data.left,
+                                "total": 100,
+                                "type": "ring",
+                                "color": $theme('supportContentColor'),
+                                "backgroundColor": "#1A000000",
+                                "width": 40,
+                                "height": 40,
+                                "strokeWidth": 6}
+                            ),
+                    IfPresent(
+                              props.leftEarIcon,
+                              Image(
+                                          props.leftEarIcon,
+                                          {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                        )
+                            )
+                  ),
+            Text(
+                    Expr(`'' + ${data.left} + '%'`),
+                    {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                  )
+          ),
+      Column(
+            {"width":"matchParent","layoutWeight": 1, "itemMargin": 1, "justifyContent": "center", "alignItems": "center", "constraintSize": {"minWidth": 0, "minHeight": 0}},
+            Stack(
+                    {"width": 40, "height": 40, "alignContent": "center", "flexShrink": 0},
+                    Progress(
+                              {"value": data.right,
+                                "total": 100,
+                                "type": "ring",
+                                "color": $theme('supportContentColor'),
+                                "backgroundColor": "#1A000000",
+                                "width": 40,
+                                "height": 40,
+                                "strokeWidth": 6}
+                            ),
+                    IfPresent(
+                              props.rightEarIcon,
+                              Image(
+                                          props.rightEarIcon,
+                                          {"width": 18, "height": 18, "objectFit": "contain", "_preserveOriginalColor": true}
+                                        )
+                            )
+                  ),
+            Text(
+                    Expr(`'' + ${data.right} + '%'`),
+                    {"width": "matchParent", "fontSize": 12, "fontWeight": 500, "fontColor": $theme('primaryColor'), "maxLines": 1, "textAlign": "center", "textOverflow": "ellipsis", "constraintSize": {"minWidth": 0, "minHeight": 0}}
+                  )
+          )
+    )
+)
+#End

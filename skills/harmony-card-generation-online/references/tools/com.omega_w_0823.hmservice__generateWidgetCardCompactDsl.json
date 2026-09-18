@@ -60,7 +60,7 @@
               },
               "candidateOutputFields": {
                 "type": "Array<String>",
-                "description": "可选候选展示字段 JSON Pointer；必须能从对应能力 outputSchema 推导",
+                "description": "候选展示字段 JSON Pointer；必须能从对应能力 outputSchema 推导；用户明确列举字段时必须传入对应投影，不因内容少或业务相关性补充其它展示字段",
                 "required": [],
                 "properties": {
                   "ArrayItem": {

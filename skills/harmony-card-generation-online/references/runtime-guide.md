@@ -69,7 +69,8 @@ unavailableCapabilities 缺失或空数组视为空；存在时必须为字符�
   2x4 最多 4 个主区域、2 个主动作、4 个主要展示项。
 - 超量时依次移除装饰、可选项、次要支撑项，再摘要列表或保留首项。用户要求全部保留且无法取舍时追问。
   核心内容、受保护文本、必要热区、必须同屏关系或关键媒体无法在 2x2 成立时允许 2x4，不因横版更舒展升级。
-- 内容不足可补充已选数据内强相关的状态、时间、上下文字段和合法素材；无合法补充时保持简洁。
+- 用户明确列举展示字段时，只选择这些字段；不要求用户额外说“只”或“仅”。不得因内容少、视觉丰富度、业务相关性或模板要求补充状态、时间等展示字段，也不得省略字段投影来引入全部输出。
+- 只有“做个耳机状态卡片”等未明确字段的概括性需求，才可从已选数据能力中选择必要默认字段；没有最低内容数量要求。用于正确显示的状态依赖不等于展示需求，主 Agent 不凭常识补写，由微服务按现行契约处理已声明的必要依赖；不得为了检索命中补字段或动作。
 - create 的 title/description 为非空静态短文案，建议不超过 8/12 字；无法提炼时使用“桌面卡片”/“信息速览”。
   不含动态值、隐私或可用性承诺；edit 只有明确修改时传。
 
@@ -80,7 +81,7 @@ unavailableCapabilities 缺失或空数组视为空；存在时必须为字符�
 | capabilityId | 数据取本轮完整 schema 中的 ID；事件取本轮概述对应项的 ID |
 | arguments | 只使用本轮 inputSchema.properties 声明字段并满足完整类型与必填约束 |
 | writeResultTo | 优先本轮 schema 默认路径，否则构造不冲突的 /data/{semanticKey}；不能相同、互为父子或覆盖 |
-| candidateOutputFields | 可省略；仅用 outputSchema 可推导的叶子 JSON Pointer ，不按主区域数设入口字段上限；当某字段的 `type` 为 `array` 时，访问具体列表项必须在 JSON Pointer 中使用从 `0` 开始的非负整数下标： `/daily/1/<field>` 表示 `daily` 列表第二项的`<field>`数据。 |
+| candidateOutputFields | 明确列举展示字段时必须传入相应投影；其它情况可省略。仅用 outputSchema 可推导的叶子 JSON Pointer，不按主区域数设入口字段上限；当某字段的 `type` 为 `array` 时，访问具体列表项必须在 JSON Pointer 中使用从 `0` 开始的非负整数下标： `/daily/1/<field>` 表示 `daily` 列表第二项的`<field>`数据。 |
 | action | 对同项 actionTemplate 完整深拷贝，只按 dynamicArguments 指定路径替换动态值 |
 | candidateAssetIds | 只用本轮概述 ID，不编造素材路径 |
 

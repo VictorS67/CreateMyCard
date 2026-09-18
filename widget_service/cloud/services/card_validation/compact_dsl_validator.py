@@ -303,8 +303,8 @@ def _collect_layout_route_errors(
         if all(
             backboard is not None
             and backboard.component_type == "Column"
-            and backboard.props.get("width") == 134
-            and backboard.props.get("height") == 126
+            and backboard.props.get("width") == 144
+            and backboard.props.get("height") == 136
             for backboard in backboards
         ):
             return
@@ -312,7 +312,7 @@ def _collect_layout_route_errors(
     roots = ", ".join(sorted(data_roots))
     errors.append(
         f"2x4 card displays two data roots ({roots}) and must use W9: root must "
-        "be a Row with exactly two direct 134x126 Column backboards. Do not use "
+        "be a Row with exactly two direct 144x136 Column backboards. Do not use "
         "a shared title, a shared action area, or stacked full-width business rows."
     )
 

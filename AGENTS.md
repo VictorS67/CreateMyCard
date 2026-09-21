@@ -5,11 +5,30 @@
 除必要专业名词术语外，文档编写、回复和面向用户的说明均使用中文。
 
 ## 文档定位
-
+ 
 - `docs/云侧方案设计.md` 是方案设计的唯一权威来源。
 - `AGENTS.md` 只记录项目背景、关键文件、优先级和 AI 编码助手执行规范。
 - 不要在 `AGENTS.md` 中新增或复制接口字段、协议细节、状态码、CardSpec、TaskSpec、Artifact、校验项等方案内容。
 - 方案变更应先同步 `docs/云侧方案设计.md`，再同步代码、Skill、测试和相关配置。
+
+## CodeCheck 约束
+
+本项目提交前必须满足以下静态检查要求：
+
+- 单行代码不得超过 120 个字符；新增或同步代码后必须重新检查。
+- `if`、`while` 等条件控制语句最多包含 3 个布尔表达式。超过时先拆成有语义的中间变量、状态元组或独立辅助方法，再由控制语句使用结果。
+- 遵守 `G.FMT.04`。避免产生冒号前空格告警；已经确认字符串具有目标前缀时，优先使用 `removeprefix()`，不要使用会被格式化为 `value[index :]` 的计算切片。
+- 从 Skill 批量同步 `widget_service/cloud/services/card_validation/` 后，不得直接以覆盖后的源码作为最终结果。必须重新执行 CodeCheck，并恢复微服务侧为满足上述规则所做的等价改写。
+- 当前校验器需要重点复查：`binding_validator.py` 的前缀截取、`component_validator.py` 的模板变量判断、`protocol_validator.py` 的入口状态判断，以及 `source_parser.py` 的表达式标记判断。
+- 遵守 `G.VAR.01`。带类型标注的变量和数据类字段应使用同类型初始值，例如 `float` 字段使用
+  `0.0`，避免在生命周期内由 `int` 隐式变为 `float`。
+- 遵守 `G.ERR.09`。同一个 `except` 元组不得同时捕获父异常和子异常；例如已捕获 `OSError` 时，不再
+  重复列出其子类 `TimeoutError`。
+- 遵守 `G.ERR.07`。不得使用 `except` 后直接 `pass`；可选流程发生异常时也必须记录异常类型和原因，
+  必要时转换为明确的业务失败。
+- 遵守 `G.FNM.05`。函数需要返回较多数据时，应使用数据类、具名元组等具名结构封装，避免依赖位置
+  解包难以辨认的长元组。
+- 修改 Python 代码后至少运行 Ruff、相关单元测试和差异空白检查；不得用 `noqa`、屏蔽规则或申请豁免代替可读的代码修复。
 
 ## 项目背景
 
@@ -22,11 +41,12 @@
 ## 关键文件说明
 
 - `docs/云侧方案设计.md`：云侧方案、系统边界、工具接口、协议约束、校验、降级、测试和日志规范。
-- `skills/harmony-card-generation-NewSkill/`：按照目标链路设计的新 Skill，需随方案持续优化。
-- `skills/harmony-card-generation/`：旧版 Skill，之前的链路让主 Agent 自行完成生成，没有调用微服务；仅作历史参考。
-- `skills/harmony-card-generation/reference/capability/event-capability/click-event.md`：事件能力清单。
-- `skills/harmony-card-generation/reference/data-capability/`：端侧数据能力清单，持续扩充中。
-- `skills/harmony-card-generation/reference/asset-library.md`：端侧素材库清单。
+- `skills/harmony-card-generation-online/`：按照目标链路设计的在线云侧编排 Skill，需随方案持续优化。
+- `skills/harmony-card-generation-offline/`：离线直出 Skill，用于不走云侧微服务时由主 Agent 端到端生成、修复、评审或解释本地 `genui` 与 `cardspec` 产物；只能作为兜底、调试和历史视觉参考，不作为在线链路协议依据。
+- `skills/harmony-card-template-generation/`：独立的模板驱动生成 Skill，由主 Agent 从固定布局和受控组件变体中选择一个模板并生成本地 `genui` 与 `cardspec`；不调用在线或离线生成 Skill。
+- `skills/harmony-card-generation-offline/reference/capability/event-capability/click-event.md`：事件能力清单。
+- `skills/harmony-card-generation-offline/reference/capability/data-capability/`：端侧数据能力清单，持续扩充中。
+- `skills/harmony-card-generation-offline/reference/design/asset-library.md`：端侧素材库清单。
 
 ## 优先级
 
@@ -34,8 +54,9 @@
 
 1. `docs/云侧方案设计.md`
 2. 本文件 `AGENTS.md`
-3. `skills/harmony-card-generation-NewSkill/` 下的新 Skill 实现与参考资料
-4. `skills/harmony-card-generation/` 下的旧版 Skill、历史模板和样例 `.dat`
+3. `skills/harmony-card-generation-online/` 下的在线云侧编排 Skill 实现与参考资料
+4. `skills/harmony-card-template-generation/` 下的独立模板生成方案、正式模板和校验配置
+5. `skills/harmony-card-generation-offline/` 下的离线 Skill、历史模板和样例 `.dat`
 
 历史模板只能作为视觉参考，不能作为协议依据。模板中出现的旧尺寸、`theme`、emoji、网络图、未声明事件或不合规属性，不得复制到新实现。
 

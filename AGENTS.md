@@ -5,11 +5,86 @@
 除必要专业名词术语外，文档编写、回复和面向用户的说明均使用中文。
 
 ## 文档定位
-
-- `docs/云侧方案设计.md` 是方案设计的唯一权威来源。
+ 
+- `docs/云侧方案设计.md` 是方案设计总文档。
 - `AGENTS.md` 只记录项目背景、关键文件、优先级和 AI 编码助手执行规范。
 - 不要在 `AGENTS.md` 中新增或复制接口字段、协议细节、状态码、CardSpec、TaskSpec、Artifact、校验项等方案内容。
 - 方案变更应先同步 `docs/云侧方案设计.md`，再同步代码、Skill、测试和相关配置。
+
+## Python 编码与 CodeCheck 约束
+
+本节适用于项目内 Python 源码、测试、生成器和脚本。修改代码时按“业务语义正确、类型与异常语义稳定、
+清晰可维护、满足静态检查”的顺序处理；CodeCheck 整改只能调整代码组织，不得改变接口、数据模型或业务语义。
+
+禁止为了消除告警而：
+
+- 用 `""`、`0`、空容器或其它伪值替代 `None`，或把数字、布尔值、列表、字典强制转成字符串。
+- 修改原有返回类型、异常行为、顺序或去重语义。
+- 将必选字典键改成未检查的 `get()` 后继续使用。
+- 通过字符串拼接、格式化或拆分规避公网地址、敏感信息等扫描规则。
+- 直接修改自动生成文件而不修复生成器、源模板或其它生成源。
+
+### 格式与控制流
+
+- 只使用 4 个空格缩进，禁止 Tab、混合缩进和无意义的额外缩进；调整缩进前先确认代码块层级，不能机械
+  改写导致语义变化。
+- 模块级函数和类之间保留两个空行；类成员、嵌套函数和装饰器方法之间保留合理的一个空行。
+- 一行只写一条语句，函数体不得与 `def` 或 `async def` 写在同一行。
+- 单行代码不得超过 120 个字符；`widget_service/` 内 Python 代码还必须遵守 Ruff 的 100 字符行宽限制。
+  长调用、长签名和长字符串应在保持内容等价的前提下主动换行。
+- 遵守 `G.FMT.04`，slice 的冒号前不得有空格。已确认字符串具有目标前缀时优先使用
+  `removeprefix()`，不要使用会被格式化为 `value[index :]` 的计算切片。
+- formatter 与 lint 规则冲突时，统一修正项目配置，避免在两套格式之间反复改写源码。
+- `if`、`while` 等条件控制语句最多包含 3 个布尔表达式。超过时拆成有语义的中间变量、状态对象或独立
+  辅助方法，再由控制语句使用结果。
+- 清晰显式优先于紧凑写法；筛选逻辑优先使用早期 `continue`，避免深层嵌套。
+
+### 推导式、字典访问与返回值
+
+- 推导式只用于一层 `for` 和最多一个简单 `if`。出现多个 `for`、多个 `if`、跨行复杂条件、赋值表达式
+  `:=`、复杂调用与判断组合，或同时承担排序、去重、状态更新时，必须展开为显式循环；测试代码同样适用。
+- 展开 `dict.fromkeys(generator)` 等代码时必须保留原有顺序和去重语义；不能直接改成无序 `set`。
+- 除非当前作用域已显式证明键存在，否则不得直接使用 `mapping[key]`。可选键使用 `get()` 并检查结果；
+  必选键使用 `get()` 后显式 `raise`，测试中使用 `get()` 后显式 `assert`。
+- 当 `None` 是字典的合法值时，使用独立 sentinel 区分“键不存在”和“值为 `None`”。
+- 遵守 `G.CTL.01`。返回 `Optional`、`Union` 或 `Any` 的函数存在不同类型的多个分支时，优先赋值给带
+  类型标注的局部变量并在末尾统一返回，同时保持真实类型和 `None` 语义。
+- 遵守 `G.FNM.05`。函数需要返回较多数据时，使用数据类、具名元组等具名结构，避免难以辨认的位置解包。
+
+### 类型、异常、生成代码与扫描误报
+
+- 遵守 `G.VAR.01`。带类型标注的变量和数据类字段使用同类型初始值，例如 `float` 字段使用 `0.0`，
+  避免生命周期内由 `int` 隐式变为 `float`。
+- 遵守 `G.ERR.09`。同一个 `except` 元组不得同时捕获父异常和子异常；例如已捕获 `OSError` 时，不再
+  重复列出其子类 `TimeoutError`。
+- 遵守 `G.ERR.07`。不得使用 `except` 后直接 `pass`；可选流程发生异常时也要记录异常类型和原因，
+  必要时转换为明确的业务失败。
+- 生成文件出现问题时先修复 generator、source prompt、template 或 build script，再重新生成。确属不可改的
+  生成产物时，才按项目统一配置处理检查范围，不在单个文件中随意屏蔽规则。
+- 四段数字版本号等真实协议值被公网地址扫描误报时，必须保留协议语义，并使用项目批准的白名单或抑制
+  机制；不得改写真实值规避扫描。`noqa`、规则屏蔽和豁免不能替代可读的源码修复，只能用于已确认且无法
+  通过等价代码修复的误报。
+- 从 Skill 批量同步 `widget_service/cloud/services/card_validation/` 后，不得直接以覆盖后的源码作为最终
+  结果。必须重新执行 CodeCheck，并恢复微服务侧为满足本节规则所做的等价改写。
+- 当前校验器重点复查：`binding_validator.py` 的前缀截取、`component_validator.py` 的模板变量判断、
+  `protocol_validator.py` 的入口状态判断，以及 `source_parser.py` 的表达式标记判断。
+
+### 修改后验证
+
+修改 Python 代码后至少执行 Ruff、相关单元测试和差异空白检查，并复核：缩进与空行、单行长度、复杂
+推导式、未保护字典访问、多类型返回、异常处理、生成源，以及顺序、去重、返回类型和业务语义是否保持不变。
+
+## 代码修改后的验证与汇报
+
+- 只要发生代码修改，就必须在交付或提交前主动完成验证，不得等用户再次要求测试。
+- Python 代码的最低验证集包括：对修改文件运行 Ruff、运行与改动行为直接相关的单元测试，以及执行
+  `git diff --check`。涉及配置、schema、生成代码或同步产物时，还应运行对应的检查或同步校验脚本。
+- 影响范围较大、跨模块或涉及公共入口时，应在相关单元测试之外补充更大范围的回归测试；完整测试成本
+  过高时，至少执行覆盖改动链路的测试，并明确说明未运行的范围。
+- 测试失败时，必须区分本次改动导致的失败和工作区已有失败。不得将失败笼统描述为通过；应给出失败的
+  测试、原因和是否与本次修改有关。无法运行测试时，应说明阻塞原因和替代验证方式。
+- 面向用户的最终总结必须逐项列出修改文件及用途，并列出实际执行的检查、测试数量和通过或失败结果。
+- 用户要求提交时，提交前必须核对暂存区文件清单；提交后必须告诉用户本次提交包含的全部文件。
 
 ## 项目背景
 
@@ -22,11 +97,12 @@
 ## 关键文件说明
 
 - `docs/云侧方案设计.md`：云侧方案、系统边界、工具接口、协议约束、校验、降级、测试和日志规范。
-- `skills/harmony-card-generation-NewSkill/`：按照目标链路设计的新 Skill，需随方案持续优化。
-- `skills/harmony-card-generation/`：旧版 Skill，之前的链路让主 Agent 自行完成生成，没有调用微服务；仅作历史参考。
-- `skills/harmony-card-generation/reference/capability/event-capability/click-event.md`：事件能力清单。
-- `skills/harmony-card-generation/reference/data-capability/`：端侧数据能力清单，持续扩充中。
-- `skills/harmony-card-generation/reference/asset-library.md`：端侧素材库清单。
+- `skills/harmony-card-generation-online/`：按照目标链路设计的在线云侧编排 Skill，需随方案持续优化。
+- `skills/harmony-card-generation-offline/`：离线直出 Skill，用于不走云侧微服务时由主 Agent 端到端生成、修复、评审或解释本地 `genui` 与 `cardspec` 产物；只能作为兜底、调试和历史视觉参考，不作为在线链路协议依据。
+- `skills/harmony-card-template-generation/`：独立的模板驱动生成 Skill，由主 Agent 从固定布局和受控组件变体中选择一个模板并生成本地 `genui` 与 `cardspec`；不调用在线或离线生成 Skill。
+- `skills/harmony-card-generation-offline/reference/capability/event-capability/click-event.md`：事件能力清单。
+- `skills/harmony-card-generation-offline/reference/capability/data-capability/`：端侧数据能力清单，持续扩充中。
+- `skills/harmony-card-generation-offline/reference/design/asset-library.md`：端侧素材库清单。
 
 ## 优先级
 
@@ -34,8 +110,9 @@
 
 1. `docs/云侧方案设计.md`
 2. 本文件 `AGENTS.md`
-3. `skills/harmony-card-generation-NewSkill/` 下的新 Skill 实现与参考资料
-4. `skills/harmony-card-generation/` 下的旧版 Skill、历史模板和样例 `.dat`
+3. `skills/harmony-card-generation-online/` 下的在线云侧编排 Skill 实现与参考资料
+4. `skills/harmony-card-template-generation/` 下的独立模板生成方案、正式模板和校验配置
+5. `skills/harmony-card-generation-offline/` 下的离线 Skill、历史模板和样例 `.dat`
 
 历史模板只能作为视觉参考，不能作为协议依据。模板中出现的旧尺寸、`theme`、emoji、网络图、未声明事件或不合规属性，不得复制到新实现。
 
@@ -53,7 +130,7 @@
 
 ## 给 AI 编码助手的要求
 
-1. 先阅读 `docs/云侧方案设计.md` 和本文件。
+1. 先阅读 `docs/云侧方案设计.md` 和本文件。当云侧方案设计你认为设计有误或与用户需求存在冲突时，与用户确认。
 2. 先判断本次改动影响的系统边界，再开始修改。
 3. 不要把方案细节重新写入 `AGENTS.md`。
 4. 不要把历史模板当成协议依据。
